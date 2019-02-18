@@ -1,0 +1,5 @@
+[rerere]
+	enabled = true
+	autoUpdate = true
+[merge]
+	conflictStyle = diff3
