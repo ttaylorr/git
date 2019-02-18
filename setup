@@ -1,0 +1,30 @@
+#!/bin/sh
+
+c=Meta/config
+
+dots() {
+	echo "$1" |
+	perl -aF/ -ne 'print map { "../" } (1..$#F)'
+}
+
+force_link() {
+	test -d "$2" && ! test -h "$2" && rm -rf "$2"
+	ln -vsf "$1" "$2"
+}
+
+link() {
+	dest="`dots $2`$1"
+	test "`readlink $2`" = "$dest" ||
+	force_link "$dest" "$2"
+}
+
+include() {
+	dest="$(dots $2)$1"
+	git config -f "$2" include.path | grep -q "$dest" ||
+	git config -f "$2" include.path "$dest"
+}
+
+link $c/exclude .git/info/exclude
+link $c/config.mak config.mak
+link $c/hooks .git/hooks
+include $c/gitconfig .git/config
