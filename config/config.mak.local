@@ -1,0 +1,1 @@
+GIT_TEST_OPTS = --root=/var/ram/git-tests
