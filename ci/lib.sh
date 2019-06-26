@@ -102,6 +102,10 @@ then
 	}
 
 	BREW_INSTALL_PACKAGES="git-lfs gettext"
+	if test "$jobname" = "osx-gcc"
+	then
+		BREW_INSTALL_PACKAGES="gcc@8 $BREW_INSTALL_PACKAGES"
+	fi
 	export GIT_PROVE_OPTS="--timer --jobs 3 --state=failed,slow,save"
 	export GIT_TEST_OPTS="--verbose-log -x --immediate"
 	MAKEFLAGS="$MAKEFLAGS --jobs=2"
