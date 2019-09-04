@@ -74,6 +74,10 @@ git jump grep -i foo_bar
 
 # use the silver searcher for git jump grep
 git config jump.grepCmd "ag --column"
+
+# jump to changes via an alias of 'git diff', assuming you have set
+# `git config alias.diff di`
+git jump di
 --------------------------------------------------
 
 

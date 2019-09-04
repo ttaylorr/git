@@ -15,6 +15,8 @@ grep: elements are grep hits. Arguments are given to git grep or, if
       configured, to the command in `jump.grepCmd`.
 
 ws: elements are whitespace errors. Arguments are given to diff --check.
+
+Aliases of any of the above are expanded automatically.
 EOF
 }
 
@@ -68,7 +70,7 @@ if test $# -lt 1; then
 	usage >&2
 	exit 1
 fi
-mode=$1; shift
+mode="$(git config --default "$1" --get -- "alias.$1")"; shift
 
 trap 'rm -f "$tmp"' 0 1 2 3 15
 tmp=`mktemp -t git-jump.XXXXXX` || exit 1
