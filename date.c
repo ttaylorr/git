@@ -280,17 +280,15 @@ static void show_date_normal(struct strbuf *buf, timestamp_t time, struct tm *tm
 		strbuf_addf(buf, " %+05d", tz);
 }
 
-const char *show_date(timestamp_t time, int tz, const struct date_mode *mode)
+void show_date_r(struct strbuf *buf, timestamp_t time, int tz, const struct date_mode *mode)
 {
 	struct tm *tm;
 	struct tm human_tm = { 0 };
 	int human_tz = -1;
-	static struct strbuf timebuf = STRBUF_INIT;
 
 	if (mode->type == DATE_UNIX) {
-		strbuf_reset(&timebuf);
-		strbuf_addf(&timebuf, "%"PRItime, time);
-		return timebuf.buf;
+		strbuf_addf(buf, "%"PRItime, time);
+		return;
 	}
 
 	if (mode->type == DATE_HUMAN) {
@@ -306,15 +304,13 @@ const char *show_date(timestamp_t time, int tz, const struct date_mode *mode)
 		tz = local_tzoffset(time);
 
 	if (mode->type == DATE_RAW) {
-		strbuf_reset(&timebuf);
-		strbuf_addf(&timebuf, "%"PRItime" %+05d", time, tz);
-		return timebuf.buf;
+		strbuf_addf(buf, "%"PRItime" %+05d", time, tz);
+		return;
 	}
 
 	if (mode->type == DATE_RELATIVE) {
-		strbuf_reset(&timebuf);
-		show_date_relative(time, &timebuf);
-		return timebuf.buf;
+		show_date_relative(time, buf);
+		return;
 	}
 
 	if (mode->local)
@@ -326,12 +322,11 @@ const char *show_date(timestamp_t time, int tz, const struct date_mode *mode)
 		tz = 0;
 	}
 
-	strbuf_reset(&timebuf);
 	if (mode->type == DATE_SHORT)
-		strbuf_addf(&timebuf, "%04d-%02d-%02d", tm->tm_year + 1900,
+		strbuf_addf(buf, "%04d-%02d-%02d", tm->tm_year + 1900,
 				tm->tm_mon + 1, tm->tm_mday);
 	else if (mode->type == DATE_ISO8601)
-		strbuf_addf(&timebuf, "%04d-%02d-%02d %02d:%02d:%02d %+05d",
+		strbuf_addf(buf, "%04d-%02d-%02d %02d:%02d:%02d %+05d",
 				tm->tm_year + 1900,
 				tm->tm_mon + 1,
 				tm->tm_mday,
@@ -340,23 +335,30 @@ const char *show_date(timestamp_t time, int tz, const struct date_mode *mode)
 	else if (mode->type == DATE_ISO8601_STRICT) {
 		char sign = (tz >= 0) ? '+' : '-';
 		tz = abs(tz);
-		strbuf_addf(&timebuf, "%04d-%02d-%02dT%02d:%02d:%02d%c%02d:%02d",
+		strbuf_addf(buf, "%04d-%02d-%02dT%02d:%02d:%02d%c%02d:%02d",
 				tm->tm_year + 1900,
 				tm->tm_mon + 1,
 				tm->tm_mday,
 				tm->tm_hour, tm->tm_min, tm->tm_sec,
 				sign, tz / 100, tz % 100);
 	} else if (mode->type == DATE_RFC2822)
-		strbuf_addf(&timebuf, "%.3s, %d %.3s %d %02d:%02d:%02d %+05d",
+		strbuf_addf(buf, "%.3s, %d %.3s %d %02d:%02d:%02d %+05d",
 			weekday_names[tm->tm_wday], tm->tm_mday,
 			month_names[tm->tm_mon], tm->tm_year + 1900,
 			tm->tm_hour, tm->tm_min, tm->tm_sec, tz);
 	else if (mode->type == DATE_STRFTIME)
-		strbuf_addftime(&timebuf, mode->strftime_fmt, tm, tz,
+		strbuf_addftime(buf, mode->strftime_fmt, tm, tz,
 				!mode->local);
 	else
-		show_date_normal(&timebuf, time, tm, tz, &human_tm, human_tz, mode->local);
-	return timebuf.buf;
+		show_date_normal(buf, time, tm, tz, &human_tm, human_tz, mode->local);
+	return;
+}
+
+const char *show_date(timestamp_t time, int tz, const struct date_mode *mode)
+{
+	struct strbuf buf = STRBUF_INIT;
+	show_date_r(&buf, time, tz, mode);
+	return buf.buf;
 }
 
 /*
