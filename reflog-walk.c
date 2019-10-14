@@ -224,7 +224,7 @@ void get_reflog_selector(struct strbuf *sb,
 	if (commit_reflog->selector == SELECTOR_DATE ||
 	    (commit_reflog->selector == SELECTOR_NONE && force_date)) {
 		info = &commit_reflog->reflogs->items[commit_reflog->recno+1];
-		strbuf_addstr(sb, show_date(info->timestamp, info->tz, dmode));
+		show_date_r(sb, info->timestamp, info->tz, dmode));
 	} else {
 		strbuf_addf(sb, "%d", commit_reflog->reflogs->nr
 			    - 2 - commit_reflog->recno);

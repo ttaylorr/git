@@ -331,7 +331,8 @@ static void create_reflog_msg(const struct object_id *oid, struct strbuf *sb)
 		free(buf);
 
 		if ((c = lookup_commit_reference(the_repository, oid)) != NULL)
-			strbuf_addf(sb, ", %s", show_date(c->date, 0, DATE_MODE(SHORT)));
+			strbuf_addf(sb, ", ");
+			show_date_r(sb, c->date, 0, DATE_MODE(SHORT));
 		break;
 	case OBJ_TREE:
 		strbuf_addstr(sb, "tree object");
