@@ -81,9 +81,6 @@ static int prepare_trace_line(const char *file, int line,
 			      struct trace_key *key, struct strbuf *buf)
 {
 	static struct trace_key trace_bare = TRACE_KEY_INIT(BARE);
-	struct timeval tv;
-	struct tm tm;
-	time_t secs;
 
 	if (!trace_want(key))
 		return 0;
@@ -93,11 +90,7 @@ static int prepare_trace_line(const char *file, int line,
 		return 1;
 
 	/* print current timestamp */
-	gettimeofday(&tv, NULL);
-	secs = tv.tv_sec;
-	localtime_r(&secs, &tm);
-	strbuf_addf(buf, "%02d:%02d:%02d.%06ld ", tm.tm_hour, tm.tm_min,
-		    tm.tm_sec, (long) tv.tv_usec);
+	strbuf_addf(buf, "%s ", show_date(time(NULL), 0, DATE_MODE(ISO8601)));
 
 #ifdef HAVE_VARIADIC_MACROS
 	/* print file:line */
