@@ -1594,19 +1594,25 @@ static void merge_commit_graph(struct write_commit_graph_context *ctx,
 {
 	uint32_t i;
 	uint32_t offset = g->num_commits_in_base;
+	/* don't fetch non-local commits, instead drop them from the graph */
+	int flags = OBJECT_INFO_SKIP_FETCH_OBJECT;
 
 	ALLOC_GROW(ctx->commits.list, ctx->commits.nr + g->num_commits, ctx->commits.alloc);
 
 	for (i = 0; i < g->num_commits; i++) {
 		struct object_id oid;
-		struct commit *result;
+		struct commit *result = NULL;
 
 		display_progress(ctx->progress, i + 1);
 
 		load_oid_from_graph(g, i + offset, &oid);
 
 		/* only add commits if they still exist in the repo */
-		result = lookup_commit_reference_gently(ctx->r, &oid, 1);
+		if (repo_has_object_file_with_flags(ctx->r, &oid, flags)) {
+			result = lookup_commit(ctx->r, &oid);
+			if (repo_parse_commit(ctx->r, result))
+				result = NULL;
+		}
 
 		if (result) {
 			ctx->commits.list[ctx->commits.nr] = result;
