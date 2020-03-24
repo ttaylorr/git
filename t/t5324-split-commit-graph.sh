@@ -411,4 +411,21 @@ test_expect_success '--split=merge-all, --input=graphed merges the chain' '
 	test_line_count = 1 $graphdir/commit-graph-chain
 '
 
+test_expect_success '--split=replace replaces the chain' '
+	rm -rf $graphdir &&
+	git reset --hard commits/2 &&
+	git rev-list -1 HEAD~1 >a &&
+	git rev-list -1 HEAD >b &&
+	git commit-graph write --split=no-merge --input=stdin-commits <a &&
+	git commit-graph write --split=no-merge --input=stdin-commits <b &&
+	test_line_count = 2 $graphdir/commit-graph-chain &&
+	git commit-graph write --input=reachable --split=replace &&
+	test_path_is_missing $infodir/commit-graph &&
+	test_path_is_file $graphdir/commit-graph-chain &&
+	ls $graphdir/graph-*.graph >graph-files &&
+	test_line_count = 1 graph-files &&
+	verify_chain_files_exist $graphdir &&
+	graph_read_expect 18 0 extra_edges
+'
+
 test_done

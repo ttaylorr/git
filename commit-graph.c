@@ -1489,8 +1489,12 @@ static int write_commit_graph_file(struct write_commit_graph_context *ctx)
 		}
 
 		if (ctx->base_graph_name) {
-			const char *dest = ctx->commit_graph_filenames_after[
-						ctx->num_commit_graphs_after - 2];
+			const char *dest;
+			int idx = ctx->num_commit_graphs_after - 1;
+			if (ctx->num_commit_graphs_after > 1)
+				idx--;
+
+			dest = ctx->commit_graph_filenames_after[idx];
 
 			if (strcmp(ctx->base_graph_name, dest)) {
 				result = rename(ctx->base_graph_name, dest);
@@ -1547,9 +1551,13 @@ static void split_graph_merge_strategy(struct write_commit_graph_context *ctx)
 
 	g = ctx->r->objects->commit_graph;
 	num_commits = ctx->commits.nr;
-	ctx->num_commit_graphs_after = ctx->num_commit_graphs_before + 1;
+	if (flags == COMMIT_GRAPH_SPLIT_REPLACE)
+		ctx->num_commit_graphs_after = 1;
+	else
+		ctx->num_commit_graphs_after = ctx->num_commit_graphs_before + 1;
 
-	if (flags != COMMIT_GRAPH_SPLIT_MERGE_PROHIBITED) {
+	if (flags != COMMIT_GRAPH_SPLIT_MERGE_PROHIBITED &&
+	    flags != COMMIT_GRAPH_SPLIT_REPLACE) {
 		while (g && (g->num_commits <= size_mult * num_commits ||
 			    (max_commits && num_commits > max_commits) ||
 			    (flags == COMMIT_GRAPH_SPLIT_MERGE_REQUIRED))) {
