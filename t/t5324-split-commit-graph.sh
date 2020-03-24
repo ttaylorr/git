@@ -23,14 +23,23 @@ test_expect_success 'setup repo' '
 
 graph_read_expect() {
 	NUM_BASE=0
+	NUM_CHUNKS=3
+	CHUNKS="oid_fanout oid_lookup commit_metadata"
 	if test ! -z $2
 	then
 		NUM_BASE=$2
 	fi
+
+	if test $3 = "extra_edges"
+	then
+		NUM_CHUNKS=4
+		CHUNKS="$CHUNKS extra_edges"
+	fi
+
 	cat >expect <<- EOF
-	header: 43475048 1 1 3 $NUM_BASE
+	header: 43475048 1 1 $NUM_CHUNKS $NUM_BASE
 	num_commits: $1
-	chunks: oid_fanout oid_lookup commit_metadata
+	chunks: $CHUNKS
 	EOF
 	test-tool read-graph >output &&
 	test_cmp expect output
