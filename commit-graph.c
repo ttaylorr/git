@@ -1227,11 +1227,9 @@ static int fill_oids_from_commits(struct write_commit_graph_context *ctx,
 			ALLOC_GROW(ctx->oids.list, ctx->oids.nr + 1, ctx->oids.alloc);
 			oidcpy(&ctx->oids.list[ctx->oids.nr], &(result->object.oid));
 			ctx->oids.nr++;
-		} else if (ctx->check_oids) {
-			error(_("invalid commit object id: %s"),
-			      oid_to_hex(oid));
-			return -1;
-		}
+		} else if (ctx->check_oids)
+			return error(_("invalid commit object id: %s"),
+				     oid_to_hex(oid));
 	}
 
 	return 0;
