@@ -49,6 +49,13 @@ test_expect_success 'exit with correct error on bad input to --stdin-commits' '
 	test_i18ngrep "invalid commit object id" stderr
 '
 
+test_expect_success 'ignores bad input to --input=stdin-commits with --no-check-oids' '
+	cd "$TRASH_DIRECTORY/full" &&
+	echo HEAD | git commit-graph write --input=stdin-commits --no-check-oids &&
+	# valid tree OID, but not a commit OID
+	git rev-parse HEAD^{tree} | git commit-graph write --input=stdin-commits --no-check-oids
+'
+
 graph_git_two_modes() {
 	git -c core.commitGraph=true $1 >output
 	git -c core.commitGraph=false $1 >expect
