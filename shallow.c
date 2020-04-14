@@ -40,13 +40,6 @@ int register_shallow(struct repository *r, const struct object_id *oid)
 
 int is_repository_shallow(struct repository *r)
 {
-	/*
-	 * NEEDSWORK: This function updates
-	 * r->parsed_objects->{is_shallow,shallow_stat} as a side effect but
-	 * there is no corresponding function to clear them when the shallow
-	 * file is updated.
-	 */
-
 	FILE *fp;
 	char buf[1024];
 	const char *path = r->parsed_objects->alternate_shallow_file;
@@ -77,6 +70,12 @@ int is_repository_shallow(struct repository *r)
 	}
 	fclose(fp);
 	return r->parsed_objects->is_shallow;
+}
+
+void reset_repository_shallow(struct repository *r)
+{
+	r->parsed_objects->is_shallow = -1;
+	stat_validity_clear(r->parsed_objects->shallow_stat);
 }
 
 /*
@@ -362,6 +361,7 @@ void setup_alternate_shallow(struct lock_file *shallow_lock,
 		 * shallow file".
 		 */
 		*alternate_shallow_file = "";
+	reset_repository_shallow(the_repository);
 	strbuf_release(&sb);
 }
 
@@ -411,6 +411,7 @@ void prune_shallow(unsigned options)
 			die_errno("failed to write to %s",
 				  get_lock_file_path(&shallow_lock));
 		commit_lock_file(&shallow_lock);
+		reset_repository_shallow(the_repository);
 	} else {
 		unlink(git_path_shallow(the_repository));
 		rollback_lock_file(&shallow_lock);

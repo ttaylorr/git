@@ -1630,6 +1630,7 @@ static void update_shallow(struct fetch_pack_args *args,
 		if (*alternate_shallow_file == '\0') { /* --unshallow */
 			unlink_or_warn(git_path_shallow(the_repository));
 			rollback_lock_file(&shallow_lock);
+			reset_repository_shallow(the_repository);
 		} else
 			commit_lock_file(&shallow_lock);
 		alternate_shallow_file = NULL;
