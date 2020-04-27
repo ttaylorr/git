@@ -6,6 +6,8 @@
 #include "repository.h"
 #include "commit-graph.h"
 #include "object-store.h"
+#include "progress.h"
+#include "tag.h"
 
 static char const * const builtin_commit_graph_usage[] = {
 	N_("git commit-graph verify [--object-dir <objdir>] [--shallow] [--[no-]progress]"),
@@ -137,6 +139,25 @@ static int write_option_parse_split(const struct option *opt, const char *arg,
 	return 0;
 }
 
+int collect_one_commit(struct oidset *commits, char *line)
+{
+	struct object *obj;
+	struct object_id oid;
+	const char *end;
+
+	if (parse_oid_hex(line, &oid, &end))
+		return error(_("unexpected non-hex object ID: %s"), line);
+
+	obj = parse_object(the_repository, &oid);
+	if (!obj)
+		return error(_("no such object: %s"), line);
+
+	obj = deref_tag(the_repository, obj, NULL, 0);
+
+	oidset_insert(commits, &obj->oid);
+	return 0;
+}
+
 static int graph_write(int argc, const char **argv)
 {
 	struct string_list *pack_indexes = NULL;
@@ -206,28 +227,40 @@ static int graph_write(int argc, const char **argv)
 	string_list_init(&lines, 0);
 	if (opts.stdin_packs || opts.stdin_commits) {
 		struct strbuf buf = STRBUF_INIT;
+		struct progress *progress = NULL;
+		uint32_t i = 0;
 
-		while (strbuf_getline(&buf, stdin) != EOF)
-			string_list_append(&lines, strbuf_detach(&buf, NULL));
+		if (opts.stdin_commits) {
+			oidset_init(&commits, lines.nr);
+			if (opts.progress)
+				progress = start_delayed_progress(
+					_("Collecting commits from stdin"), 0);
+		}
+
+		while (strbuf_getline(&buf, stdin) != EOF) {
+			if (opts.stdin_commits) {
+				char *line = strbuf_detach(&buf, NULL);
+				int ret;
+
+				if (progress)
+					display_progress(progress, ++i);
+
+				ret = collect_one_commit(&commits, line);
+
+				free(line);
+				if (ret)
+					return 1;
+			} else if (opts.stdin_packs)
+				string_list_append(&lines, strbuf_detach(&buf, NULL));
+		}
 
 		if (opts.stdin_packs)
 			pack_indexes = &lines;
 		if (opts.stdin_commits) {
-			struct string_list_item *item;
-			oidset_init(&commits, lines.nr);
-			for_each_string_list_item(item, &lines) {
-				struct object_id oid;
-				const char *end;
-
-				if (parse_oid_hex(item->string, &oid, &end)) {
-					error(_("unexpected non-hex object ID: "
-						"%s"), item->string);
-					return 1;
-				}
-
-				oidset_insert(&commits, &oid);
-			}
-			flags |= COMMIT_GRAPH_WRITE_CHECK_OIDS;
+			if (progress)
+				stop_progress(&progress);
+			if (opts.verify_oids)
+				flags |= COMMIT_GRAPH_WRITE_CHECK_OIDS;
 		}
 
 		UNLEAK(buf);
