@@ -1141,8 +1141,12 @@ static int add_ref_to_set(const char *refname,
 			  int flags, void *cb_data)
 {
 	struct oidset *commits = (struct oidset *)cb_data;
+	struct object_id peeled;
 
-	oidset_insert(commits, oid);
+	if (!peel_ref(refname, &peeled))
+		oidset_insert(commits, &peeled);
+	else
+		oidset_insert(commits, oid);
 	return 0;
 }
 
@@ -1209,32 +1213,16 @@ static int fill_oids_from_packs(struct write_commit_graph_context *ctx,
 static int fill_oids_from_commits(struct write_commit_graph_context *ctx,
 				  struct oidset *commits)
 {
-	uint32_t i = 0;
-	struct strbuf progress_title = STRBUF_INIT;
 	struct oidset_iter iter;
 	struct object_id *oid;
 
 	if (!oidset_size(commits))
 		return 0;
 
-	if (ctx->report_progress) {
-		strbuf_addf(&progress_title,
-			    Q_("Finding commits for commit graph from %d ref",
-			       "Finding commits for commit graph from %d refs",
-			       oidset_size(commits)),
-			    oidset_size(commits));
-		ctx->progress = start_delayed_progress(
-					progress_title.buf,
-					oidset_size(commits));
-	}
-
 	oidset_iter_init(commits, &iter);
 	while ((oid = oidset_iter_next(&iter))) {
-		struct commit *result;
+		struct commit *result = lookup_commit(ctx->r, oid);
 
-		display_progress(ctx->progress, ++i);
-
-		result = lookup_commit_reference_gently(ctx->r, oid, 1);
 		if (result) {
 			ALLOC_GROW(ctx->oids.list, ctx->oids.nr + 1, ctx->oids.alloc);
 			oidcpy(&ctx->oids.list[ctx->oids.nr], &(result->object.oid));
@@ -1245,9 +1233,6 @@ static int fill_oids_from_commits(struct write_commit_graph_context *ctx,
 			return -1;
 		}
 	}
-
-	stop_progress(&ctx->progress);
-	strbuf_release(&progress_title);
 
 	return 0;
 }
