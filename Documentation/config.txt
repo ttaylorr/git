@@ -366,6 +366,8 @@ include::config/gitcvs.txt[]
 
 include::config/gitweb.txt[]
 
+include::config/graph.txt[]
+
 include::config/grep.txt[]
 
 include::config/gpg.txt[]
