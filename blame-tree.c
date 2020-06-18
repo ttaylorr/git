@@ -8,11 +8,13 @@
 #include "revision.h"
 #include "log-tree.h"
 #include "dir.h"
+#include "commit-graph.h"
 
 struct blame_tree_entry {
 	struct hashmap_entry hashent;
 	struct object_id oid;
 	struct commit *commit;
+	struct bloom_key key;
 	const char path[FLEX_ARRAY];
 };
 
@@ -30,6 +32,9 @@ static void add_from_diff(struct diff_queue_struct *q,
 
 		FLEX_ALLOC_STR(ent, path, path);
 		oidcpy(&ent->oid, &p->two->oid);
+		if (bt->rev.bloom_filter_settings)
+			fill_bloom_key(path, strlen(path), &ent->key,
+				       bt->rev.bloom_filter_settings);
 		hashmap_entry_init(&ent->hashent, strhash(ent->path));
 		hashmap_add(&bt->paths, &ent->hashent);
 	}
@@ -91,6 +96,11 @@ void blame_tree_init(struct blame_tree *bt, int argc, const char **argv,
 	bt->rev.diffopt.no_free = 1;
 	setup_revisions(argc, argv, &bt->rev, NULL);
 
+	(void)generation_numbers_enabled(bt->rev.repo);
+	if (bt->rev.repo->objects->commit_graph)
+		bt->rev.bloom_filter_settings =
+			bt->rev.repo->objects->commit_graph->bloom_filter_settings;
+
 	if (add_from_revs(bt) < 0)
 		die("unable to setup blame-tree");
 }
@@ -134,6 +144,7 @@ static void mark_path(const char *path, const struct object_id *oid,
 	data->num_interesting--;
 	if (data->callback)
 		data->callback(path, data->commit, data->callback_data);
+	hashmap_remove(data->paths, &ent->hashent, path);
 }
 
 static void blame_diff(struct diff_queue_struct *q,
@@ -177,6 +188,30 @@ static void blame_diff(struct diff_queue_struct *q,
 	}
 }
 
+static int maybe_changed_path(struct blame_tree *bt, struct commit *origin)
+{
+	struct bloom_filter *filter;
+	struct blame_tree_entry *e;
+	struct hashmap_iter iter;
+
+	if (!bt->rev.bloom_filter_settings)
+		return 1;
+
+	if (commit_graph_generation(origin) == GENERATION_NUMBER_INFINITY)
+		return 1;
+
+	filter = get_bloom_filter(bt->rev.repo, origin);
+	if (!filter)
+		return 1;
+
+	hashmap_for_each_entry(&bt->paths, &iter, e, hashent) {
+		if (bloom_filter_contains(filter, &e->key,
+					  bt->rev.bloom_filter_settings))
+			return 1;
+	}
+	return 0;
+}
+
 int blame_tree_run(struct blame_tree *bt, blame_tree_callback cb, void *cbdata)
 {
 	struct blame_tree_callback_data data;
@@ -197,13 +232,15 @@ int blame_tree_run(struct blame_tree *bt, blame_tree_callback cb, void *cbdata)
 		if (!data.commit)
 			break;
 
+		if (!maybe_changed_path(bt, data.commit))
+			continue;
+
 		if (data.commit->object.flags & BOUNDARY) {
 			diff_tree_oid(the_hash_algo->empty_tree,
 				      &data.commit->object.oid,
 				      "", &bt->rev.diffopt);
 			diff_flush(&bt->rev.diffopt);
-		}
-		else
+		} else
 			log_tree_commit(&bt->rev, data.commit);
 	}
 

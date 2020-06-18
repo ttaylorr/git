@@ -5,6 +5,7 @@
 #include "diff.h"
 #include "revision.h"
 #include "hashmap.h"
+#include "bloom.h"
 
 struct blame_tree {
 	struct hashmap paths;
