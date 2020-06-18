@@ -152,4 +152,10 @@ test_expect_success 'Use Bloom filters if they exist in the latest but not all c
 	test_bloom_filters_used_when_some_filters_are_missing "-- A/B"
 '
 
+test_expect_success 'non-existent Bloom keys are not used' '
+	git log >log-without-spec &&
+	git log -- . >log-with-spec &&
+	test_cmp log-without-spec log-with-spec
+'
+
 test_done

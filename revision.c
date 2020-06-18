@@ -706,6 +706,9 @@ static void prepare_to_use_bloom_filter(struct rev_info *revs)
 		len = pi->len;
 	}
 
+	if (!len)
+		return;
+
 	revs->bloom_key = xmalloc(sizeof(struct bloom_key));
 	fill_bloom_key(path, len, revs->bloom_key, revs->bloom_filter_settings);
 
