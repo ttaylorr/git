@@ -4,10 +4,10 @@
 #include "commit.h"
 #include "diff.h"
 #include "revision.h"
-#include "string-list.h"
+#include "hashmap.h"
 
 struct blame_tree {
-	struct string_list paths;
+	struct hashmap paths;
 	struct rev_info rev;
 };
 

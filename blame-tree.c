@@ -10,8 +10,10 @@
 #include "dir.h"
 
 struct blame_tree_entry {
+	struct hashmap_entry hashent;
 	struct object_id oid;
 	struct commit *commit;
+	const char path[FLEX_ARRAY];
 };
 
 static void add_from_diff(struct diff_queue_struct *q,
@@ -23,12 +25,13 @@ static void add_from_diff(struct diff_queue_struct *q,
 
 	for (i = 0; i < q->nr; i++) {
 		struct diff_filepair *p = q->queue[i];
-		struct blame_tree_entry *ent = xcalloc(1, sizeof(*ent));
-		struct string_list_item *it;
+		struct blame_tree_entry *ent;
+		const char *path = p->two->path;
 
+		FLEX_ALLOC_STR(ent, path, path);
 		oidcpy(&ent->oid, &p->two->oid);
-		it = string_list_append(&bt->paths, p->two->path);
-		it->util = ent;
+		hashmap_entry_init(&ent->hashent, strhash(ent->path));
+		hashmap_add(&bt->paths, &ent->hashent);
 	}
 }
 
@@ -56,15 +59,26 @@ static int add_from_revs(struct blame_tree *bt)
 		diff_flush(&diffopt);
 	}
 
-	string_list_sort(&bt->paths);
 	return 0;
+}
+
+static int blame_tree_entry_hashcmp(const void *unused UNUSED,
+				    const struct hashmap_entry *he1,
+				    const struct hashmap_entry *he2,
+				    const void *path)
+{
+	const struct blame_tree_entry *e1 =
+		container_of(he1, const struct blame_tree_entry, hashent);
+	const struct blame_tree_entry *e2 =
+		container_of(he2, const struct blame_tree_entry, hashent);
+	return strcmp(e1->path, path ? path : e2->path);
 }
 
 void blame_tree_init(struct blame_tree *bt, int argc, const char **argv,
 		     const char *prefix)
 {
 	memset(bt, 0, sizeof(*bt));
-	bt->paths.strdup_strings = 1;
+	hashmap_init(&bt->paths, blame_tree_entry_hashcmp, NULL, 0);
 
 	repo_init_revisions(the_repository, &bt->rev, prefix);
 	bt->rev.def = "HEAD";
@@ -83,13 +97,12 @@ void blame_tree_init(struct blame_tree *bt, int argc, const char **argv,
 
 void blame_tree_release(struct blame_tree *bt)
 {
-	string_list_clear(&bt->paths, 1);
+	hashmap_clear_and_free(&bt->paths, struct blame_tree_entry, hashent);
 }
-
 
 struct blame_tree_callback_data {
 	struct commit *commit;
-	struct string_list *paths;
+	struct hashmap *paths;
 	int num_interesting;
 
 	blame_tree_callback callback;
@@ -99,15 +112,15 @@ struct blame_tree_callback_data {
 static void mark_path(const char *path, const struct object_id *oid,
 		      struct blame_tree_callback_data *data)
 {
-	struct string_list_item *item = string_list_lookup(data->paths, path);
 	struct blame_tree_entry *ent;
 
-	/* Is it even a path that exists in our tree? */
-	if (!item)
+	/* Is it even a path that we are interested in? */
+	ent = hashmap_get_entry_from_hash(data->paths, strhash(path), path,
+					  struct blame_tree_entry, hashent);
+	if (!ent)
 		return;
 
 	/* Have we already blamed a commit? */
-	ent = item->util;
 	if (ent->commit)
 		return;
 	/*
@@ -169,7 +182,7 @@ int blame_tree_run(struct blame_tree *bt, blame_tree_callback cb, void *cbdata)
 	struct blame_tree_callback_data data;
 
 	data.paths = &bt->paths;
-	data.num_interesting = bt->paths.nr;
+	data.num_interesting = hashmap_get_size(&bt->paths);
 	data.callback = cb;
 	data.callback_data = cbdata;
 
