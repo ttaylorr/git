@@ -684,7 +684,7 @@ static void prepare_to_use_bloom_filter(struct rev_info *revs)
 	if (!revs->repo->objects->commit_graph)
 		return;
 
-	revs->bloom_filter_settings = revs->repo->objects->commit_graph->bloom_filter_settings;
+	revs->bloom_filter_settings = get_bloom_filter_settings(revs->repo);
 	if (!revs->bloom_filter_settings)
 		return;
 
