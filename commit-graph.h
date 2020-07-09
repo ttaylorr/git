@@ -52,7 +52,8 @@ struct tree *get_commit_tree_in_graph(struct repository *r,
 				      const struct commit *c);
 
 int get_bloom_filter_large_in_graph(struct commit_graph *g,
-				    const struct commit *c);
+				    const struct commit *c,
+				    uint32_t max_changed_paths);
 
 struct commit_graph {
 	const unsigned char *data;
@@ -120,6 +121,7 @@ struct commit_graph_opts {
 	int max_commits;
 	timestamp_t expire_time;
 	enum commit_graph_split_flags flags;
+	int max_new_filters;
 };
 
 /*
