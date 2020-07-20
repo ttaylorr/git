@@ -150,18 +150,17 @@ test_expect_success 'blame-tree with merged cherry-pick' '
 	grep "$(git rev-parse branchA)	file" new
 '
 
-test_expect_success 'blame-tree dereferences tags (old)' '
+test_expect_success 'blame-tree dereferences tags' '
 	git tag -m lo lo HEAD~2 &&
 	git tag -m hi hi HEAD &&
-	git blame-tree HEAD~2..HEAD >by-commit &&
-	git blame-tree lo..hi >by-tag &&
-	test_cmp by-commit by-tag
-'
-
-test_expect_success 'blame-tree dereferences tags (go-faster)' '
-	git blame-tree --go-faster HEAD~2..HEAD >by-commit &&
-	git blame-tree --go-faster lo..hi >by-tag &&
-	test_cmp by-commit by-tag
+	cat >want <<-\EOF &&
+		A A.t
+		A file
+		B B.t
+		^resolved conflict
+	EOF
+	check_blame HEAD~2..HEAD <want &&
+	check_blame lo..hi <want
 '
 
 test_expect_failure 'blame-tree complains about non-commits (old)' '
