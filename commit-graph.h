@@ -4,6 +4,7 @@
 #include "git-compat-util.h"
 #include "object-store.h"
 #include "oidset.h"
+#include "ewah/ewok.h"
 
 #define GIT_TEST_COMMIT_GRAPH "GIT_TEST_COMMIT_GRAPH"
 #define GIT_TEST_COMMIT_GRAPH_DIE_ON_PARSE "GIT_TEST_COMMIT_GRAPH_DIE_ON_PARSE"
@@ -50,6 +51,9 @@ void load_commit_graph_info(struct repository *r, struct commit *item);
 struct tree *get_commit_tree_in_graph(struct repository *r,
 				      const struct commit *c);
 
+int get_bloom_filter_large_in_graph(struct commit_graph *g,
+				    const struct commit *c);
+
 struct commit_graph {
 	const unsigned char *data;
 	size_t data_len;
@@ -71,6 +75,10 @@ struct commit_graph {
 	const unsigned char *chunk_base_graphs;
 	const unsigned char *chunk_bloom_indexes;
 	const unsigned char *chunk_bloom_data;
+	const unsigned char *chunk_bloom_large_filters;
+
+	struct bitmap *bloom_large;
+	size_t bloom_large_alloc;
 
 	struct bloom_filter_settings *bloom_filter_settings;
 };
@@ -82,6 +90,8 @@ struct commit_graph *read_commit_graph_one(struct repository *r,
 					   struct object_directory *odb);
 struct commit_graph *parse_commit_graph(struct repository *r,
 					void *graph_map, size_t graph_size);
+
+void prepare_commit_graph_bloom_large(struct commit_graph *g);
 
 /*
  * Return 1 if and only if the repository has a commit-graph
