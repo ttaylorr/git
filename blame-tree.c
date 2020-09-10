@@ -105,8 +105,7 @@ void blame_tree_init(struct blame_tree *bt, int argc, const char **argv,
 
 	(void)generation_numbers_enabled(bt->rev.repo);
 	if (bt->rev.repo->objects->commit_graph)
-		bt->rev.bloom_filter_settings =
-			bt->rev.repo->objects->commit_graph->bloom_filter_settings;
+		bt->rev.bloom_filter_settings = get_bloom_filter_settings(bt->rev.repo);
 
 	if (add_from_revs(bt) < 0)
 		die("unable to setup blame-tree");
