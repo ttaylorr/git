@@ -252,6 +252,7 @@ static int maybe_changed_path(struct blame_tree *bt,
 	struct bloom_filter *filter;
 	struct blame_tree_entry *e;
 	struct hashmap_iter iter;
+	int i;
 
 	if (!bt->rev.bloom_filter_settings)
 		return 1;
@@ -262,6 +263,13 @@ static int maybe_changed_path(struct blame_tree *bt,
 	filter = get_bloom_filter(bt->rev.repo, origin);
 	if (!filter)
 		return 1;
+
+	for (i = 0; i < bt->rev.bloom_keys_nr; i++) {
+		if (!(bloom_filter_contains(filter,
+					    &bt->rev.bloom_keys[i],
+					    bt->rev.bloom_filter_settings)))
+			return 0;
+	}
 
 	hashmap_for_each_entry(&bt->paths, &iter, e, hashent) {
 		if (active && !active->active[e->diff_idx])
@@ -349,6 +357,57 @@ cleanup:
 	return ret;
 }
 
+static void blame_tree_fast_init_bloom(struct rev_info *revs)
+{
+	const char *path, *p;
+	char *path_alloc = NULL;
+	size_t len;
+	int path_component_nr = 1;
+	struct pathspec_item *pi;
+
+	if (!revs->pruning.pathspec.nr)
+		return;
+
+	pi = &revs->pruning.pathspec.items[0];
+	/* remove single trailing slash from path, if needed */
+	if (pi->len > 0 && pi->match[pi->len - 1] == '/') {
+		path_alloc = xmemdupz(pi->match, pi->len - 1);
+		path = path_alloc;
+	} else
+		path = pi->match;
+
+	len = strlen(path);
+	if (len) {
+		p = path;
+		while (*p) {
+			/*
+			 * At this point, the path is normalized to use Unix-style
+			 * path separators. This is required due to how the
+			 * changed-path Bloom filters store the paths.
+			 */
+			if (*p == '/')
+				path_component_nr++;
+			p++;
+		}
+
+		revs->bloom_keys_nr = path_component_nr;
+		ALLOC_ARRAY(revs->bloom_keys, revs->bloom_keys_nr);
+
+		fill_bloom_key(path, len, &revs->bloom_keys[0],
+			       revs->bloom_filter_settings);
+		path_component_nr = 1;
+
+		p = path + len - 1;
+		while (p > path) {
+			if (*p == '/')
+				fill_bloom_key(path, p - path,
+					       &revs->bloom_keys[path_component_nr++],
+					       revs->bloom_filter_settings);
+			p--;
+		}
+	}
+}
+
 int blame_tree_run_fast(struct blame_tree *bt, blame_tree_callback cb, void *cbdata)
 {
 	int max_count, queue_popped = 0;
@@ -361,6 +420,9 @@ int blame_tree_run_fast(struct blame_tree *bt, blame_tree_callback cb, void *cbd
 	data.callback = cb;
 	data.callback_data = cbdata;
 	data.go_faster = 1;
+
+	if (bt->rev.bloom_filter_settings)
+		blame_tree_fast_init_bloom(&bt->rev);
 
 	bt->rev.diffopt.output_format = DIFF_FORMAT_CALLBACK;
 	bt->rev.diffopt.format_callback = blame_diff;
