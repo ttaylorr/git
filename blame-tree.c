@@ -375,8 +375,13 @@ int blame_tree_run_fast(struct blame_tree *bt, blame_tree_callback cb, void *cbd
 	bt->rev.diffopt.format_callback = blame_diff;
 	bt->rev.diffopt.format_callback_data = &data;
 	bt->rev.no_walk = 1;
+	bt->rev.blob_objects = 1;
+	bt->rev.tree_objects = 1;
 
 	prepare_revision_walk(&bt->rev);
+
+	if (bt->rev.pending.nr)
+		die("not a commit: %s", oid_to_hex(&bt->rev.pending.objects[0].item->oid));
 
 	max_count = bt->rev.max_count;
 
