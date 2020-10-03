@@ -166,4 +166,9 @@ test_expect_success 'blame-tree complains about non-commits' '
 	test_must_fail git blame-tree HEAD^{tree}
 '
 
+test_expect_success 'blame-tree complains about unknown arguments' '
+	test_must_fail git blame-tree --foo 2>err &&
+	grep "unknown blame-tree argument: --foo" err
+'
+
 test_done

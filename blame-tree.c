@@ -101,7 +101,8 @@ void blame_tree_init(struct blame_tree *bt, int argc, const char **argv,
 	bt->rev.diff = 1;
 	bt->rev.diffopt.flags.recursive = 1;
 	bt->rev.diffopt.no_free = 1;
-	setup_revisions(argc, argv, &bt->rev, NULL);
+	if (setup_revisions(argc, argv, &bt->rev, NULL) > 1)
+		die("unknown blame-tree argument: %s\n", argv[1]);
 
 	(void)generation_numbers_enabled(bt->rev.repo);
 	if (bt->rev.repo->objects->commit_graph)
