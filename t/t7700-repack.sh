@@ -3,6 +3,7 @@
 test_description='git repack works correctly'
 
 . ./test-lib.sh
+. "${TEST_DIRECTORY}/lib-midx.sh"
 
 commit_and_pack () {
 	test_commit "$@" 1>&2 &&
@@ -232,6 +233,71 @@ test_expect_success 'auto-bitmaps do not complain if unavailable' '
 	test_must_be_empty stderr &&
 	find bare.git/objects/pack -type f -name "*.bitmap" >actual &&
 	test_must_be_empty actual
+'
+
+objdir=.git/objects
+midx=$objdir/pack/multi-pack-index
+
+test_expect_success 'setup for --write-midx tests' '
+	git init midx &&
+	(
+		cd midx &&
+		git config core.multiPackIndex true &&
+
+		test_commit base
+	)
+'
+
+test_expect_success '--write-midx unchanged' '
+	(
+		cd midx &&
+		GIT_TEST_MULTI_PACK_INDEX=0 git repack &&
+		test_path_is_missing $midx &&
+		test_path_is_missing $midx-*.bitmap &&
+
+		GIT_TEST_MULTI_PACK_INDEX=0 git repack --write-midx &&
+
+		test_path_is_file $midx &&
+		test_path_is_missing $midx-*.bitmap &&
+		test_midx_consistent $objdir
+	)
+'
+
+test_expect_success '--write-midx with a new pack' '
+	(
+		cd midx &&
+		test_commit loose &&
+
+		GIT_TEST_MULTI_PACK_INDEX=0 git repack --write-midx &&
+
+		test_path_is_file $midx &&
+		test_path_is_missing $midx-*.bitmap &&
+		test_midx_consistent $objdir
+	)
+'
+
+test_expect_success '--write-midx with -b' '
+	(
+		cd midx &&
+		GIT_TEST_MULTI_PACK_INDEX=0 git repack -mb &&
+
+		test_path_is_file $midx &&
+		test_path_is_file $midx-*.bitmap &&
+		test_midx_consistent $objdir
+	)
+'
+
+test_expect_success '--write-midx with -d' '
+	(
+		cd midx &&
+		test_commit repack &&
+
+		GIT_TEST_MULTI_PACK_INDEX=0 git repack -Ad --write-midx &&
+
+		test_path_is_file $midx &&
+		test_path_is_missing $midx-*.bitmap &&
+		test_midx_consistent $objdir
+	)
 '
 
 test_done
