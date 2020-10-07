@@ -445,6 +445,7 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 	struct strbuf line = STRBUF_INIT;
 	int i, ext, ret;
 	FILE *out;
+	int show_progress = isatty(2);
 
 	/* variables to be filled by option parsing */
 	int pack_everything = 0;
@@ -717,7 +718,7 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 			}
 			strbuf_release(&buf);
 		}
-		if (!po_args.quiet && isatty(2))
+		if (!po_args.quiet && show_progress)
 			opts |= PRUNE_PACKED_VERBOSE;
 		prune_packed_objects(opts);
 
