@@ -1380,7 +1380,7 @@ static void try_partial_reuse(struct bitmap_index *bitmap_git,
 	bitmap_set(reuse, pos);
 }
 
-static uint32_t midx_preferred_pack(struct bitmap_index *bitmap_git)
+uint32_t midx_preferred_pack(struct bitmap_index *bitmap_git)
 {
 	struct multi_pack_index *m = bitmap_git->midx;
 	if (!m)
