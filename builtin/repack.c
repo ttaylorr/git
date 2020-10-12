@@ -17,6 +17,7 @@
 #include "pack.h"
 #include "pack-bitmap.h"
 #include "refs.h"
+#include "pack-bitmap.h"
 
 static int delta_base_offset = 1;
 static int pack_kept_objects = -1;
@@ -585,6 +586,30 @@ static int write_midx_included_packs(struct string_list *include,
 	return finish_command(&cmd);
 }
 
+static void remove_redundant_bitmaps(struct string_list *include,
+				     const char *packdir)
+{
+	struct strbuf path = STRBUF_INIT;
+	struct string_list_item *item;
+
+	/*
+	 * Remove any pack bitmaps corresponding to packs which are now
+	 * included in the midx.
+	 */
+	for_each_string_list_item(item, include) {
+		strbuf_addf(&path, "%s/%s", packdir, item->string);
+		strbuf_strip_suffix(&path, ".idx");
+		strbuf_addstr(&path, ".bitmap");
+
+		if (unlink(path.buf) && errno != ENOENT)
+			die(_("could not remove stale bitmap: %s"),
+			    path.buf);
+
+		strbuf_reset(&path);
+	}
+	strbuf_release(&path);
+}
+
 int cmd_repack(int argc, const char **argv, const char *prefix)
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
@@ -875,10 +900,15 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 						refs_snapshot ? get_tempfile_path(refs_snapshot) : NULL,
 						show_progress, write_bitmaps > 0);
 
-		string_list_clear(&include, 0);
-
-		if (ret)
+		if (ret) {
+			string_list_clear(&include, 0);
 			return ret;
+		}
+
+		if (write_bitmaps)
+			remove_redundant_bitmaps(&include, packdir);
+
+		string_list_clear(&include, 0);
 	}
 
 	reprepare_packed_git(the_repository);

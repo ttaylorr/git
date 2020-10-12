@@ -3,6 +3,7 @@
 test_description='git repack works correctly'
 
 . ./test-lib.sh
+. "${TEST_DIRECTORY}/lib-bitmap.sh"
 . "${TEST_DIRECTORY}/lib-midx.sh"
 
 commit_and_pack () {
@@ -298,6 +299,27 @@ test_expect_success '--write-midx with -d' '
 		test_path_is_missing $midx-*.bitmap &&
 		test_midx_consistent $objdir
 	)
+'
+
+test_expect_success '--write-midx removes stale pack-based bitmaps' '
+       rm -fr repo &&
+       git init repo &&
+       test_when_finished "rm -fr repo" &&
+       (
+		cd repo &&
+		git config core.multiPackIndex true &&
+		test_commit base &&
+		GIT_TEST_MULTI_PACK_INDEX=0 git repack -Ab &&
+
+		pack_bitmap=$(ls $objdir/pack/pack-*.bitmap) &&
+
+		test_commit tip &&
+		GIT_TEST_MULTI_PACK_INDEX=0 git repack -bm &&
+
+		test_path_is_file $midx &&
+		test_path_is_file $midx-$(midx_checksum $objdir).bitmap &&
+		test_path_is_missing $pack_bitmap
+       )
 '
 
 test_done
