@@ -1,0 +1,26 @@
+#!/bin/bash
+
+have() {
+	for i in $HOME/local/bin/git.*; do
+		echo "${i#$HOME/local/bin/git.}"
+	done
+}
+
+want() {
+	echo compile
+	echo gh
+	Meta/install/versions
+}
+
+comm -23 <(have) <(want) |
+while read version; do
+	rm -vf "$HOME/local/bin/git.$version"
+done
+
+comm -13 <(have) <(want) |
+while read version; do
+  ln -sfTv ../git/$version/bin/git $HOME/local/bin/git.$version
+done
+
+ln -sfT $PWD/bin-wrappers/git $HOME/local/bin/git.compile
+ln -sfT $HOME/github/git/bin-wrappers/git $HOME/local/bin/git.gh

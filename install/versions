@@ -1,0 +1,7 @@
+#!/bin/sh
+
+cd $HOME/local/git || exit 1
+for i in *; do
+	test -d $i && ! test -h $i && echo $i
+done
+exit 0
