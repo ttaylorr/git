@@ -1,0 +1,26 @@
+#!/bin/sh
+
+describe() {
+  if v=`git describe --exact-match $1 2>/dev/null`; then
+    echo $v
+  elif v=`git describe --exact-match --all $1 2>/dev/null`; then
+    # dereference symbolic links
+    shorten `git rev-parse --symbolic-full-name "$v"`
+  else
+    echo detached
+  fi
+}
+
+shorten() {
+  case "$1" in
+    refs/heads/*) echo "${1#refs/heads/}" ;;
+  refs/remotes/*) echo "$1"  | sed 's,refs/remotes/[^/]*/,,' ;;
+               *) echo "$1" ;;
+  esac
+}
+
+test -z "$1" && set -- HEAD
+for i in "$@"; do
+	describe $i | tr / .
+done
+exit 0
