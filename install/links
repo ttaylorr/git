@@ -12,12 +12,12 @@ want() {
 	Meta/install/versions
 }
 
-comm -23 <(have) <(want) |
+comm -23 <(have) <(want | sort) |
 while read version; do
 	rm -vf "$HOME/local/bin/git.$version"
 done
 
-comm -13 <(have) <(want) |
+comm -13 <(have) <(want | sort) |
 while read version; do
   ln -sfTv ../git/$version/bin/git $HOME/local/bin/git.$version
 done
