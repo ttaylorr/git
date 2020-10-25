@@ -9,6 +9,7 @@ have() {
 want() {
 	echo compile
 	echo gh
+	echo private
 	Meta/install/versions
 }
 
