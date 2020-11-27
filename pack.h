@@ -42,6 +42,8 @@ struct pack_idx_option {
 	/* flag bits */
 #define WRITE_IDX_VERIFY 01 /* verify only, do not write the idx file */
 #define WRITE_IDX_STRICT 02
+#define WRITE_REV 04
+#define WRITE_REV_VERIFY 010
 
 	uint32_t version;
 	uint32_t off32_limit;
@@ -86,6 +88,8 @@ int verify_pack(struct repository *, struct packed_git *, verify_fn fn, struct p
 off_t write_pack_header(struct hashfile *f, uint32_t);
 void fixup_pack_header_footer(int, unsigned char *, const char *, uint32_t, unsigned char *, off_t);
 char *index_pack_lockfile(int fd);
+
+const char *write_rev_file(const char *rev_name, struct pack_idx_entry **objects, uint32_t nr_objects, const unsigned char *hash, unsigned flags);
 
 /*
  * The "hdr" output buffer should be at least this big, which will handle sizes
