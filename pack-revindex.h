@@ -21,6 +21,9 @@ struct packed_git;
 /*
  * load_pack_revindex populates the revindex's internal data-structures for the
  * given pack, returning zero on success and a negative value otherwise.
+ *
+ * If a '.rev' file is present, it is checked for consistency, mmap'd, and
+ * pointers are assigned into it (instead of using the in-memory variant).
  */
 int load_pack_revindex(struct packed_git *p);
 
@@ -55,7 +58,9 @@ uint32_t pack_pos_to_index(struct packed_git *p, uint32_t pos);
  * If the reverse index has not yet been loaded, or the position is out of
  * bounds, this function aborts.
  *
- * This function runs in constant time.
+ * This function runs in constant time under both in-memory and on-disk reverse
+ * indexes, but an additional step is taken to consult the corresponding .idx
+ * file when using the on-disk format.
  */
 off_t pack_pos_to_offset(struct packed_git *p, uint32_t pos);
 

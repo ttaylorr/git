@@ -164,14 +164,96 @@ static void create_pack_revindex(struct packed_git *p)
 	sort_revindex(p->revindex, num_ent, p->pack_size);
 }
 
+static int load_pack_revindex_from_memory(struct packed_git *p)
+{
+	if (open_pack_index(p))
+		return -1;
+	create_pack_revindex(p);
+	return 0;
+}
+
+static char *pack_revindex_filename(struct packed_git *p)
+{
+	size_t len;
+	if (!strip_suffix(p->pack_name, ".pack", &len))
+		BUG("pack_name does not end in .pack");
+	return xstrfmt("%.*s.rev", (int)len, p->pack_name);
+}
+
+#define RIDX_MIN_SIZE (12 + (2 * the_hash_algo->rawsz))
+
+static int load_revindex_from_disk(char *revindex_name,
+				   uint32_t num_objects,
+				   const void **data, size_t *len)
+{
+	int fd, ret = 0;
+	struct stat st;
+	size_t revindex_size;
+
+	fd = git_open(revindex_name);
+
+	if (fd < 0) {
+		ret = -1;
+		goto cleanup;
+	}
+	if (fstat(fd, &st)) {
+		ret = error_errno(_("failed to read %s"), revindex_name);
+		goto cleanup;
+	}
+
+	revindex_size = xsize_t(st.st_size);
+
+	if (revindex_size < RIDX_MIN_SIZE) {
+		ret = error(_("reverse-index file %s is too small"), revindex_name);
+		goto cleanup;
+	}
+
+	if (revindex_size - RIDX_MIN_SIZE != st_mult(sizeof(uint32_t), num_objects)) {
+		ret = error(_("reverse-index file %s is corrupt"), revindex_name);
+		goto cleanup;
+	}
+
+	*len = revindex_size;
+	*data = xmmap(NULL, revindex_size, PROT_READ, MAP_PRIVATE, fd, 0);
+
+cleanup:
+	close(fd);
+	return ret;
+}
+
+static int load_pack_revindex_from_disk(struct packed_git *p)
+{
+	char *revindex_name;
+	int ret;
+	if (open_pack_index(p))
+		return -1;
+
+	revindex_name = pack_revindex_filename(p);
+
+	ret = load_revindex_from_disk(revindex_name,
+				      p->num_objects,
+				      &p->revindex_map,
+				      &p->revindex_size);
+	if (ret)
+		goto cleanup;
+
+	p->revindex_data = (char *)p->revindex_map + 12;
+
+cleanup:
+	free(revindex_name);
+	return ret;
+}
+
 int load_pack_revindex(struct packed_git *p)
 {
-	if (!p->revindex) {
-		if (open_pack_index(p))
-			return -1;
-		create_pack_revindex(p);
-	}
-	return 0;
+	if (p->revindex || p->revindex_data)
+		return 0;
+
+	if (!load_pack_revindex_from_disk(p))
+		return 0;
+	else if (!load_pack_revindex_from_memory(p))
+		return 0;
+	return -1;
 }
 
 int offset_to_pack_pos(struct packed_git *p, off_t ofs, uint32_t *pos)
@@ -203,18 +285,28 @@ int offset_to_pack_pos(struct packed_git *p, off_t ofs, uint32_t *pos)
 
 uint32_t pack_pos_to_index(struct packed_git *p, uint32_t pos)
 {
-	if (!p->revindex)
+	if (!(p->revindex || p->revindex_data))
 		BUG("pack_pos_to_index: reverse index not yet loaded");
 	if (pos >= p->num_objects)
 		BUG("pack_pos_to_index: out-of-bounds object at %"PRIu32, pos);
-	return p->revindex[pos].nr;
+
+	if (p->revindex)
+		return p->revindex[pos].nr;
+	else
+		return get_be32((char *)p->revindex_data + (pos * sizeof(uint32_t)));
 }
 
 off_t pack_pos_to_offset(struct packed_git *p, uint32_t pos)
 {
-	if (!p->revindex)
+	if (!(p->revindex || p->revindex_data))
 		BUG("pack_pos_to_index: reverse index not yet loaded");
 	if (pos > p->num_objects)
 		BUG("pack_pos_to_offset: out-of-bounds object at %"PRIu32, pos);
-	return p->revindex[pos].offset;
+
+	if (p->revindex)
+		return p->revindex[pos].offset;
+	else if (pos == p->num_objects)
+		return p->pack_size - the_hash_algo->rawsz;
+	else
+		return nth_packed_object_offset(p, pack_pos_to_index(p, pos));
 }
