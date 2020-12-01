@@ -63,6 +63,11 @@ struct oid_array {
 void oid_array_append(struct oid_array *array, const struct object_id *oid);
 
 /**
+ * Sorts the array in order of ascending oids.
+ */
+void oid_array_sort(struct oid_array *array);
+
+/**
  * Perform a binary search of the array for a specific object ID. If found,
  * returns the offset (in number of elements) of the object ID. If not found,
  * returns a negative integer. If the array is not sorted, this function has

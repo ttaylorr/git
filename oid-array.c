@@ -14,7 +14,7 @@ static int void_hashcmp(const void *a, const void *b)
 	return oidcmp(a, b);
 }
 
-static void oid_array_sort(struct oid_array *array)
+void oid_array_sort(struct oid_array *array)
 {
 	QSORT(array->oid, array->nr, void_hashcmp);
 	array->sorted = 1;
