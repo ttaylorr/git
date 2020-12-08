@@ -16,6 +16,8 @@
  *   can be found
  */
 
+#define GIT_TEST_WRITE_REV_INDEX "GIT_TEST_WRITE_REV_INDEX"
+
 struct packed_git;
 
 /*
