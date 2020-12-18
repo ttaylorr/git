@@ -1,0 +1,62 @@
+Blame-tree cache format
+=======================
+
+The blame-tree cache is a file located at `.git/blame-tree/<hash>.btc` where
+`<hash>` is the hash of the string `<depth> <pathspec>` for a
+`git blame-tree --max-depth=<depth> -- <pathspec>` command.
+
+All integers are in network-byte order.
+
+The format starts with two 32-bit values:
+
+1. The file type is given as the first four bytes: { 'B', 'L', 'T', 'C' }
+2. The next four bytes are considered as 8-bit integers:
+   i. The file format version (only 1 is supported).
+  ii. The number of chunks in the table of contents.
+ iii. The hash version, 1 for SHA-1 (20 bytes) and 2 for SHA-256 (32 bytes).
+   (The other byte is ignored right now and is expected to be zero.)
+
+The format follows the chunk-format. A table of contents is given in
+12-byte rows: a 4-byte chunk identifier and an 8-byte offset from the
+beginning of the file. The final chunk has the all-zeroes chunk-id and
+that row contains the offset of the end of the chunk-format.
+
+METADATA CHUNK (id: META)
+---------------------
+
+This required chunk contains the information for the `--max-depth` and
+pathspec parameters. It contains the following information:
+
+ * A 4-byte integer storing the `--max-depth` value.
+ * A 4-byte integer storing the length of the pathspec.
+ * A variable-width data region containing the pathspec. This data is
+   padded to four bytes.
+
+COMMIT CHUNK (id: CMMT)
+-------------------------
+
+This chunk contains the object ID of the commit used to compute the
+results. If the object ID is the null OID (all zeroes) then this file
+is a placeholder requesting for future caching and there will not be
+a results chunk.
+
+RESULTS CHUNK (id: RSLT)
+------------------------
+
+The results chunk contains the information for the cached run of
+`git blame-tree --max-depth=<X> <commit> -- <pathspec>`. The
+chunk stores data in dynamically-sized rows containing:
+
+ * An object ID for the commit that most-recently changed this
+   path.
+
+ * A 4-byte integer for the length of the path.
+
+ * The path string, with padding zeroes to align the row to a
+   multiple of four bytes.
+
+TRAILER
+-------
+
+The file terminates with a hash of the previous contents. This is
+a 20-byte SHA-1 or 32-byte SHA-256 as appropriate to the hash version.
