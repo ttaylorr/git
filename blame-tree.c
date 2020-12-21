@@ -143,7 +143,8 @@ struct blame_tree_callback_data {
 };
 
 static void mark_path(const char *path, const struct object_id *oid,
-		      struct blame_tree_callback_data *data)
+		      struct blame_tree_callback_data *data,
+		      int check_active)
 {
 	struct blame_tree_entry *ent;
 	struct commit_active_paths *active;
@@ -159,10 +160,12 @@ static void mark_path(const char *path, const struct object_id *oid,
 		return;
 
 	/* Are we inactive on the current commit? */
-	active = active_paths_at(&active_paths, data->commit);
-	if (active && active->active &&
-	    !active->active[ent->diff_idx])
-		return;
+	if (check_active) {
+		active = active_paths_at(&active_paths, data->commit);
+		if (active && active->active &&
+		    !active->active[ent->diff_idx])
+			return;
+	}
 
 	/*
 	 * Is it arriving at a version of interest, or is it from a side branch
@@ -213,7 +216,7 @@ static void blame_diff(struct diff_queue_struct *q,
 			 * the behavior (e.g., to "--follow" the content across
 			 * renames) can come later.
 			 */
-			mark_path(p->two->path, &p->two->oid, data);
+			mark_path(p->two->path, &p->two->oid, data, 1);
 			break;
 		}
 	}
@@ -473,7 +476,7 @@ int blame_tree_run(struct blame_tree *bt, blame_tree_callback cb, void *cbdata)
 			data.commit = c;
 			for (int i = 0; i < bt->all_paths_nr; i++) {
 				if (active_c->active[i])
-					mark_path(bt->all_paths[i], NULL, &data);
+					mark_path(bt->all_paths[i], NULL, &data, 1);
 			}
 		}
 
