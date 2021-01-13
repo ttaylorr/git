@@ -18,6 +18,8 @@ test_index_pack () {
 	rm -f $rev &&
 	conf=$1 &&
 	shift &&
+	# remove the index since Windows won't overwrite an existing file
+	rm $packdir/pack-$pack.idx &&
 	git -c pack.writeReverseIndex=$conf index-pack "$@" \
 		$packdir/pack-$pack.pack
 }
