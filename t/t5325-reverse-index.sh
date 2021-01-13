@@ -86,7 +86,8 @@ test_expect_success 'pack-objects respects pack.writeReverseIndex' '
 '
 
 test_expect_success 'reverse index is not generated when available on disk' '
-	git index-pack --rev-index $packdir/pack-$pack.pack &&
+	test_index_pack true &&
+	test_path_is_file $rev &&
 
 	git rev-parse HEAD >tip &&
 	GIT_TEST_REV_INDEX_DIE_IN_MEMORY=1 git cat-file \
