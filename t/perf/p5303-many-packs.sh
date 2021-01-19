@@ -24,11 +24,11 @@ repack_into_n () {
 	sed -n '1~5p' |
 	head -n "$1" |
 	perl -e 'print reverse <>' \
-	>pushes
+	>pushes &&
 
 	# create base packfile
 	head -n 1 pushes |
-	git pack-objects --delta-base-offset --revs staging/pack
+	git pack-objects --delta-base-offset --revs staging/pack &&
 
 	# and then incrementals between each pair of commits
 	last= &&
