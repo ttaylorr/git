@@ -338,6 +338,13 @@ static void traverse_trees_and_blobs(struct traversal_context *ctx,
 			ctx->show_object(obj, name, ctx->show_data);
 			continue;
 		}
+		if (ctx->revs->no_kept_objects) {
+			struct pack_entry e;
+			if (find_kept_pack_entry(ctx->revs->repo, &obj->oid,
+						 ctx->revs->keep_pack_cache_flags,
+						 &e))
+				continue;
+		}
 		if (!path)
 			path = "";
 		if (obj->type == OBJ_TREE) {

@@ -856,6 +856,13 @@ ifdef::git-rev-list[]
 	Only useful with `--objects`; print the object IDs that are not
 	in packs.
 
+--no-kept-objects[=<kind>]::
+	Halts the traversal as soon as an object in a kept pack is
+	found. If `<kind>` is `on-disk`, only packs with a corresponding
+	`*.keep` file are ignored. If `<kind>` is `in-core`, only packs
+	with their in-core kept state set are ignored. Otherwise, both
+	kinds of kept packs are ignored.
+
 --object-names::
 	Only useful with `--objects`; print the names of the object IDs
 	that are found. This is the default behavior.
