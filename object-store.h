@@ -105,6 +105,14 @@ static inline int pack_map_entry_cmp(const void *unused_cmp_data,
 	return strcmp(pg1->pack_name, key ? key : pg2->pack_name);
 }
 
+#define CACHE_ON_DISK_KEEP_PACKS 1
+#define CACHE_IN_CORE_KEEP_PACKS 2
+
+struct kept_pack_cache {
+	struct packed_git **packs;
+	unsigned flags;
+};
+
 struct raw_object_store {
 	/*
 	 * Set of all object directories; the main directory is first (and
@@ -149,6 +157,8 @@ struct raw_object_store {
 	struct packed_git *packed_git;
 	/* A most-recently-used ordered version of the packed_git list. */
 	struct list_head packed_git_mru;
+
+	struct kept_pack_cache *kept_pack_cache;
 
 	/*
 	 * A map of packfiles to packed_git structs for tracking which
