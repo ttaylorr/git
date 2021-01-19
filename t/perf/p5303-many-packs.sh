@@ -27,8 +27,11 @@ repack_into_n () {
 	>pushes &&
 
 	# create base packfile
-	head -n 1 pushes |
-	git pack-objects --delta-base-offset --revs staging/pack &&
+	base_pack=$(
+		head -n 1 pushes |
+		git pack-objects --delta-base-offset --revs staging/pack
+	) &&
+	test_export base_pack &&
 
 	# and then incrementals between each pair of commits
 	last= &&
@@ -84,6 +87,15 @@ do
 		GIT_TEST_FULL_IN_PACK_ARRAY=1 \
 		git pack-objects --keep-true-parents \
 		  --honor-pack-keep --non-empty --all \
+		  --reflog --indexed-objects --delta-base-offset \
+		  --stdout </dev/null >/dev/null
+	'
+
+	test_perf "repack with keep ($nr_packs)" '
+		git pack-objects --keep-true-parents \
+		  --honor-pack-keep --assume-kept-packs-closed \
+		  --keep-pack=pack-$base_pack.pack \
+		  --non-empty --all \
 		  --reflog --indexed-objects --delta-base-offset \
 		  --stdout </dev/null >/dev/null
 	'
