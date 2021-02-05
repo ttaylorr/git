@@ -61,6 +61,7 @@ osx-clang|osx-gcc)
 	esac
 	;;
 StaticAnalysis)
+	sudo add-apt-repository universe
 	sudo apt-get -q update
 	sudo apt-get -q -y install coccinelle libcurl4-openssl-dev libssl-dev \
 		libexpat-dev gettext make
