@@ -228,4 +228,25 @@ test_expect_success 'auto-bitmaps do not complain if unavailable' '
 	test_must_be_empty actual
 '
 
+test_expect_success 'redundant bitmaps are removed with -d' '
+	git init repo &&
+	test_when_finished "rm -fr repo" &&
+	(
+		cd repo &&
+
+		test_commit first &&
+		git repack -A -d -b &&
+
+		find .git/objects/pack -type f -name "*.bitmap" >before &&
+
+		test_commit second &&
+		git repack -A -d -b &&
+
+		find .git/objects/pack -type f -name "*.bitmap" >after &&
+
+		test_line_count = 1 after &&
+		! test_cmp before after
+	)
+'
+
 test_done
