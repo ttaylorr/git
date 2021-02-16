@@ -1476,4 +1476,27 @@ test_expect_success 'suppress --- handling' '
 	test_cmp expected actual
 '
 
+test_expect_success 'handling of empty continuations lines' '
+	tr _ " " >input <<-\EOF &&
+	subject
+
+	body
+
+	trailer: single
+	multi: one
+	_two
+	multi: one
+	_
+	_two
+	_three
+	EOF
+	cat >expect <<-\EOF &&
+	trailer: single
+	multi: one two
+	multi: one two three
+	EOF
+	git interpret-trailers --parse <input >actual &&
+	test_cmp expect actual
+'
+
 test_done

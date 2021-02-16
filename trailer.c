@@ -846,7 +846,7 @@ static size_t find_trailer_start(const char *buf, size_t len)
 			possible_continuation_lines = 0;
 			continue;
 		}
-		if (is_blank_line(bol)) {
+		if (is_blank_line(bol) && *bol == '\n') {
 			if (only_spaces)
 				continue;
 			non_trailer_lines += possible_continuation_lines;
