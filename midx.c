@@ -973,7 +973,42 @@ static void bitmap_show_commit(struct commit *commit, void *_data)
 	}
 }
 
+static int read_refs_snapshot(const char *refs_snapshot,
+			      struct rev_info *revs)
+{
+	struct strbuf buf = STRBUF_INIT;
+	struct object_id oid;
+	FILE *f = xfopen(refs_snapshot, "r");
+
+	while (strbuf_getline(&buf, f) != EOF) {
+		struct object *object;
+		int preferred = 0;
+		char *hex = buf.buf;
+		const char *end = NULL;
+
+		if (buf.len && *buf.buf == '+') {
+			preferred = 1;
+			hex = &buf.buf[1];
+		}
+
+		if (parse_oid_hex(hex, &oid, &end) < 0)
+			die(_("could not parse line: %s"), buf.buf);
+		if (*end)
+			die(_("malformed line: %s"), buf.buf);
+
+		object = parse_object_or_die(&oid, NULL);
+		if (preferred)
+			object->flags |= NEEDS_BITMAP;
+
+		add_pending_object(revs, object, "");
+	}
+
+	fclose(f);
+	return 0;
+}
+
 static struct commit **find_commits_for_midx_bitmap(uint32_t *indexed_commits_nr_p,
+						    const char *refs_snapshot,
 						    struct write_midx_context *ctx)
 {
 	struct rev_info revs;
@@ -983,7 +1018,10 @@ static struct commit **find_commits_for_midx_bitmap(uint32_t *indexed_commits_nr
 	cb.ctx = ctx;
 
 	repo_init_revisions(the_repository, &revs, NULL);
-	for_each_ref(add_ref_to_pending, &revs);
+	if (refs_snapshot)
+		read_refs_snapshot(refs_snapshot, &revs);
+	else
+		for_each_ref(add_ref_to_pending, &revs);
 
 	/*
 	 * Skipping promisor objects here is intentional, since it only excludes
@@ -1019,6 +1057,7 @@ static struct commit **find_commits_for_midx_bitmap(uint32_t *indexed_commits_nr
 
 static int write_midx_bitmap(char *midx_name, unsigned char *midx_hash,
 			     struct write_midx_context *ctx,
+			     const char *refs_snapshot,
 			     unsigned flags)
 {
 	struct packing_data pdata;
@@ -1030,7 +1069,7 @@ static int write_midx_bitmap(char *midx_name, unsigned char *midx_hash,
 
 	prepare_midx_packing_data(&pdata, ctx);
 
-	commits = find_commits_for_midx_bitmap(&commits_nr, ctx);
+	commits = find_commits_for_midx_bitmap(&commits_nr, refs_snapshot, ctx);
 
 	/*
 	 * Build the MIDX-order index based on pdata.objects (which is already
@@ -1078,6 +1117,7 @@ static int write_midx_internal(const char *object_dir, struct multi_pack_index *
 			       struct string_list *packs_to_include,
 			       struct string_list *packs_to_drop,
 			       const char *preferred_pack_name,
+			       const char *refs_snapshot,
 			       unsigned flags)
 {
 	char *midx_name;
@@ -1337,7 +1377,8 @@ static int write_midx_internal(const char *object_dir, struct multi_pack_index *
 	if (flags & MIDX_WRITE_REV_INDEX)
 		write_midx_reverse_index(midx_name, midx_hash, &ctx);
 	if (flags & MIDX_WRITE_BITMAP) {
-		if (write_midx_bitmap(midx_name, midx_hash, &ctx, flags) < 0) {
+		if (write_midx_bitmap(midx_name, midx_hash, &ctx,
+				      refs_snapshot, flags) < 0) {
 			error(_("could not write multi-pack bitmap"));
 			result = 1;
 			goto cleanup;
@@ -1380,19 +1421,21 @@ cleanup:
 
 int write_midx_file(const char *object_dir,
 		    const char *preferred_pack_name,
+		    const char *refs_snapshot,
 		    unsigned flags)
 {
 	return write_midx_internal(object_dir, NULL, NULL, NULL, preferred_pack_name,
-				   flags);
+				   refs_snapshot, flags);
 }
 
 int write_midx_file_only(const char *object_dir,
 			 struct string_list *packs_to_include,
 			 const char *preferred_pack_name,
+			 const char *refs_snapshot,
 			 unsigned flags)
 {
 	return write_midx_internal(object_dir, NULL, packs_to_include, NULL,
-				   preferred_pack_name, flags);
+				   preferred_pack_name, refs_snapshot, flags);
 }
 
 struct clear_midx_data {
@@ -1668,7 +1711,7 @@ int expire_midx_packs(struct repository *r, const char *object_dir, unsigned fla
 	free(count);
 
 	if (packs_to_drop.nr)
-		result = write_midx_internal(object_dir, m, NULL, &packs_to_drop, NULL, flags);
+		result = write_midx_internal(object_dir, m, NULL, &packs_to_drop, NULL, NULL, flags);
 
 	string_list_clear(&packs_to_drop, 0);
 	return result;
@@ -1857,7 +1900,7 @@ int midx_repack(struct repository *r, const char *object_dir, size_t batch_size,
 		goto cleanup;
 	}
 
-	result = write_midx_internal(object_dir, m, NULL, NULL, NULL, flags);
+	result = write_midx_internal(object_dir, m, NULL, NULL, NULL, NULL, flags);
 	m = NULL;
 
 cleanup:
