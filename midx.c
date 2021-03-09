@@ -195,6 +195,7 @@ cleanup_fail:
 void close_midx(struct multi_pack_index *m)
 {
 	uint32_t i;
+	struct multi_pack_index *ptr, **pptr;
 
 	if (!m)
 		return;
@@ -207,6 +208,17 @@ void close_midx(struct multi_pack_index *m)
 	}
 	FREE_AND_NULL(m->packs);
 	FREE_AND_NULL(m->pack_names);
+
+	/* remove this instance from the linked list */
+	pptr = &the_repository->objects->multi_pack_index;
+	for (ptr = the_repository->objects->multi_pack_index; ptr; ptr = ptr->next)
+	{
+		if (ptr == m) {
+			*pptr = ptr->next;
+			break;
+		}
+		pptr = &ptr->next;
+	}
 }
 
 int prepare_midx_pack(struct repository *r, struct multi_pack_index *m, uint32_t pack_int_id)
@@ -1283,6 +1295,11 @@ static int write_midx_internal(const char *object_dir, struct multi_pack_index *
 
 	hold_lock_file_for_update(&lk, midx_name, LOCK_DIE_ON_ERROR);
 	f = hashfd(get_lock_file_fd(&lk), get_lock_file_path(&lk));
+
+	if (ctx.m) {
+		close_midx(ctx.m);
+		ctx.m = NULL;
+	}
 
 	if (ctx.nr - dropped_packs == 0) {
 		error(_("no pack files to index."));
