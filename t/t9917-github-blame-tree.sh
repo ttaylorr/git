@@ -163,4 +163,17 @@ test_expect_success 'blame-tree complains about unknown arguments' '
 	grep "unknown blame-tree argument: --foo" err
 '
 
+test_expect_success 'blame-tree succeeds on commit with empty tree' '
+	treehash=$(git mktree </dev/null) &&
+	commithash=$(git commit-tree -m "empty commit" $treehash) &&
+	mergehash=$(git commit-tree -p $commithash -p HEAD -m "merge empty on first-parent" HEAD^{tree}) &&
+	git reset --hard $mergehash &&
+	check_blame --max-depth=0 <<-\EOF
+	A A.t
+	A file
+	B B.t
+	resolved conflict
+	EOF
+'
+
 test_done
