@@ -908,8 +908,18 @@ static int write_midx_internal(const char *object_dir, struct multi_pack_index *
 
 	if (m)
 		ctx.m = m;
-	else
-		ctx.m = load_multi_pack_index(object_dir, 1);
+	else {
+		struct multi_pack_index *cur;
+
+		prepare_multi_pack_index_one(the_repository, object_dir, 1);
+
+		ctx.m = NULL;
+		for (cur = the_repository->objects->multi_pack_index; cur;
+		     cur = cur->next) {
+			if (!strcmp(object_dir, cur->object_dir))
+				ctx.m = cur;
+		}
+	}
 
 	ctx.nr = 0;
 	ctx.alloc = ctx.m ? ctx.m->num_packs : 16;
