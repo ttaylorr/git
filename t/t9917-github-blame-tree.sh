@@ -221,4 +221,21 @@ test_expect_success 'blame-tree cache works across alternates' '
 	grep "cached-commit:true" trace-1-fork
 '
 
+test_expect_success 'test cache with unicode paths' '
+	test_when_finished rm -rf .git/objects/info/blame-tree blame-tree &&
+
+	# The first unicode character Ċ is U+010A, so the second
+	# byte looks like a newline.
+	# The second unicode character Ā is U+0100, so the second
+	# byte looks like a nul terminator.
+	echo >_Ċ_Ā_ &&
+	git add _Ċ_Ā_ &&
+	git commit -m "add unicode pathname" &&
+
+	git blame-tree --max-depth=0 >expect &&
+	git blame-tree --cache --max-depth=0 &&
+	git blame-tree --max-depth=0 >actual &&
+	test_cmp expect actual
+'
+
 test_done
