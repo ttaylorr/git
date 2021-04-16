@@ -430,8 +430,19 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 		bt->all_paths[e->diff_idx] = e->path;
 	}
 
-	/* Skip caching */
+	/* Skip caching for scenarios that do not work */
+
+	/* Multiple pathspecs? */
 	if (bt->rev.diffopt.pathspec.nr > 1)
+		return;
+	/*
+	 * Multiple starting commits?
+	 * This usually means the arguments are something like
+	 * "git blame-tree HEAD ^HEAD~100", so they include
+	 * negative arguments. Multiple starting points would also
+	 * be invalid.
+	 */
+	if (bt->rev.pending.nr != 1)
 		return;
 
 	if (bt->rev.diffopt.pathspec.nr == 1)
