@@ -13,7 +13,6 @@ int cmd_blame_tree(int argc, const char **argv, const char *prefix,
 		   struct repository *repo)
 {
 	struct blame_tree bt;
-	struct strvec new_argv = STRVEC_INIT;
 
 	if (argc == 2 && !strcmp(argv[1], "-h"))
 		usage(blame_tree_usage);
@@ -25,6 +24,5 @@ int cmd_blame_tree(int argc, const char **argv, const char *prefix,
 		die("error running blame-tree traversal");
 	blame_tree_release(&bt);
 
-	strvec_clear(&new_argv);
 	return 0;
 }
