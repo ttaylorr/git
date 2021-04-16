@@ -7,12 +7,16 @@
 #include "hashmap.h"
 #include "bloom.h"
 
+struct blame_tree_cache_writer;
+
 struct blame_tree {
 	struct hashmap paths;
 	struct rev_info rev;
 
 	const char **all_paths;
 	int all_paths_nr;
+
+	struct blame_tree_cache_writer *writer;
 };
 
 #define BLAME_TREE_CACHE (1 << 0)

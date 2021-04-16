@@ -34,6 +34,35 @@ static void show_entry(const char *path, const struct commit *commit, void *d)
 	fflush(stdout);
 }
 
+struct blame_tree_cache_result {
+	struct object_id oid;
+	size_t pathlen;
+	char *path;
+};
+
+struct blame_tree_cache_writer {
+	struct blame_tree_cache_result *results;
+	size_t results_nr;
+	size_t results_alloc;
+};
+
+/*
+ * This callback is used when writing the cache to
+ * a file. We first collect the rows in a list.
+ */
+static void store_row(const char *path, const struct commit *commit, void *d)
+{
+	struct blame_tree_cache_writer *writer = d;
+	struct blame_tree_cache_result *result;
+	ALLOC_GROW(writer->results, writer->results_nr + 1, writer->results_alloc);
+
+	result = &writer->results[writer->results_nr++];
+
+	oidcpy(&result->oid, &commit->object.oid);
+	result->pathlen = strlen(path);
+	result->path = xstrdup(path);
+}
+
 struct blame_tree_entry {
 	struct hashmap_entry hashent;
 	struct object_id oid;
@@ -109,6 +138,7 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 {
 	struct hashmap_iter iter;
 	struct blame_tree_entry *e;
+	const char *pathspec = "";
 
 	memset(bt, 0, sizeof(*bt));
 	hashmap_init(&bt->paths, blame_tree_entry_hashcmp, NULL, 0);
@@ -138,12 +168,27 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 		e->diff_idx = bt->all_paths_nr++;
 		bt->all_paths[e->diff_idx] = e->path;
 	}
+
+	/* Skip caching */
+	if (bt->rev.diffopt.pathspec.nr > 1)
+		return;
+
+	if (bt->rev.diffopt.pathspec.nr == 1)
+		pathspec = bt->rev.diffopt.pathspec.items[0].original;
+
+	if (flags & BLAME_TREE_CACHE)
+		CALLOC_ARRAY(bt->writer, 1);
 }
 
 void blame_tree_release(struct blame_tree *bt)
 {
 	hashmap_clear_and_free(&bt->paths, struct blame_tree_entry, hashent);
 	free(bt->all_paths);
+
+	if (bt->writer) {
+		free(bt->writer->results);
+		FREE_AND_NULL(bt->writer);
+	}
 }
 
 struct commit_active_paths {
@@ -388,8 +433,8 @@ int blame_tree_run(struct blame_tree *bt)
 
 	data.paths = &bt->paths;
 	data.num_interesting = hashmap_get_size(&bt->paths);
-	data.callback = show_entry;
-	data.callback_data = bt;
+	data.callback = bt->writer ? store_row : show_entry;
+	data.callback_data = bt->writer ? (void*)bt->writer : (void*)bt;
 
 	bt->rev.diffopt.output_format = DIFF_FORMAT_CALLBACK;
 	bt->rev.diffopt.format_callback = blame_diff;
