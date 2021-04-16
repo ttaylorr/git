@@ -17,23 +17,28 @@ int cmd_blame_tree(int argc, const char **argv, const char *prefix,
 {
 	struct blame_tree bt;
 	int flags = 0;
-	static int write_to_cache;
-	static int update_cache;
-	static struct option blame_tree_options[] = {
-		OPT_BOOL(0, "cache", &write_to_cache,
-			N_("update the cache for this pathspec")),
-		OPT_BOOL(0, "update-cache", &update_cache,
-			N_("update all blame-tree caches already on-disk")),
-		OPT_END(),
-	};
+	int write_to_cache = 0;
+	int update_cache = 0;
+	int i;
 
 	if (argc == 2 && !strcmp(argv[1], "-h"))
 		usage(blame_tree_usage[0]);
 
-	argc = parse_options(argc, argv, prefix,
-			     blame_tree_options,
-			     blame_tree_usage,
-			     PARSE_OPT_KEEP_UNKNOWN_OPT | PARSE_OPT_KEEP_ARGV0);
+	for (i = 1; i < argc; i++) {
+		int j;
+		if (!strcmp(argv[i], "--cache"))
+			write_to_cache = 1;
+		else if (!strcmp(argv[i], "--update-cache"))
+			update_cache = 1;
+		else
+			continue;
+
+		for (j = i + 1; j <= argc; j++) {
+			argv[j - 1] = argv[j];
+		}
+		argc--;
+		i--;
+	}
 
 	if (update_cache) {
 		if (argc != 2)
