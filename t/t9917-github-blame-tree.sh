@@ -238,4 +238,24 @@ test_expect_success 'test cache with unicode paths' '
 	test_cmp expect actual
 '
 
+test_expect_success '--update-cache populates all cache files' '
+	test_when_finished rm -rf .git/objects/info/blame-tree blame-tree &&
+	# Compute expected cache files
+	git blame-tree --cache --max-depth=1 HEAD -- a &&
+	git blame-tree --cache --max-depth=0 HEAD &&
+	mv .git/objects/info/blame-tree blame-tree &&
+	git blame-tree --cache --max-depth=1 HEAD~1 -- a &&
+	git blame-tree --cache --max-depth=0 HEAD~1 &&
+	for filename in $(ls blame-tree/*.btc)
+	do
+		test_path_is_file .git/objects/info/$filename || return 1
+	done &&
+	git blame-tree --update-cache HEAD &&
+	for filename in $(ls blame-tree/*.btc)
+	do
+		test_path_is_file .git/objects/info/$filename &&
+		test_cmp $filename .git/objects/info/$filename || return 1
+	done
+'
+
 test_done

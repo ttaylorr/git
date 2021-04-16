@@ -32,4 +32,13 @@ typedef void (*blame_tree_callback)(const char *path,
 				    void *data);
 int blame_tree_run(struct blame_tree *);
 
+/*
+ * Iterate through all blame-tree cache files and
+ * recompute them starting at the given commit.
+ *
+ * The command-line arguments are supplied as the
+ * revision to use.
+ */
+int update_blame_tree_caches(const char *revision);
+
 #endif /* BLAME_TREE_H */

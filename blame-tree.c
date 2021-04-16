@@ -18,6 +18,9 @@
 #include "lockfile.h"
 #include "object-file.h"
 #include "trace2.h"
+#include "strvec.h"
+#include "run-command.h"
+#include "path.h"
 
 /*
  * This is the default blame-tree output. It is used when
@@ -929,4 +932,103 @@ cleanup:
 			   found_cached_commit ? "true" : "false");
 
 	return 0;
+}
+
+static int call_blame_tree_cache(int max_depth, const char *pathspec,
+				 const char *revision)
+{
+	struct child_process cmd = CHILD_PROCESS_INIT;
+
+	cmd.git_cmd = 1;
+	strvec_pushl(&cmd.args, "blame-tree", "--cache", revision, NULL);
+	strvec_pushf(&cmd.args, "--max-depth=%d", max_depth);
+
+	if (pathspec && *pathspec)
+		strvec_pushl(&cmd.args, "--", pathspec, NULL);
+
+	return run_command(&cmd);
+}
+
+static int update_cache(const char *filename, const char *revision)
+{
+	int res = 0;
+	int max_depth;
+	char *pathspec;
+	struct blame_tree_cache_reader *reader;
+	struct stat st;
+	int fd = git_open(filename);
+
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &st)) {
+		close(fd);
+		return -1;
+	}
+
+	reader = init_blame_tree_cache_reader(fd, &st);
+
+	max_depth = reader->max_depth;
+	pathspec = xstrdup(reader->pathspec);
+
+	/*
+	 * Free reader before replacing the file, since
+	 * otherwise we still have a handle on the file.
+	 */
+	free_blame_tree_cache_reader(reader);
+
+	/* max_depth=0 with root pathspec is handled separately */
+	if (reader->max_depth)
+		res = call_blame_tree_cache(max_depth,
+					    pathspec,
+					    revision);
+
+	free(pathspec);
+	return res;
+}
+
+/*
+ * Iterate through all blame-tree cache files and
+ * recompute them starting at the given commit.
+ */
+int update_blame_tree_caches(const char *revision)
+{
+	struct repository *r = the_repository;
+	int res = 0;
+	struct strbuf path = STRBUF_INIT;
+	size_t dirlen;
+	DIR *dir;
+	struct dirent *de;
+
+	trace2_region_enter("blame-tree", "update-caches", r);
+
+	/* update the root by default */
+	call_blame_tree_cache(0, NULL, revision);
+
+	strbuf_addstr(&path, repo_common_path(r, "objects/info/blame-tree"));
+
+	dir = opendir(path.buf);
+	if (!dir) {
+		strbuf_release(&path);
+		return 0;
+	}
+
+	strbuf_addch(&path, '/');
+	dirlen = path.len;
+
+	while (!res && (de = readdir(dir)) != NULL) {
+		if (is_dot_or_dotdot(de->d_name))
+			continue;
+
+		strbuf_setlen(&path, dirlen);
+		strbuf_addstr(&path, de->d_name);
+
+		res = update_cache(path.buf, revision);
+	}
+
+	closedir(dir);
+	strbuf_release(&path);
+
+	trace2_region_leave("blame-tree", "update-caches", r);
+
+	return res;
 }
