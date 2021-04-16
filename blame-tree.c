@@ -291,6 +291,7 @@ static int blame_tree_entry_hashcmp(const void *unused UNUSED,
 void blame_tree_init(struct blame_tree *bt, int flags,
 		     int argc, const char **argv, const char *prefix)
 {
+	struct repository *r = the_repository;
 	struct hashmap_iter iter;
 	struct blame_tree_entry *e;
 	const char *pathspec = "";
@@ -310,9 +311,9 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 	if (setup_revisions(argc, argv, &bt->rev, NULL) > 1)
 		die("unknown blame-tree argument: %s\n", argv[1]);
 
-	(void)generation_numbers_enabled(bt->rev.repo);
-	if (bt->rev.repo->objects->commit_graph)
-		bt->rev.bloom_filter_settings = get_bloom_filter_settings(bt->rev.repo);
+	(void)generation_numbers_enabled(r);
+	if (r->objects->commit_graph)
+		bt->rev.bloom_filter_settings = get_bloom_filter_settings(r);
 
 	if (add_from_revs(bt) < 0)
 		die("unable to setup blame-tree");
