@@ -105,10 +105,15 @@ static void write_btc_header(struct hashfile *f, struct chunkfile *cf)
 
 static void add_padding(struct hashfile *f, size_t len)
 {
-	size_t remainder = len % 4;
-	while (remainder && remainder < 4) {
+	switch (len % 4) {
+	case 1:
 		hashwrite_u8(f, 0);
-		remainder++;
+		/* fallthrough */
+	case 2:
+		hashwrite_u8(f, 0);
+		/* fallthrough */
+	case 3:
+		hashwrite_u8(f, 0);
 	}
 }
 
@@ -134,7 +139,7 @@ static int write_results_chunk(struct hashfile *f, void *data)
 {
 	struct blame_tree_cache_writer *writer = data;
 	struct blame_tree_cache_result *result = writer->results;
-	int remaining = writer->results_nr;
+	size_t remaining = writer->results_nr;
 
 	while (remaining) {
 		hashwrite(f, result->oid.hash, the_hash_algo->rawsz);
