@@ -13,6 +13,10 @@
 #include "commit-slab.h"
 #include "hex.h"
 #include "quote.h"
+#include "chunk-format.h"
+#include "csum-file.h"
+#include "lockfile.h"
+#include "object-file.h"
 
 /*
  * This is the default blame-tree output. It is used when
@@ -44,7 +48,21 @@ struct blame_tree_cache_writer {
 	struct blame_tree_cache_result *results;
 	size_t results_nr;
 	size_t results_alloc;
+	size_t results_size;
+
+	struct commit *commit;
+
+	int max_depth;
+	size_t pathspec_len;
+	const char *pathspec;
 };
+
+static size_t padded(size_t len)
+{
+	if (len % 4)
+		len += 4 - (len % 4);
+	return len;
+}
 
 /*
  * This callback is used when writing the cache to
@@ -61,6 +79,143 @@ static void store_row(const char *path, const struct commit *commit, void *d)
 	oidcpy(&result->oid, &commit->object.oid);
 	result->pathlen = strlen(path);
 	result->path = xstrdup(path);
+
+	writer->results_size += the_hash_algo->rawsz + 4 +
+				padded(result->pathlen);
+}
+
+#define BLAME_TREE_CACHE_FORMAT 0x424C5443
+#define META_CHUNK 0x4D455441
+#define COMMIT_CHUNK 0x434D4D54
+#define RESULTS_CHUNK 0x52534C54
+
+static void write_btc_header(struct hashfile *f, struct chunkfile *cf)
+{
+	hashwrite_be32(f, BLAME_TREE_CACHE_FORMAT);
+
+	hashwrite_u8(f, 1);
+	hashwrite_u8(f, get_num_chunks(cf));
+	hashwrite_u8(f, oid_version(the_hash_algo));
+	hashwrite_u8(f, 0);
+}
+
+static void add_padding(struct hashfile *f, size_t len)
+{
+	size_t remainder = len % 4;
+	while (remainder && remainder < 4) {
+		hashwrite_u8(f, 0);
+		remainder++;
+	}
+}
+
+static int write_meta_chunk(struct hashfile *f, void *data)
+{
+	struct blame_tree_cache_writer *writer = data;
+	hashwrite_be32(f, writer->max_depth);
+	hashwrite_be32(f, padded(writer->pathspec_len));
+	hashwrite(f, writer->pathspec, writer->pathspec_len);
+	add_padding(f, writer->pathspec_len);
+
+	return 0;
+}
+
+static int write_commit_chunk(struct hashfile *f, void *data)
+{
+	struct blame_tree_cache_writer *writer = data;
+	hashwrite(f, writer->commit->object.oid.hash, the_hash_algo->rawsz);
+	return 0;
+}
+
+static int write_results_chunk(struct hashfile *f, void *data)
+{
+	struct blame_tree_cache_writer *writer = data;
+	struct blame_tree_cache_result *result = writer->results;
+	int remaining = writer->results_nr;
+
+	while (remaining) {
+		hashwrite(f, result->oid.hash, the_hash_algo->rawsz);
+		hashwrite_be32(f, result->pathlen);
+		hashwrite(f, result->path, result->pathlen);
+		add_padding(f, result->pathlen);
+		result++;
+		remaining--;
+	}
+
+	return 0;
+}
+
+static void write_btc(struct blame_tree_cache_writer *writer,
+		      struct hashfile *f, struct chunkfile *cf)
+{
+	size_t meta_len = 4 + 4 + padded(writer->pathspec_len);
+
+	add_chunk(cf, META_CHUNK, meta_len, write_meta_chunk);
+	add_chunk(cf, COMMIT_CHUNK, the_hash_algo->rawsz, write_commit_chunk);
+
+	if (writer->results_size)
+		add_chunk(cf, RESULTS_CHUNK, writer->results_size, write_results_chunk);
+
+	write_btc_header(f, cf);
+	write_chunkfile(cf, writer);
+	finalize_hashfile(f, NULL, FSYNC_COMPONENT_PACK_METADATA,
+			  CSUM_HASH_IN_STREAM | CSUM_FSYNC);
+}
+
+static char *get_cache_id(int max_depth, const char *pathspec)
+{
+	struct git_hash_ctx ctx;
+	unsigned char hash[GIT_MAX_RAWSZ];
+	struct strbuf input = STRBUF_INIT;
+	strbuf_addf(&input, "%d %s", max_depth, pathspec);
+
+	the_hash_algo->init_fn(&ctx);
+	the_hash_algo->update_fn(&ctx, input.buf, input.len);
+	the_hash_algo->final_fn(hash, &ctx);
+
+	strbuf_release(&input);
+	return xstrdup(hash_to_hex(hash));
+}
+
+static char *get_cache_filename(const char *object_dir, const char *cache_id)
+{
+	return xstrfmt("%s/info/blame-tree/%s.btc", object_dir, cache_id);
+}
+
+static int write_blame_tree_cache(struct repository *r,
+				  struct blame_tree_cache_writer *writer)
+{
+	struct lock_file lk = LOCK_INIT;
+	struct hashfile *f;
+	struct chunkfile *cf;
+	int res = 0;
+	char *cache_id = get_cache_id(writer->max_depth, writer->pathspec);
+	char *filename = get_cache_filename(r->objects->odb->path, cache_id);
+
+	if (safe_create_leading_directories(filename)) {
+		error(_("unable to create leading directories of %s"),
+			filename);
+		res = -1;
+		goto cleanup;
+	}
+
+	if (hold_lock_file_for_update_mode(&lk, filename,
+					   LOCK_REPORT_ON_ERROR, 0644) < 0) {
+		res = -1;
+		goto cleanup;
+	}
+
+	f = hashfd(lk.tempfile->fd, lk.tempfile->filename.buf);
+	cf = init_chunkfile(f);
+
+	write_btc(writer, f, cf);
+
+	free_chunkfile(cf);
+	commit_lock_file(&lk);
+
+cleanup:
+	free(cache_id);
+	free(filename);
+	return res;
 }
 
 struct blame_tree_entry {
@@ -176,8 +331,21 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 	if (bt->rev.diffopt.pathspec.nr == 1)
 		pathspec = bt->rev.diffopt.pathspec.items[0].original;
 
-	if (flags & BLAME_TREE_CACHE)
+	if (flags & BLAME_TREE_CACHE) {
 		CALLOC_ARRAY(bt->writer, 1);
+
+		if (bt->rev.pending.nr != 1) {
+			FREE_AND_NULL(bt->writer);
+			return;
+		}
+
+		bt->writer->commit = lookup_commit(bt->rev.repo,
+						   &bt->rev.pending.objects[0].item->oid);
+		bt->writer->pathspec = pathspec;
+		bt->writer->pathspec_len = strlen(pathspec);
+		bt->writer->results_alloc = 16;
+		ALLOC_ARRAY(bt->writer->results, bt->writer->results_alloc);
+	}
 }
 
 void blame_tree_release(struct blame_tree *bt)
@@ -186,6 +354,8 @@ void blame_tree_release(struct blame_tree *bt)
 	free(bt->all_paths);
 
 	if (bt->writer) {
+		write_blame_tree_cache(bt->rev.repo, bt->writer);
+
 		free(bt->writer->results);
 		FREE_AND_NULL(bt->writer);
 	}
