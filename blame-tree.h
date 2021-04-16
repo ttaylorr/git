@@ -15,15 +15,15 @@ struct blame_tree {
 	int all_paths_nr;
 };
 
-void blame_tree_init(struct blame_tree *,
+#define BLAME_TREE_CACHE (1 << 0)
+
+void blame_tree_init(struct blame_tree *, int flags,
 		     int argc, const char **argv, const char *prefix);
 void blame_tree_release(struct blame_tree *);
 
 typedef void (*blame_tree_callback)(const char *path,
 				    const struct commit *commit,
 				    void *data);
-int blame_tree_run(struct blame_tree *,
-		   blame_tree_callback cb,
-		   void *data);
+int blame_tree_run(struct blame_tree *);
 
 #endif /* BLAME_TREE_H */

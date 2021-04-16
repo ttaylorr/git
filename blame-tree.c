@@ -12,6 +12,27 @@
 #include "prio-queue.h"
 #include "commit-slab.h"
 #include "hex.h"
+#include "quote.h"
+
+/*
+ * This is the default blame-tree output. It is used when
+ * not writing to the blame-tree cache.
+ */
+static void show_entry(const char *path, const struct commit *commit, void *d)
+{
+	struct blame_tree *bt = d;
+
+	if (commit->object.flags & BOUNDARY)
+		putchar('^');
+	printf("%s\t", oid_to_hex(&commit->object.oid));
+
+	if (bt->rev.diffopt.line_termination)
+		write_name_quoted(path, stdout, '\n');
+	else
+		printf("%s%c", path, '\0');
+
+	fflush(stdout);
+}
 
 struct blame_tree_entry {
 	struct hashmap_entry hashent;
@@ -83,8 +104,8 @@ static int blame_tree_entry_hashcmp(const void *unused UNUSED,
 	return strcmp(e1->path, path ? path : e2->path);
 }
 
-void blame_tree_init(struct blame_tree *bt, int argc, const char **argv,
-		     const char *prefix)
+void blame_tree_init(struct blame_tree *bt, int flags,
+		     int argc, const char **argv, const char *prefix)
 {
 	struct hashmap_iter iter;
 	struct blame_tree_entry *e;
@@ -357,7 +378,7 @@ cleanup:
 	return ret;
 }
 
-int blame_tree_run(struct blame_tree *bt, blame_tree_callback cb, void *cbdata)
+int blame_tree_run(struct blame_tree *bt)
 {
 	int max_count, queue_popped = 0;
 	struct prio_queue queue = { compare_commits_by_gen_then_commit_date };
@@ -367,8 +388,8 @@ int blame_tree_run(struct blame_tree *bt, blame_tree_callback cb, void *cbdata)
 
 	data.paths = &bt->paths;
 	data.num_interesting = hashmap_get_size(&bt->paths);
-	data.callback = cb;
-	data.callback_data = cbdata;
+	data.callback = show_entry;
+	data.callback_data = bt;
 
 	bt->rev.diffopt.output_format = DIFF_FORMAT_CALLBACK;
 	bt->rev.diffopt.format_callback = blame_diff;
