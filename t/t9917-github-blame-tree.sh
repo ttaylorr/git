@@ -176,4 +176,23 @@ test_expect_success 'blame-tree succeeds on commit with empty tree' '
 	EOF
 '
 
+test_expect_success '--cache writes to a btc file' '
+	test_when_finished rm -rf .git/objects/info/blame-tree &&
+	git blame-tree --cache --max-depth=0 >out 2>err &&
+	test_must_be_empty out &&
+	test_must_be_empty err
+'
+
+test_expect_success '--cache writes to a btc file (extra details)' '
+	test_when_finished rm -rf .git/objects/info/blame-tree &&
+	git add a &&
+	git commit -m "add dir a" &&
+	echo new >a/new &&
+	git add a/new &&
+	git commit -m "add a/new" &&
+	git blame-tree --cache --max-depth=1 -- a >out 2>err &&
+	test_must_be_empty out &&
+	test_must_be_empty err
+'
+
 test_done
