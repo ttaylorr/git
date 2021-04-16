@@ -197,4 +197,28 @@ test_expect_success '--cache writes to a btc file (extra details)' '
 	test_must_be_empty err
 '
 
+test_expect_success 'blame-tree cache works across alternates' '
+	test_when_finished rm -rf .git/objects/info/blame-tree blame-tree &&
+	test_when_finished rm -f trace-* &&
+
+	git clone --shared . fork &&
+	git blame-tree --cache --max-depth=0 &&
+	GIT_TRACE2_PERF="$(pwd)/trace-0-base" \
+		git blame-tree --max-depth=0 >expect &&
+	GIT_TRACE2_PERF="$(pwd)/trace-0-fork" \
+		git -C fork blame-tree --max-depth=0 >actual &&
+	test_cmp expect actual &&
+	grep "cached-commit:true" trace-0-base &&
+	grep "cached-commit:true" trace-0-fork &&
+
+	git blame-tree --cache --max-depth=1 -- a &&
+	GIT_TRACE2_PERF="$(pwd)/trace-1-base" \
+		git blame-tree --max-depth=1 -- a >expect &&
+	GIT_TRACE2_PERF="$(pwd)/trace-1-fork" \
+		git -C fork blame-tree --max-depth=1 -- a >actual &&
+	test_cmp expect actual &&
+	grep "cached-commit:true" trace-1-base &&
+	grep "cached-commit:true" trace-1-fork
+'
+
 test_done

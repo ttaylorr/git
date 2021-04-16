@@ -8,6 +8,7 @@
 #include "bloom.h"
 
 struct blame_tree_cache_writer;
+struct blame_tree_cache_reader;
 
 struct blame_tree {
 	struct hashmap paths;
@@ -17,6 +18,7 @@ struct blame_tree {
 	int all_paths_nr;
 
 	struct blame_tree_cache_writer *writer;
+	struct blame_tree_cache_reader *reader;
 };
 
 #define BLAME_TREE_CACHE (1 << 0)

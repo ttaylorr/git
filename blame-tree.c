@@ -17,6 +17,7 @@
 #include "csum-file.h"
 #include "lockfile.h"
 #include "object-file.h"
+#include "trace2.h"
 
 /*
  * This is the default blame-tree output. It is used when
@@ -218,6 +219,107 @@ cleanup:
 	return res;
 }
 
+struct blame_tree_cache_reader {
+	const unsigned char *data;
+	size_t size;
+
+	int max_depth;
+	size_t pathspec_len;
+	const char *pathspec;
+
+	struct object_id oid;
+
+	int fd;
+	struct chunkfile *cf;
+};
+
+static int read_meta_chunk(const unsigned char *chunk_start, size_t chunk_size,
+			   void *data)
+{
+	struct blame_tree_cache_reader *reader = data;
+
+	if (chunk_size < 8) {
+		warning(_("blame-tree cache: META chunk is too small"));
+		return -1;
+	}
+
+	reader->max_depth = get_be32(chunk_start);
+	reader->pathspec_len = get_be32(chunk_start + 4);
+	reader->pathspec = (const char *)(chunk_start + 8);
+
+	return 0;
+}
+
+static int read_commit_chunk(const unsigned char *chunk_start, size_t chunk_size,
+			     void *data)
+{
+	struct blame_tree_cache_reader *reader = data;
+
+	if (chunk_size != the_hash_algo->rawsz) {
+		warning(_("blame-tree cache: COMMIT chunk is wrong size"));
+		return -1;
+	}
+
+	hashcpy(reader->oid.hash, chunk_start, the_hash_algo);
+	return 0;
+}
+
+static struct blame_tree_cache_reader *init_blame_tree_cache_reader(int fd, struct stat *st)
+{
+	struct blame_tree_cache_reader *reader;
+	size_t size = xsize_t(st->st_size);
+	int format;
+	unsigned char version, num_chunks, hash_version, unused;
+	const unsigned char *data;
+
+	if (size < 8) {
+		warning(_("blame-tree cache file is too short"));
+		return NULL;
+	}
+
+	data = xmmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+
+	format = get_be32(data);
+
+	if (format != BLAME_TREE_CACHE_FORMAT) {
+		warning(_("blame-tree cache file has incorrect header %08x"),
+			format);
+		goto fail;
+	}
+
+	version = *(data + 4);
+	num_chunks = *(data + 5);
+	hash_version = *(data + 6);
+	unused = *(data + 7);
+
+	if (version != 1 || hash_version != oid_version(the_hash_algo) || unused) {
+		warning(_("incompatible blame-tree header information"));
+		goto fail;
+	}
+
+	CALLOC_ARRAY(reader, 1);
+	reader->fd = fd;
+	reader->data = data;
+	reader->cf = init_chunkfile(NULL);
+	read_table_of_contents(reader->cf, data, size, 8, num_chunks, 1);
+
+	read_chunk(reader->cf, META_CHUNK, read_meta_chunk, reader);
+	read_chunk(reader->cf, COMMIT_CHUNK, read_commit_chunk, reader);
+
+	return reader;
+
+fail:
+	munmap((void *)data, size);
+	return NULL;
+}
+
+static void free_blame_tree_cache_reader(struct blame_tree_cache_reader *reader)
+{
+	munmap((void *)reader->data, reader->size);
+	free(reader->cf);
+	close(reader->fd);
+}
+
 struct blame_tree_entry {
 	struct hashmap_entry hashent;
 	struct object_id oid;
@@ -332,20 +434,45 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 	if (bt->rev.diffopt.pathspec.nr == 1)
 		pathspec = bt->rev.diffopt.pathspec.items[0].original;
 
+
 	if (flags & BLAME_TREE_CACHE) {
-		CALLOC_ARRAY(bt->writer, 1);
-
-		if (bt->rev.pending.nr != 1) {
-			FREE_AND_NULL(bt->writer);
+		if (bt->rev.pending.nr != 1)
 			return;
-		}
 
+		CALLOC_ARRAY(bt->writer, 1);
 		bt->writer->commit = lookup_commit(bt->rev.repo,
 						   &bt->rev.pending.objects[0].item->oid);
 		bt->writer->pathspec = pathspec;
 		bt->writer->pathspec_len = strlen(pathspec);
 		bt->writer->results_alloc = 16;
 		ALLOC_ARRAY(bt->writer->results, bt->writer->results_alloc);
+	} else {
+		/* look for a cache file */
+		struct object_directory *odb;
+		int fd = -1;
+		struct stat st;
+		char *cache_id = get_cache_id(bt->writer->max_depth, pathspec);
+		prepare_alt_odb(r);
+
+		for (odb = r->objects->odb; odb; odb = odb->next) {
+			char *filename = get_cache_filename(odb->path, cache_id);
+			fd = git_open(filename);
+
+			free(filename);
+
+			if (fd < 0)
+				continue;
+			if (fstat(fd, &st)) {
+				close(fd);
+				fd = -1;
+				continue;
+			} else {
+				break;
+			}
+		}
+
+		if (fd >= 0)
+			bt->reader = init_blame_tree_cache_reader(fd, &st);
 	}
 }
 
@@ -353,6 +480,11 @@ void blame_tree_release(struct blame_tree *bt)
 {
 	hashmap_clear_and_free(&bt->paths, struct blame_tree_entry, hashent);
 	free(bt->all_paths);
+
+	if (bt->reader) {
+		free_blame_tree_cache_reader(bt->reader);
+		FREE_AND_NULL(bt->reader);
+	}
 
 	if (bt->writer) {
 		write_blame_tree_cache(bt->rev.repo, bt->writer);
@@ -594,8 +726,61 @@ cleanup:
 	return ret;
 }
 
+struct read_cache_results_data {
+	struct blame_tree *bt;
+	struct commit_active_paths *active_c;
+	struct blame_tree_callback_data *data;
+};
+
+static int read_results_chunk(const unsigned char *chunk_start, size_t chunk_size,
+			      void *data)
+{
+	struct read_cache_results_data *read_data = data;
+	struct blame_tree *bt = read_data->bt;
+	struct commit_active_paths *active_c = read_data->active_c;
+	struct blame_tree_callback_data *cdata = read_data->data;
+	const unsigned char *chunk_end = chunk_start + chunk_size;
+	const unsigned char *cur_pos = chunk_start;
+
+	while (cur_pos < chunk_end) {
+		struct blame_tree_cache_result result;
+		struct blame_tree_entry *ent;
+
+		oidread(&result.oid, cur_pos, the_hash_algo);
+		cur_pos += the_hash_algo->rawsz;
+
+		result.pathlen = get_be32(cur_pos);
+		cur_pos += 4;
+
+		result.path = xstrndup((const char *)cur_pos, result.pathlen);
+		cur_pos += padded(result.pathlen);
+
+		/* check if this result should be emitted */
+		ent = hashmap_get_entry_from_hash(
+			&bt->paths, strhash(result.path), result.path,
+			struct blame_tree_entry, hashent);
+
+		if (!ent || !active_c->active[ent->diff_idx])
+			goto cleanup_result;
+
+		cdata->commit = lookup_commit(the_repository, &result.oid);
+		mark_path(result.path, NULL, cdata, 0);
+
+	cleanup_result:
+		free(result.path);
+	}
+
+	if (cur_pos > chunk_end) {
+		warning(_("blame-tree results table has wrong size"));
+		return -1;
+	}
+
+	return 0;
+}
+
 int blame_tree_run(struct blame_tree *bt)
 {
+	int found_cached_commit = 0;
 	int max_count, queue_popped = 0;
 	struct prio_queue queue = { compare_commits_by_gen_then_commit_date };
 	struct prio_queue not_queue = { compare_commits_by_gen_then_commit_date };
@@ -658,6 +843,21 @@ int blame_tree_run(struct blame_tree *bt)
 		struct commit_list *p;
 		struct commit *c = prio_queue_get(&queue);
 		struct commit_active_paths *active_c = active_paths_at(&active_paths, c);
+
+		if (bt->reader &&
+		    oideq(&c->object.oid, &bt->reader->oid)) {
+			struct read_cache_results_data results_data;
+
+			results_data.bt = bt;
+			results_data.active_c = active_c;
+			results_data.data = &data;
+
+			read_chunk(bt->reader->cf, RESULTS_CHUNK,
+				   read_results_chunk, &results_data);
+
+			found_cached_commit = 1;
+			goto cleanup;
+		}
 
 		if ((0 <= max_count && max_count < ++queue_popped) ||
 		    (c->object.flags & PARENT2)) {
@@ -724,6 +924,9 @@ cleanup:
 
 	clear_active_paths(&active_paths);
 	free(scratch);
+
+	trace2_data_string("blame-tree", bt->rev.repo, "cached-commit",
+			   found_cached_commit ? "true" : "false");
 
 	return 0;
 }
