@@ -944,8 +944,11 @@ cleanup:
 	clear_active_paths(&active_paths);
 	free(scratch);
 
-	trace2_data_string("blame-tree", bt->rev.repo, "cached-commit",
-			   found_cached_commit ? "true" : "false");
+	trace2_data_intmax("blame-tree", bt->rev.repo,
+			   found_cached_commit ?
+				"cached-commit-true.count" :
+				"cached-commit-false.count",
+			   1);
 
 	return 0;
 }

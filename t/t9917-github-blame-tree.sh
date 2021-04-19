@@ -208,8 +208,8 @@ test_expect_success 'blame-tree cache works across alternates' '
 	GIT_TRACE2_PERF="$(pwd)/trace-0-fork" \
 		git -C fork blame-tree --max-depth=0 >actual &&
 	test_cmp expect actual &&
-	grep "cached-commit:true" trace-0-base &&
-	grep "cached-commit:true" trace-0-fork &&
+	grep "cached-commit-true" trace-0-base &&
+	grep "cached-commit-true" trace-0-fork &&
 
 	git blame-tree --cache --max-depth=1 -- a &&
 	GIT_TRACE2_PERF="$(pwd)/trace-1-base" \
@@ -217,8 +217,8 @@ test_expect_success 'blame-tree cache works across alternates' '
 	GIT_TRACE2_PERF="$(pwd)/trace-1-fork" \
 		git -C fork blame-tree --max-depth=1 -- a >actual &&
 	test_cmp expect actual &&
-	grep "cached-commit:true" trace-1-base &&
-	grep "cached-commit:true" trace-1-fork
+	grep "cached-commit-true" trace-1-base &&
+	grep "cached-commit-true" trace-1-fork
 '
 
 test_expect_success 'test cache with unicode paths' '
