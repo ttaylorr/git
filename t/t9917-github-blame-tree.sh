@@ -287,4 +287,37 @@ test_expect_success 'timeout creates an empty cache file' '
 	test_line_count = 1 actual
 '
 
+test_expect_success 'modify multiple caches, with limit' '
+	test_when_finished rm -rf .git/objects/info/blame-tree blame-tree &&
+
+	git blame-tree --cache --max-depth=0 &&
+
+	file=$(ls -t .git/objects/info/blame-tree/*.btc) &&
+	test-tool chmtime =-100 "$file" &&
+
+	for i in $(test_seq 1 5)
+	do
+		cp -r a $i &&
+		git add $i &&
+		git commit -m "add $i" &&
+		git blame-tree --cache --max-depth=1 -- $i &&
+		file=$(ls -t .git/objects/info/blame-tree/*.btc | head -n 1) &&
+		backtime=$((i * 10)) &&
+		test-tool chmtime =-$backtime "$file" || return 1
+	done &&
+
+	ls -t .git/objects/info/blame-tree/ >before-all &&
+	tail -n 3 before-all >before-oldest &&
+	head -n 3 before-all >before-newest &&
+
+	git -c blameTree.maxWrites=2 blame-tree --update-cache HEAD &&
+
+	ls -t .git/objects/info/blame-tree/ >after-all &&
+	tail -n 3 after-all >after-oldest &&
+	head -n 3 after-all >after-newest &&
+
+	test_cmp before-oldest after-newest &&
+	test_cmp before-newest after-oldest
+'
+
 test_done

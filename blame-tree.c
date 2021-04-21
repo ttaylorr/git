@@ -1024,7 +1024,8 @@ static int call_blame_tree_cache(int max_depth, const char *pathspec,
 	return run_command(&cmd);
 }
 
-static int update_cache(const char *filename, const char *revision)
+static int update_cache(const char *filename, const char *revision,
+			int *updated)
 {
 	int res = 0;
 	int max_depth;
@@ -1052,13 +1053,34 @@ static int update_cache(const char *filename, const char *revision)
 	free_blame_tree_cache_reader(reader);
 
 	/* max_depth=0 with root pathspec is handled separately */
-	if (reader->max_depth)
+	if (reader->max_depth) {
 		res = call_blame_tree_cache(max_depth,
 					    pathspec,
 					    revision);
+		*updated = 1;
+	} else {
+		*updated = 0;
+	}
 
 	free(pathspec);
 	return res;
+}
+
+struct path_and_mtime {
+	char *name;
+	time_t mtime;
+};
+
+static int compare_mtime(const void *a_, const void *b_)
+{
+	const struct path_and_mtime *a = a_;
+	const struct path_and_mtime *b = b_;
+
+	if (a->mtime < b->mtime)
+		return -1;
+	else if (a->mtime == b->mtime)
+		return 0;
+	return 1;
 }
 
 /*
@@ -1068,13 +1090,18 @@ static int update_cache(const char *filename, const char *revision)
 int update_blame_tree_caches(const char *revision)
 {
 	struct repository *r = the_repository;
-	int res = 0;
+	size_t i, res = 0;
 	struct strbuf path = STRBUF_INIT;
 	size_t dirlen;
 	DIR *dir;
 	struct dirent *de;
+	int write_count = 0, max_writes = 10;
+	struct path_and_mtime *list;
+	size_t list_nr = 0, list_alloc = 16;
 
 	trace2_region_enter("blame-tree", "update-caches", r);
+
+	git_config_get_int("blametree.maxwrites", &max_writes);
 
 	/* update the root by default */
 	call_blame_tree_cache(0, NULL, revision);
@@ -1090,15 +1117,49 @@ int update_blame_tree_caches(const char *revision)
 	strbuf_addch(&path, '/');
 	dirlen = path.len;
 
+	ALLOC_ARRAY(list, list_alloc);
 	while (!res && (de = readdir(dir)) != NULL) {
+		struct stat st;
 		if (is_dot_or_dotdot(de->d_name))
 			continue;
 
 		strbuf_setlen(&path, dirlen);
 		strbuf_addstr(&path, de->d_name);
 
-		res = update_cache(path.buf, revision);
+		if (stat(path.buf, &st))
+			continue;
+
+		ALLOC_GROW(list, list_nr + 1, list_alloc);
+		list[list_nr].name = xstrdup(de->d_name);
+		list[list_nr].mtime = st.st_mtime;
+		list_nr++;
 	}
+
+	QSORT(list, list_nr, compare_mtime);
+
+	for (i = 0; i < list_nr && write_count < max_writes; i++) {
+		int updated = 0;
+
+		strbuf_setlen(&path, dirlen);
+		strbuf_addstr(&path, list[i].name);
+
+		res = update_cache(path.buf, revision, &updated);
+
+		/*
+		 * Clear the cache if there are problems, so
+		 * we don't end up in a spiral of bad files
+		 */
+		if (res) {
+			warning(_("error while computing cache file '%s'"),
+				list[i].name);
+			unlink(path.buf);
+		}
+
+		write_count += updated;
+	}
+	for (i = 0; i < list_nr; i++)
+		free(list[i].name);
+	free(list);
 
 	closedir(dir);
 	strbuf_release(&path);
