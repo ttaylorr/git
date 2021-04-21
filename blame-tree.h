@@ -19,6 +19,8 @@ struct blame_tree {
 
 	struct blame_tree_cache_writer *writer;
 	struct blame_tree_cache_reader *reader;
+
+	clock_t goal_end_time;
 };
 
 #define BLAME_TREE_WRITE_CACHE	(1 << 0)

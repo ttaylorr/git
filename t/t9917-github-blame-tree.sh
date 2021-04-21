@@ -273,4 +273,18 @@ test_expect_success '--update-cache populates all cache files' '
 	done
 '
 
+test_expect_success 'timeout creates an empty cache file' '
+	test_when_finished rm -rf .git/objects/info/blame-tree blame-tree &&
+
+	# Root directory skips the auto-cache.
+	git -c blameTree.limitMilliseconds=0 \
+		blame-tree --max-depth=0 HEAD &&
+	test_path_is_missing .git/objects/info/blame-tree &&
+
+	git -c blameTree.limitMilliseconds=0 \
+		blame-tree --max-depth=1 HEAD -- a &&
+	ls .git/objects/info/blame-tree/*.btc >actual &&
+	test_line_count = 1 actual
+'
+
 test_done

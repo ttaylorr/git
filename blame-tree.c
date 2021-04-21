@@ -21,6 +21,7 @@
 #include "strvec.h"
 #include "run-command.h"
 #include "path.h"
+#include "config.h"
 
 /*
  * This is the default blame-tree output. It is used when
@@ -131,7 +132,10 @@ static int write_meta_chunk(struct hashfile *f, void *data)
 static int write_commit_chunk(struct hashfile *f, void *data)
 {
 	struct blame_tree_cache_writer *writer = data;
-	hashwrite(f, writer->commit->object.oid.hash, the_hash_algo->rawsz);
+	if (writer->commit)
+		hashwrite(f, writer->commit->object.oid.hash, the_hash_algo->rawsz);
+	else
+		hashwrite(f, null_oid()->hash, the_hash_algo->rawsz);
 	return 0;
 }
 
@@ -225,6 +229,30 @@ cleanup:
 	free(cache_id);
 	free(filename);
 	return res;
+}
+
+static void write_placeholder_cache_file(struct blame_tree *bt)
+{
+	struct repository *r = bt->rev.repo;
+	struct blame_tree_cache_writer writer;
+
+	/*
+	 * Cache does not support multiple pathspecs.
+	 * No pathspec means the root tree, which is
+	 * automatically cached.
+	 */
+	if (bt->rev.diffopt.pathspec.nr != 1)
+		return;
+
+	memset(&writer, 0, sizeof(writer));
+
+	writer.pathspec = bt->rev.diffopt.pathspec.items[0].original;
+	writer.max_depth = bt->rev.diffopt.max_depth;
+
+	bt->goal_end_time = 0;
+	if (write_blame_tree_cache(r, &writer))
+		warning(_("failed to create placeholder for pathspec '%s'"),
+			writer.pathspec);
 }
 
 struct blame_tree_cache_reader {
@@ -405,6 +433,7 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 	struct hashmap_iter iter;
 	struct blame_tree_entry *e;
 	const char *pathspec = "";
+	int limit_millis = 1000;
 
 	memset(bt, 0, sizeof(*bt));
 	hashmap_init(&bt->paths, blame_tree_entry_hashcmp, NULL, 0);
@@ -495,12 +524,27 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 		if (fd >= 0)
 			bt->reader = init_blame_tree_cache_reader(fd, &st);
 	}
+
+	/*
+	 * In the case that we did not find a cache file,
+	 * determine a maximum window of time before we
+	 * should write one of our own as a helper.
+	 */
+	if (!bt->reader &&
+	    bt->rev.diffopt.pathspec.nr == 1) {
+		repo_config_get_int(r, "blametree.limitmilliseconds", &limit_millis);
+		bt->goal_end_time = clock() + (CLOCKS_PER_SEC * limit_millis) / 1000;
+	}
 }
 
 void blame_tree_release(struct blame_tree *bt)
 {
 	hashmap_clear_and_free(&bt->paths, struct blame_tree_entry, hashent);
 	free(bt->all_paths);
+
+	if (bt->goal_end_time &&
+	    clock() > bt->goal_end_time)
+		write_placeholder_cache_file(bt);
 
 	if (bt->reader) {
 		free_blame_tree_cache_reader(bt->reader);
@@ -803,6 +847,7 @@ int blame_tree_run(struct blame_tree *bt)
 {
 	int found_cached_commit = 0;
 	int max_count, queue_popped = 0;
+	int loop_count = 0, clock_check_rate = 100;
 	struct prio_queue queue = { compare_commits_by_gen_then_commit_date };
 	struct prio_queue not_queue = { compare_commits_by_gen_then_commit_date };
 	struct blame_tree_callback_data data;
@@ -864,6 +909,18 @@ int blame_tree_run(struct blame_tree *bt)
 		struct commit_list *p;
 		struct commit *c = prio_queue_get(&queue);
 		struct commit_active_paths *active_c = active_paths_at(&active_paths, c);
+
+		/*
+		 * Check during the loop to ensure we write even if the
+		 * process is killed due to a timeout.
+		 */
+		if (bt->goal_end_time &&
+		    ++loop_count >= clock_check_rate) {
+			loop_count = 0;
+
+			if (clock() > bt->goal_end_time)
+				write_placeholder_cache_file(bt);
+		}
 
 		if (bt->reader &&
 		    oideq(&c->object.oid, &bt->reader->oid)) {
