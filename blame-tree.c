@@ -499,14 +499,13 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 	if (!(flags & BLAME_TREE_SKIP_CACHE)) {
 		/* look for a cache file */
 		struct object_directory *odb;
-		int fd = -1;
 		struct stat st;
 		char *cache_id = get_cache_id(bt->writer->max_depth, pathspec);
 		prepare_alt_odb(r);
 
 		for (odb = r->objects->odb; odb; odb = odb->next) {
 			char *filename = get_cache_filename(odb->path, cache_id);
-			fd = git_open(filename);
+			int fd = git_open(filename);
 
 			free(filename);
 
@@ -517,12 +516,10 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 				fd = -1;
 				continue;
 			} else {
+				bt->reader = init_blame_tree_cache_reader(fd, &st);
 				break;
 			}
 		}
-
-		if (fd >= 0)
-			bt->reader = init_blame_tree_cache_reader(fd, &st);
 	}
 
 	/*
