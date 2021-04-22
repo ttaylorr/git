@@ -454,7 +454,7 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 		pathspec = bt->rev.diffopt.pathspec.items[0].original;
 
 
-	if (flags & BLAME_TREE_CACHE) {
+	if (flags & BLAME_TREE_WRITE_CACHE) {
 		if (bt->rev.pending.nr != 1)
 			return;
 

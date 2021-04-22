@@ -47,7 +47,7 @@ int cmd_blame_tree(int argc, const char **argv, const char *prefix,
 	}
 
 	if (write_to_cache)
-		flags |= BLAME_TREE_CACHE;
+		flags |= BLAME_TREE_WRITE_CACHE;
 
 	repo_config(repo, git_default_config, NULL);
 

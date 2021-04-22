@@ -21,7 +21,7 @@ struct blame_tree {
 	struct blame_tree_cache_reader *reader;
 };
 
-#define BLAME_TREE_CACHE (1 << 0)
+#define BLAME_TREE_WRITE_CACHE	(1 << 0)
 
 void blame_tree_init(struct blame_tree *, int flags,
 		     int argc, const char **argv, const char *prefix);
