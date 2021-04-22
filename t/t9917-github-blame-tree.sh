@@ -197,6 +197,21 @@ test_expect_success '--cache writes to a btc file (extra details)' '
 	test_must_be_empty err
 '
 
+test_expect_success 'blame-tree cache is used during write' '
+	test_when_finished rm -rf .git/objects/info/blame-tree blame-tree &&
+	test_when_finished rm -f trace-* &&
+
+	git blame-tree --cache --max-depth=0 HEAD~1 &&
+	GIT_TRACE2_PERF="$(pwd)/trace-reads-cache" \
+		git blame-tree --cache --max-depth=0 HEAD &&
+	grep "cached-commit-true" trace-reads-cache &&
+
+	GIT_TRACE2_PERF="$(pwd)/trace-skips-cache" \
+		git -c blameTree.skipReadCache=true \
+		blame-tree --cache --max-depth=0 HEAD &&
+	grep "cached-commit-false" trace-skips-cache
+'
+
 test_expect_success 'blame-tree cache works across alternates' '
 	test_when_finished rm -rf .git/objects/info/blame-tree blame-tree &&
 	test_when_finished rm -f trace-* &&

@@ -19,7 +19,7 @@ int cmd_blame_tree(int argc, const char **argv, const char *prefix,
 	int flags = 0;
 	int write_to_cache = 0;
 	int update_cache = 0;
-	int i;
+	int i, skip_read_cache = 0;
 
 	if (argc == 2 && !strcmp(argv[1], "-h"))
 		usage(blame_tree_usage[0]);
@@ -50,6 +50,10 @@ int cmd_blame_tree(int argc, const char **argv, const char *prefix,
 		flags |= BLAME_TREE_WRITE_CACHE;
 
 	repo_config(repo, git_default_config, NULL);
+
+	if (!repo_config_get_bool(repo, "blametree.skipreadcache",
+				  &skip_read_cache) && skip_read_cache)
+		flags |= BLAME_TREE_SKIP_CACHE;
 
 	blame_tree_init(&bt, flags, argc, argv, prefix);
 	if (blame_tree_run(&bt) < 0)

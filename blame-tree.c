@@ -465,7 +465,9 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 		bt->writer->pathspec_len = strlen(pathspec);
 		bt->writer->results_alloc = 16;
 		ALLOC_ARRAY(bt->writer->results, bt->writer->results_alloc);
-	} else {
+	}
+
+	if (!(flags & BLAME_TREE_SKIP_CACHE)) {
 		/* look for a cache file */
 		struct object_directory *odb;
 		int fd = -1;
