@@ -482,11 +482,7 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 	if (bt->rev.diffopt.pathspec.nr == 1)
 		pathspec = bt->rev.diffopt.pathspec.items[0].original;
 
-
 	if (flags & BLAME_TREE_WRITE_CACHE) {
-		if (bt->rev.pending.nr != 1)
-			return;
-
 		CALLOC_ARRAY(bt->writer, 1);
 		bt->writer->commit = lookup_commit(bt->rev.repo,
 						   &bt->rev.pending.objects[0].item->oid);
