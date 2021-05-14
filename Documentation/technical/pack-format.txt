@@ -294,6 +294,28 @@ Pack file entry: <+
 
 All 4-byte numbers are in network order.
 
+== pack-*.mtimes files have the format:
+
+  - A 4-byte magic number '0x4d544d45' ('MTME').
+
+  - A 4-byte version identifier (= 1).
+
+  - A 4-byte hash function identifier (= 1 for SHA-1, 2 for SHA-256).
+
+  - A table of mtimes (one per packed object, num_objects in total, each
+    a 4-byte unsigned integer in network order), in the same order as
+    objects appear in the index file (e.g., the first entry in the mtime
+    table corresponds to the object with the lowest lexically-sorted
+    oid). The mtimes count standard epoch seconds.
+
+  - A trailer, containing a:
+
+    checksum of the corresponding packfile, and
+
+    a checksum of all of the above.
+
+All 4-byte numbers are in network order.
+
 == multi-pack-index (MIDX) files have the following format:
 
 The multi-pack-index files refer to multiple pack-files and loose objects.
