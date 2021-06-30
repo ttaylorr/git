@@ -27,6 +27,7 @@ struct bitmap_disk_header {
 enum pack_bitmap_opts {
 	BITMAP_OPT_FULL_DAG = 1,
 	BITMAP_OPT_HASH_CACHE = 4,
+	BITMAP_OPT_LOOKUP_TABLE = 16,
 };
 
 enum pack_bitmap_flags {
