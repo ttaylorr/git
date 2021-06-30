@@ -618,7 +618,8 @@ static const struct object_id *oid_access(size_t pos, const void *table)
 
 static void write_selected_commits_v1(struct hashfile *f,
 				      struct pack_idx_entry **index,
-				      uint32_t index_nr)
+				      uint32_t index_nr,
+				      off_t *offsets)
 {
 	int i;
 
@@ -631,12 +632,60 @@ static void write_selected_commits_v1(struct hashfile *f,
 		if (commit_pos < 0)
 			BUG("trying to write commit not in index");
 
+		if (offsets)
+			offsets[i] = hashfile_total(f);
+
 		hashwrite_be32(f, commit_pos);
 		hashwrite_u8(f, stored->xor_offset);
 		hashwrite_u8(f, stored->flags);
 
 		dump_bitmap(f, stored->write_as);
 	}
+}
+
+static int table_cmp(const void *_va, const void *_vb)
+{
+	return oidcmp(&writer.selected[*(uint32_t*)_va].commit->object.oid,
+		      &writer.selected[*(uint32_t*)_vb].commit->object.oid);
+}
+
+static void write_lookup_table(struct hashfile *f,
+			       struct pack_idx_entry **index,
+			       off_t *offsets,
+			       uint32_t index_nr)
+{
+	uint32_t i;
+	uint32_t flags = 0;
+	uint32_t *table, *table_inv;
+
+	ALLOC_ARRAY(table, writer.selected_nr);
+	ALLOC_ARRAY(table_inv, writer.selected_nr);
+
+	for (i = 0; i < writer.selected_nr; i++)
+		table[i] = i;
+	QSORT(table, writer.selected_nr, table_cmp);
+	for (i = 0; i < writer.selected_nr; i++)
+		table_inv[table[i]] = i;
+
+	for (i = 0; i < writer.selected_nr; i++) {
+		struct bitmapped_commit *selected = &writer.selected[table[i]];
+		struct object_id *oid = &selected->commit->object.oid;
+
+		hashwrite(f, oid->hash, the_hash_algo->rawsz);
+	}
+	for (i = 0; i < writer.selected_nr; i++) {
+		struct bitmapped_commit *selected = &writer.selected[table[i]];
+
+		hashwrite_be32(f, offsets[table[i]]);
+		hashwrite_be32(f, selected->xor_offset
+			       ? table_inv[table[i] - selected->xor_offset]
+			       : 0xffffffff);
+	}
+
+	hashwrite_be32(f, flags);
+
+	free(table);
+	free(table_inv);
 }
 
 static void write_hash_cache(struct hashfile *f,
@@ -663,6 +712,7 @@ void bitmap_writer_finish(struct pack_idx_entry **index,
 {
 	static uint16_t default_version = 1;
 	static uint16_t flags = BITMAP_OPT_FULL_DAG;
+	off_t *offsets = NULL;
 	struct strbuf tmp_file = STRBUF_INIT;
 	struct hashfile *f;
 
@@ -683,8 +733,14 @@ void bitmap_writer_finish(struct pack_idx_entry **index,
 	dump_bitmap(f, writer.trees);
 	dump_bitmap(f, writer.blobs);
 	dump_bitmap(f, writer.tags);
-	write_selected_commits_v1(f, index, index_nr);
 
+	if (options & BITMAP_OPT_LOOKUP_TABLE)
+		CALLOC_ARRAY(offsets, index_nr);
+
+	write_selected_commits_v1(f, index, index_nr, offsets);
+
+	if (options & BITMAP_OPT_LOOKUP_TABLE)
+		write_lookup_table(f, index, offsets, index_nr);
 	if (options & BITMAP_OPT_HASH_CACHE)
 		write_hash_cache(f, index, index_nr);
 
@@ -697,4 +753,5 @@ void bitmap_writer_finish(struct pack_idx_entry **index,
 		die_errno("unable to rename temporary bitmap file to '%s'", filename);
 
 	strbuf_release(&tmp_file);
+	free(offsets);
 }
