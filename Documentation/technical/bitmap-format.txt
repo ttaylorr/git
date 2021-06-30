@@ -162,3 +162,26 @@ Note that this hashing scheme is tied to the BITMAP_OPT_HASH_CACHE flag.
 If implementations want to choose a different hashing scheme, they are
 free to do so, but MUST allocate a new header flag (because comparing
 hashes made under two different schemes would be pointless).
+
+Commit lookup table
+-------------------
+
+If the BITMAP_OPT_LOOKUP_TABLE flag is set, the end of the `.bitmap`
+contains a lookup table specifying the positions of commits which have a
+bitmap.
+
+For a `.bitmap` contianing `nr_entries` reachability bitmaps, the format
+is as follows:
+
+	- `nr_entries` object names.
+
+	- `nr_entries` pairs of 4-byte integers, each in network order.
+	  The first holds the offset from which that commit's bitmap can
+	  be read. The second number holds the position of the commit
+	  whose bitmap the current bitmap is xor'd with in lexicographic
+	  order, or 0xffffffff if the current commit is not xor'd with
+	  anything.
+
+	- One 4-byte network byte order integer specifying
+	  table-specific flags. None exist currently, so this is always
+	  "0".
