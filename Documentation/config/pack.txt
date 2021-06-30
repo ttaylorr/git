@@ -149,6 +149,13 @@ pack.writeBitmapHashCache::
 	pushed since the last gc). The downside is that it consumes 4
 	bytes per object of disk space. Defaults to true.
 
+pack.writeBitmapLookupTable::
+	When true, git will include a "lookup table" section in the
+	bitmap index (if one is written). This table is used to defer
+	loading individual bitmaps as late as possible. This can be
+	beneficial in repositories which have relatively large bitmap
+	indexes. Defaults to false.
+
 pack.writeReverseIndex::
 	When true, git will write a corresponding .rev file (see:
 	link:../technical/pack-format.html[Documentation/technical/pack-format.txt])
