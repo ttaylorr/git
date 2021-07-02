@@ -176,7 +176,8 @@ static int load_bitmap_header(struct bitmap_index *index)
 			index_end -= cache_size;
 		}
 
-		if (flags & BITMAP_OPT_LOOKUP_TABLE) {
+		if (flags & BITMAP_OPT_LOOKUP_TABLE &&
+		    git_env_bool("GIT_READ_COMMIT_TABLE", 1)) {
 			uint32_t entry_count = ntohl(header->entry_count);
 			uint32_t table_size =
 				(entry_count * the_hash_algo->rawsz) /* oids */ +
