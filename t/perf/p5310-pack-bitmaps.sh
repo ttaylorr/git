@@ -9,10 +9,11 @@ test_perf_large_repo
 # since we want to be able to compare bitmap-aware
 # git versus non-bitmap git
 #
-# We intentionally use the deprecated pack.writebitmaps
+# We intentionally use the deprecated pack.writeBitmaps
 # config so that we can test against older versions of git.
 test_expect_success 'setup bitmap config' '
-	git config pack.writebitmaps true
+	git config pack.writeBitmaps true &&
+	git config pack.writeReverseIndex true
 '
 
 # we need to create the tag up front such that it is covered by the repack and
