@@ -42,6 +42,10 @@ test_perf 'pack to file (bitmap)' '
 	git pack-objects --use-bitmap-index --all pack1b </dev/null >/dev/null
 '
 
+test_perf 'rev-list (single commit)' '
+	git rev-list --use-bitmap-index HEAD >/dev/null
+'
+
 test_perf 'rev-list (commits)' '
 	git rev-list --all --use-bitmap-index >/dev/null
 '
