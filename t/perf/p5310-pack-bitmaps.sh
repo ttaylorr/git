@@ -54,6 +54,22 @@ test_perf 'rev-list (objects)' '
 	git rev-list --all --use-bitmap-index --objects >/dev/null
 '
 
+test_perf 'repack to disk (lookup table)' '
+	git -c pack.writeBitmapLookupTable repack -ad
+'
+
+test_perf 'rev-list (lookup table, single commit)' '
+	git rev-list --use-bitmap-index HEAD >/dev/null
+'
+
+test_perf 'rev-list (lookup table, commits)' '
+	git rev-list --all --use-bitmap-index >/dev/null
+'
+
+test_perf 'rev-list (lookup table, objects)' '
+	git rev-list --all --use-bitmap-index --objects >/dev/null
+'
+
 test_perf 'rev-list with tag negated via --not --all (objects)' '
 	git rev-list perf-tag --not --all --use-bitmap-index --objects >/dev/null
 '
