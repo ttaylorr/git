@@ -1971,9 +1971,22 @@ static int freshen_loose_object(const struct object_id *oid)
 	return check_and_freshen(oid, 1);
 }
 
+static int can_freshen_packs = -1;
+static int get_can_freshen_packs(void)
+{
+	 if (can_freshen_packs < 0) {
+		if (git_config_get_bool("core.freshenpackfiles",
+					&can_freshen_packs))
+			can_freshen_packs = 1;
+	 }
+	 return can_freshen_packs;
+}
+
 static int freshen_packed_object(const struct object_id *oid)
 {
 	struct pack_entry e;
+	if (!get_can_freshen_packs())
+		return 0;
 	if (!find_pack_entry(the_repository, oid, &e))
 		return 0;
 	if (e.p->freshened)
