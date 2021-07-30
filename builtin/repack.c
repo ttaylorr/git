@@ -607,10 +607,17 @@ static int write_cruft_pack(const struct pack_objects_args *args,
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	struct strbuf line = STRBUF_INIT;
 	struct string_list_item *item;
+	struct pack_objects_args po_args;
 	FILE *in, *out;
 	int ret;
 
-	prepare_pack_objects(&cmd, args);
+	/*
+	 * NEEDSWORK: these should be configurable; but let pack-objects use the
+	 * defaults.
+	 */
+	memcpy(&po_args, args, sizeof(struct pack_objects_args));
+	po_args.window = "10";
+	prepare_pack_objects(&cmd, &po_args);
 
 	strvec_push(&cmd.args, "--cruft");
 	if (cruft_expiration)
