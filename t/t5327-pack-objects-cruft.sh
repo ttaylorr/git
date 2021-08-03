@@ -429,4 +429,33 @@ test_expect_success 'cruft packs are not included in geometric repack' '
 	)
 '
 
+test_expect_success 'MIDX bitmaps tolerate reachable cruft objects' '
+	git init repo &&
+	test_when_finished "rm -fr repo" &&
+	(
+		cd repo &&
+
+		test_commit reachable &&
+		test_commit cruft &&
+		unreachable="$(git rev-parse cruft)" &&
+
+		git reset --hard $unreachable^ &&
+		git tag -d cruft &&
+		rm -fr .git/logs &&
+
+		git repack --cruft -d &&
+
+		# resurrect the unreachable object via a new commit. the
+		# new commit will get selected for a bitmap, but be
+		# missing one of its parents from the selected packs.
+		git reset --hard $unreachable &&
+		test_commit resurrect &&
+
+		test_must_fail git repack --write-midx \
+			--write-bitmap-index --geometric=2 -d 2>err &&
+		grep full.closure err &&
+		grep $unreachable err
+	)
+'
+
 test_done
