@@ -451,10 +451,7 @@ test_expect_success 'MIDX bitmaps tolerate reachable cruft objects' '
 		git reset --hard $unreachable &&
 		test_commit resurrect &&
 
-		test_must_fail git repack --write-midx \
-			--write-bitmap-index --geometric=2 -d 2>err &&
-		grep full.closure err &&
-		grep $unreachable err
+		git repack --write-midx --write-bitmap-index --geometric=2 -d
 	)
 '
 
