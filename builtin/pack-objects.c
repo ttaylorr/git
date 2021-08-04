@@ -3489,6 +3489,7 @@ static void read_cruft_objects(void)
 	revs.include_check = cruft_include_check;
 	revs.include_check_obj = cruft_include_check_obj;
 
+	revs.ignore_missing_links = 1;
 	ignore_packed_keep_in_core = 1;
 
 	while (strbuf_getline(&buf, stdin) != EOF) {
