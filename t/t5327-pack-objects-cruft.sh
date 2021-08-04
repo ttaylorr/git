@@ -476,4 +476,27 @@ test_expect_success 'MIDX bitmaps tolerate reachable cruft objects' '
 	)
 '
 
+test_expect_success 'cruft packs tolerate missing objects' '
+	git init repo &&
+	test_when_finished "rm -fr repo" &&
+	(
+		cd repo &&
+
+		test_commit reachable &&
+		test_commit cruft &&
+
+		tree="$(git rev-parse cruft^{tree})" &&
+
+		git reset --hard reachable &&
+		git tag -d cruft &&
+		rm -fr .git/logs &&
+
+		# remove the unreachable tree, but leave the commit
+		# which has it as its root tree in-tact
+		rm -fr "$objdir/$(test_oid_to_path "$tree")" &&
+
+		git repack --cruft -d
+	)
+'
+
 test_done
