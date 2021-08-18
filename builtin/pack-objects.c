@@ -3472,6 +3472,20 @@ static void mark_pack_kept_in_core(struct string_list *packs, unsigned keep)
 	}
 }
 
+static void add_unreachable_loose_objects(void);
+static void add_objects_in_unpacked_packs(void);
+
+static void enumerate_cruft_objects(void)
+{
+	if (progress)
+		progress_state = start_progress(_("Enumerating cruft objects"), 0);
+
+	add_objects_in_unpacked_packs();
+	add_unreachable_loose_objects();
+
+	stop_progress(&progress_state);
+}
+
 static void enumerate_and_traverse_cruft_objects(struct string_list *fresh_packs)
 {
 	struct packed_git *p;
@@ -3566,7 +3580,10 @@ static void read_cruft_objects(void)
 	mark_pack_kept_in_core(&fresh_packs, 1);
 	mark_pack_kept_in_core(&discard_packs, 0);
 
-	enumerate_and_traverse_cruft_objects(&fresh_packs);
+	if (cruft_expiration)
+		enumerate_and_traverse_cruft_objects(&fresh_packs);
+	else
+		enumerate_cruft_objects();
 
 	strbuf_release(&buf);
 	string_list_clear(&discard_packs, 0);
@@ -3705,7 +3722,24 @@ static int add_object_in_unpacked_pack(const struct object_id *oid,
 				       uint32_t pos,
 				       void *_data)
 {
-	add_object_entry(oid, OBJ_NONE, "", 0);
+	if (cruft) {
+		off_t offset;
+		time_t mtime;
+
+		if (pack->is_cruft) {
+			if (load_pack_mtimes(pack) < 0)
+				die(_("could not load cruft pack .mtimes"));
+			mtime = nth_packed_mtime(pack, pos);
+		} else {
+			mtime = pack->mtime;
+		}
+		offset = nth_packed_object_offset(pack, pos);
+
+		add_cruft_object_entry(oid, OBJ_NONE, pack, offset,
+				       NULL, mtime);
+	} else {
+		add_object_entry(oid, OBJ_NONE, "", 0);
+	}
 	return 0;
 }
 
@@ -3729,7 +3763,19 @@ static int add_loose_object(const struct object_id *oid, const char *path,
 		return 0;
 	}
 
-	add_object_entry(oid, type, "", 0);
+	if (cruft) {
+		struct stat st;
+		if (stat(path, &st) < 0) {
+			if (errno == ENOENT)
+				return 0;
+			return error_errno("unable to stat %s", oid_to_hex(oid));
+		}
+
+		add_cruft_object_entry(oid, type, NULL, 0, NULL,
+				       st.st_mtime);
+	} else {
+		add_object_entry(oid, type, "", 0);
+	}
 	return 0;
 }
 
