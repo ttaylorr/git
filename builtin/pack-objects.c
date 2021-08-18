@@ -3412,6 +3412,22 @@ static int add_cruft_object_entry(const struct object_id *oid, enum object_type 
 	} else {
 		if (!want_object_in_pack(oid, 0, &pack, &offset))
 			return 0;
+		if (!pack && type == OBJ_BLOB && !has_loose_object(oid)) {
+			/*
+			 * If a traversed tree has a missing blob then we want
+			 * to avoid adding that missing object to our pack.
+			 *
+			 * This only applies to missing blobs, not trees,
+			 * because the traversal needs to parse sub-trees but
+			 * not blobs.
+			 *
+			 * Note we only perform this check when we couldn't
+			 * already find the object in a pack, so we're really
+			 * limited to "ensure non-tip blobs which don't exist in
+			 * packs do exist via loose objects". Confused?
+			 */
+			return 0;
+		}
 
 		entry = create_object_entry(oid, type, pack_name_hash(name),
 					    0, name && no_try_delta(name),

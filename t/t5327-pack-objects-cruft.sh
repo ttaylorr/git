@@ -476,7 +476,7 @@ test_expect_success 'MIDX bitmaps tolerate reachable cruft objects' '
 	)
 '
 
-test_expect_success 'cruft packs tolerate missing objects' '
+test_expect_success 'cruft packs tolerate missing trees' '
 	git init repo &&
 	test_when_finished "rm -fr repo" &&
 	(
@@ -496,6 +496,29 @@ test_expect_success 'cruft packs tolerate missing objects' '
 		rm -fr "$objdir/$(test_oid_to_path "$tree")" &&
 
 		git repack --cruft -d
+	)
+'
+
+test_expect_success 'cruft packs tolerate missing blobs' '
+	git init repo &&
+	test_when_finished "rm -fr repo" &&
+	(
+		cd repo &&
+
+		test_commit reachable &&
+		test_commit cruft &&
+
+		blob="$(git rev-parse cruft:cruft.t)" &&
+
+		git reset --hard reachable &&
+		git tag -d cruft &&
+		rm -fr .git/logs &&
+
+		# remove the unreachable blob, but leave the commit (and
+		# the root tree of that commit) in-tact
+		rm -fr "$objdir/$(test_oid_to_path "$blob")" &&
+
+		git repack --cruft --cruft-expiration=2.weeks.ago -d
 	)
 '
 
