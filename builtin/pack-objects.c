@@ -3472,13 +3472,11 @@ static void mark_pack_kept_in_core(struct string_list *packs, unsigned keep)
 	}
 }
 
-static void read_cruft_objects(void)
+static void enumerate_and_traverse_cruft_objects(struct string_list *fresh_packs)
 {
-	struct rev_info revs;
-	struct strbuf buf = STRBUF_INIT;
-	struct string_list discard_packs = STRING_LIST_INIT_DUP;
-	struct string_list fresh_packs = STRING_LIST_INIT_DUP;
 	struct packed_git *p;
+	struct rev_info revs;
+	int ret;
 
 	repo_init_revisions(the_repository, &revs, NULL);
 
@@ -3490,6 +3488,41 @@ static void read_cruft_objects(void)
 	revs.include_check_obj = cruft_include_check_obj;
 
 	revs.ignore_missing_links = 1;
+
+	if (progress)
+		progress_state = start_progress(_("Enumerating cruft objects"), 0);
+	ret = add_unseen_recent_objects_to_traversal(&revs, cruft_expiration,
+						     set_cruft_mtime, 1);
+	stop_progress(&progress_state);
+
+	if (ret)
+		die(_("unable to add cruft objects"));
+
+	/*
+	 * Re-mark only the fresh packs as kept so that objects in
+	 * unknown packs do not halt the reachability traversal early.
+	 */
+	for (p = get_all_packs(the_repository); p; p = p->next)
+		p->pack_keep_in_core = 0;
+	mark_pack_kept_in_core(fresh_packs, 1);
+
+	if (prepare_revision_walk(&revs))
+		die(_("revision walk setup failed"));
+	if (progress)
+		progress_state = start_progress(_("Traversing cruft objects"), 0);
+	nr_seen = 0;
+	traverse_commit_list(&revs, show_cruft_commit, show_cruft_object, NULL);
+
+	stop_progress(&progress_state);
+}
+
+static void read_cruft_objects(void)
+{
+	struct strbuf buf = STRBUF_INIT;
+	struct string_list discard_packs = STRING_LIST_INIT_DUP;
+	struct string_list fresh_packs = STRING_LIST_INIT_DUP;
+	struct packed_git *p;
+
 	ignore_packed_keep_in_core = 1;
 
 	while (strbuf_getline(&buf, stdin) != EOF) {
@@ -3533,29 +3566,8 @@ static void read_cruft_objects(void)
 	mark_pack_kept_in_core(&fresh_packs, 1);
 	mark_pack_kept_in_core(&discard_packs, 0);
 
-	if (progress)
-		progress_state = start_progress(_("Enumerating cruft objects"), 0);
-	if (add_unseen_recent_objects_to_traversal(&revs, cruft_expiration,
-						   set_cruft_mtime, 1))
-		die(_("unable to add cruft objects"));
-	stop_progress(&progress_state);
+	enumerate_and_traverse_cruft_objects(&fresh_packs);
 
-	/*
-	 * Re-mark only the fresh packs as kept so that objects in unknown packs
-	 * do not halt the reachability traversal early.
-	 */
-	for (p = get_all_packs(the_repository); p; p = p->next)
-		p->pack_keep_in_core = 0;
-	mark_pack_kept_in_core(&fresh_packs, 1);
-
-	if (prepare_revision_walk(&revs))
-		die(_("revision walk setup failed"));
-	if (progress)
-		progress_state = start_progress(_("Traversing cruft objects"), 0);
-	nr_seen = 0;
-	traverse_commit_list(&revs, show_cruft_commit, show_cruft_object, NULL);
-
-	stop_progress(&progress_state);
 	strbuf_release(&buf);
 	string_list_clear(&discard_packs, 0);
 	string_list_clear(&fresh_packs, 0);
