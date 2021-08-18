@@ -292,7 +292,7 @@ test_expect_success 'multiple cruft packs' '
 	)
 '
 
-test_expect_success 'cruft packs tolerate missing objects' '
+test_expect_success 'cruft packs tolerate missing trees' '
 	git init repo &&
 	test_when_finished "rm -fr repo" &&
 	(
@@ -314,6 +314,32 @@ test_expect_success 'cruft packs tolerate missing objects' '
 		git repack -Ad &&
 		basename $(ls $packdir/pack-*.pack) |
 			git pack-objects --cruft $packdir/pack
+	)
+'
+
+test_expect_success 'cruft packs tolerate missing blobs' '
+	git init repo &&
+	test_when_finished "rm -fr repo" &&
+	(
+		cd repo &&
+
+		test_commit reachable &&
+		test_commit cruft &&
+
+		blob="$(git rev-parse cruft:cruft.t)" &&
+
+		git reset --hard reachable &&
+		git tag -d cruft &&
+		rm -fr .git/logs &&
+
+		# remove the unreachable blob, but leave the commit (and
+		# the root tree of that commit) in-tact
+		rm -fr "$objdir/$(test_oid_to_path "$blob")" &&
+
+		git repack -Ad &&
+		basename $(ls $packdir/pack-*.pack) >in &&
+		git pack-objects --cruft --cruft-expiration=2.weeks.ago \
+			$packdir/pack <in
 	)
 '
 
