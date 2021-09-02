@@ -932,7 +932,7 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 	if (!names.nr && !po_args.quiet)
 		printf_ln(_("Nothing new to pack."));
 
-	if ((pack_everything & PACK_CRUFT) && names.nr) {
+	if (pack_everything & PACK_CRUFT) {
 		const char *pack_prefix;
 		if (!skip_prefix(packtmp, packdir, &pack_prefix))
 			die(_("pack prefix %s does not begin with objdir %s"),

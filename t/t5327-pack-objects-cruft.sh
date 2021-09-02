@@ -516,4 +516,30 @@ test_expect_success 'MIDX bitmaps tolerate reachable cruft objects' '
 	)
 '
 
+test_expect_success 'cruft repack handles pack corruption' '
+	git init repo &&
+	test_when_finished "rm -fr repo" &&
+	(
+		cd repo &&
+
+		test_commit base &&
+		git repack -ad &&
+
+		git for-each-ref --format="delete %(refname)" >in &&
+		git update-ref --stdin <in &&
+		rm -fr .git/logs &&
+		rm -fr .git/index &&
+
+		pack="$(ls .git/objects/pack/pack-*.pack)" &&
+		chmod u+w "$pack" &&
+		echo "garbage" >>"$pack" &&
+		chmod u-w "$pack" &&
+
+		test_must_fail git repack --cruft -d 2>err &&
+		grep "cannot be accessed" err &&
+
+		test_path_is_file "$pack"
+	)
+'
+
 test_done
