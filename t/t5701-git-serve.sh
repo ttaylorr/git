@@ -380,4 +380,25 @@ test_expect_success 'basics of bundle-uri: dies if not enabled' '
 	test_must_be_empty out
 '
 
+test_expect_success 'object-info missing from capabilities when disabled' '
+	test_config transfer.advertiseObjectInfo false &&
+
+	GIT_TEST_SIDEBAND_ALL=0 test-tool serve-v2 \
+		--advertise-capabilities >out &&
+	test-tool pkt-line unpack <out >actual &&
+
+	! grep object.info actual
+'
+
+test_expect_success 'object-info commands rejected when disabled' '
+	test_config transfer.advertiseObjectInfo false &&
+
+	test-tool pkt-line pack >in <<-EOF &&
+	command=object-info
+	EOF
+
+	test_must_fail test-tool serve-v2 --stateless-rpc <in 2>err &&
+	grep invalid.command err
+'
+
 test_done
