@@ -13,6 +13,7 @@ SYNOPSIS
 	[--no-reuse-delta] [--delta-base-offset] [--non-empty]
 	[--local] [--incremental] [--window=<n>] [--depth=<n>]
 	[--revs [--unpacked | --all]] [--keep-pack=<pack-name>]
+	[--cruft] [--cruft-expiration=<time>]
 	[--stdout [--filter=<filter-spec>] | base-name]
 	[--shallow] [--keep-true-parents] [--[no-]sparse] < object-list
 
@@ -94,6 +95,28 @@ base-name::
 +
 Incompatible with `--revs`, or options that imply `--revs` (such as
 `--all`), with the exception of `--unpacked`, which is compatible.
+
+--cruft::
+	Packs unreachable objects into a separate "cruft" pack, denoted
+	by the existence of a `.mtimes` file. Pack names provided over
+	stdin indicate which packs will remain after a `git repack`.
+	Pack names prefixed with a `-` indicate those which will be
+	removed. The contents of the cruft pack are all objects not
+	contained in the surviving packs specified by `--keep-pack`)
+	which have not exceeded the grace period (see
+	`--cruft-expiration` below), or which have exceeded the grace
+	period, but are reachable from an other object which hasn't.
++
+Incompatible with `--unpack-unreachable`, `--keep-unreachable`,
+`--pack-loose-unreachable`, `--stdin-packs`, as well as any other
+options which imply `--revs`. Also incompatible with `--max-pack-size`;
+when this option is set, the maximum pack size is not inferred from
+`pack.packSizeLimit`.
+
+--cruft-expiration=<approxidate>::
+	If specified, objects are eliminated from the cruft pack if they
+	have an mtime older than `<approxidate>`. If unspecified (and
+	given `--cruft`), then no objects are eliminated.
 
 --window=<n>::
 --depth=<n>::

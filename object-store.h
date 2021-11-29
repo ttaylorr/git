@@ -308,6 +308,8 @@ int repo_has_object_file_with_flags(struct repository *r,
  */
 int has_loose_object_nonlocal(const struct object_id *);
 
+int has_loose_object(const struct object_id *);
+
 void assert_oid_type(const struct object_id *oid, enum object_type expect);
 
 /*
