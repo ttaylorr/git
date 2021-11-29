@@ -3951,7 +3951,7 @@ static void get_object_list(int ac, const char **av)
 	if (unpack_unreachable_expiration) {
 		revs.ignore_missing_links = 1;
 		if (add_unseen_recent_objects_to_traversal(&revs,
-				unpack_unreachable_expiration))
+				unpack_unreachable_expiration, NULL, 0))
 			die(_("unable to add recent objects"));
 		if (prepare_revision_walk(&revs))
 			die(_("revision walk setup failed"));
