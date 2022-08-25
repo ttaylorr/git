@@ -309,14 +309,14 @@ test_expect_success 'modify multiple caches, with limit' '
 	done &&
 
 	ls -t .git/objects/info/blame-tree/ >before-all &&
-	tail -n 3 before-all >before-oldest &&
+	tail -n 3 before-all | sort >before-oldest &&
 	head -n 3 before-all >before-newest &&
 
 	git -c blameTree.maxWrites=2 blame-tree --update-cache HEAD &&
 
 	ls -t .git/objects/info/blame-tree/ >after-all &&
 	tail -n 3 after-all >after-oldest &&
-	head -n 3 after-all >after-newest &&
+	head -n 3 after-all | sort >after-newest &&
 
 	test_cmp before-oldest after-newest &&
 	test_cmp before-newest after-oldest &&
