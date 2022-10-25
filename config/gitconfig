@@ -1,3 +1,5 @@
+[format]
+	to = git@vger.kernel.org
 [rerere]
 	enabled = true
 	autoUpdate = true
