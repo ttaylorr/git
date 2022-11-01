@@ -55,7 +55,7 @@ sub compare_them {
 	}
 	close $ah;
 	close $bh;
-	open(my $fh, "-|", 'diff', "-U$cnt", $aname, $bname);
+	open(my $fh, "-|", 'diff', "--color=always", "-U$cnt", $aname, $bname);
 	$cnt = 0;
 	while (<$fh>) {
 		next if ($cnt++ < 3);
