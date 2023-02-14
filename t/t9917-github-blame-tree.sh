@@ -288,7 +288,7 @@ test_expect_success 'test cache with unicode paths' '
 	test_cmp expect actual
 '
 
-test_expect_failure '--update-cache populates all cache files' '
+test_expect_success '--update-cache populates all cache files' '
 	test_when_finished rm -rf .git/objects/info/blame-tree blame-tree &&
 	# Compute expected cache files
 	git blame-tree --cache --max-depth=1 HEAD -- a &&

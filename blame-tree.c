@@ -275,7 +275,7 @@ struct blame_tree_cache_reader {
 
 	int max_depth;
 	size_t pathspec_len;
-	const char *pathspec;
+	char *pathspec;
 
 	struct object_id oid;
 
@@ -295,7 +295,8 @@ static int read_meta_chunk(const unsigned char *chunk_start, size_t chunk_size,
 
 	reader->max_depth = get_be32(chunk_start);
 	reader->pathspec_len = get_be32(chunk_start + 4);
-	reader->pathspec = (const char *)(chunk_start + 8);
+	reader->pathspec = xstrndup((const char *)(chunk_start + 8),
+				    reader->pathspec_len);
 
 	return 0;
 }
@@ -366,6 +367,7 @@ fail:
 static void free_blame_tree_cache_reader(struct blame_tree_cache_reader *reader)
 {
 	munmap((void *)reader->data, reader->size);
+	free(reader->pathspec);
 	free(reader->cf);
 	close(reader->fd);
 }
