@@ -8,7 +8,9 @@ test_expect_success 'setup' '
 	mkdir a &&
 	test_commit 2 a/file &&
 	mkdir a/b &&
-	test_commit 3 a/b/file
+	test_commit 3 a/b/file &&
+	mkdir mult_of8 &&
+	test_commit 4 mult_of8/file
 '
 
 test_expect_success 'cannot blame two trees' '
@@ -32,6 +34,7 @@ test_expect_success 'blame recursive' '
 	1 file
 	2 a/file
 	3 a/b/file
+	4 mult_of8/file
 	EOF
 '
 
@@ -39,6 +42,7 @@ test_expect_success 'blame root' '
 	check_blame --max-depth=0 <<-\EOF
 	1 file
 	3 a
+	4 mult_of8
 	EOF
 '
 
@@ -52,7 +56,7 @@ test_expect_success 'blame subdir' '
 test_expect_success 'blame from non-HEAD commit' '
 	check_blame --max-depth=0 HEAD^ <<-\EOF
 	1 file
-	2 a
+	3 a
 	EOF
 '
 
@@ -61,6 +65,7 @@ test_expect_success 'blame from subdir defaults to root' '(
 	check_blame --max-depth=0 <<-\EOF
 	1 file
 	3 a
+	4 mult_of8
 	EOF
 )'
 
@@ -73,15 +78,17 @@ test_expect_success 'blame from subdir uses relative pathspecs' '(
 
 test_expect_success 'limit blame traversal by count' '
 	check_blame --max-depth=0 -1 <<-\EOF
-	3 a
-	^2 file
+	4 mult_of8
+	^3 a
+	^3 file
 	EOF
 '
 
 test_expect_success 'limit blame traversal by commit' '
 	check_blame --max-depth=0 HEAD~2..HEAD <<-\EOF
 	3 a
-	^1 file
+	4 mult_of8
+	^2 file
 	EOF
 '
 
@@ -90,6 +97,7 @@ test_expect_success 'only blame files in the current tree' '
 	git commit -m "remove a" &&
 	check_blame <<-\EOF
 	1 file
+	4 mult_of8/file
 	EOF
 '
 
@@ -280,14 +288,18 @@ test_expect_success 'test cache with unicode paths' '
 	test_cmp expect actual
 '
 
-test_expect_success '--update-cache populates all cache files' '
+test_expect_failure '--update-cache populates all cache files' '
 	test_when_finished rm -rf .git/objects/info/blame-tree blame-tree &&
 	# Compute expected cache files
 	git blame-tree --cache --max-depth=1 HEAD -- a &&
 	git blame-tree --cache --max-depth=0 HEAD &&
+	git blame-tree --cache --max-depth=1 HEAD -- mult_of8 &&
+
 	mv .git/objects/info/blame-tree blame-tree &&
 	git blame-tree --cache --max-depth=1 HEAD~1 -- a &&
 	git blame-tree --cache --max-depth=0 HEAD~1 &&
+	git blame-tree --cache --max-depth=1 HEAD~1 -- mult_of8 &&
+
 	for filename in $(ls blame-tree/*.btc)
 	do
 		test_path_is_file .git/objects/info/$filename || return 1
