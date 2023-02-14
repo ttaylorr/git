@@ -22,6 +22,7 @@
 #include "run-command.h"
 #include "path.h"
 #include "config.h"
+#include "environment.h"
 
 /*
  * This is the default blame-tree output. It is used when
@@ -448,6 +449,9 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 	bt->rev.diff = 1;
 	bt->rev.diffopt.flags.recursive = 1;
 	bt->rev.diffopt.no_free = 1;
+
+	setenv(GIT_LITERAL_PATHSPECS_ENVIRONMENT, "1", 1);
+
 	if (setup_revisions(argc, argv, &bt->rev, NULL) > 1)
 		die("unknown blame-tree argument: %s\n", argv[1]);
 

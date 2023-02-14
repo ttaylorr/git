@@ -336,4 +336,15 @@ test_expect_success 'modify multiple caches, with limit' '
 	done
 '
 
+test_expect_success 'cache with strange pathnames' '
+	mkdir dir\*name &&
+	echo >dir\*name/file &&
+	git add dir\*name &&
+	git commit -m "add strange path" &&
+	git blame-tree --max-depth=1 --cache HEAD -- dir\*name  &&
+
+	git blame-tree --update-cache HEAD 2>err &&
+	test_must_be_empty err
+'
+
 test_done
