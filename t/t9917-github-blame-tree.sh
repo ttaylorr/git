@@ -374,4 +374,24 @@ test_expect_success 'cache with strange pathnames' '
 	test_must_be_empty err
 '
 
+test_expect_success '--update-cache removes non-existent paths' '
+	rm -rf .git/objects/info/blame-tree &&
+
+	# Make sure there is a cache file for "a"
+	git blame-tree --max-depth=1 --cache HEAD -- a &&
+	git blame-tree --update-cache HEAD &&
+	ls .git/objects/info/blame-tree/*.btc >before &&
+
+	# Contains cache for root and "a"
+	test_line_count = 2 before &&
+
+	git rm -r a &&
+	git commit -m "remove a" &&
+	git blame-tree --update-cache HEAD 2>err &&
+	test_must_be_empty err &&
+
+	ls .git/objects/info/blame-tree/*.btc >after &&
+	test_line_count = 1 after
+'
+
 test_done

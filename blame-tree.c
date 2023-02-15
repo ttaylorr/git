@@ -232,6 +232,18 @@ cleanup:
 	return res;
 }
 
+static int unlink_blame_tree_cache(struct repository *r,
+				   struct blame_tree_cache_writer *writer)
+{
+	char *cache_id = get_cache_id(writer->max_depth, writer->pathspec);
+	char *filename = get_cache_filename(r->objects->odb->path, cache_id);
+	int res = unlink_or_warn(filename);
+
+	free(cache_id);
+	free(filename);
+	return res;
+}
+
 static void write_placeholder_cache_file(struct blame_tree *bt)
 {
 	struct repository *r = bt->rev.repo;
@@ -556,7 +568,10 @@ void blame_tree_release(struct blame_tree *bt)
 	}
 
 	if (bt->writer) {
-		write_blame_tree_cache(bt->rev.repo, bt->writer);
+		if (bt->all_paths_nr)
+			write_blame_tree_cache(bt->rev.repo, bt->writer);
+		else
+			unlink_blame_tree_cache(bt->rev.repo, bt->writer);
 
 		free(bt->writer->results);
 		FREE_AND_NULL(bt->writer);
