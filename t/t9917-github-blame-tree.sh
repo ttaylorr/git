@@ -163,6 +163,11 @@ test_expect_success 'blame-tree complains about unknown arguments' '
 	grep "unknown blame-tree argument: --foo" err
 '
 
+test_expect_success 'blame-tree complains about caching without --max-depth' '
+	test_must_fail git blame-tree --cache HEAD 2>err &&
+	grep "refusing to cache without --max-depth" err
+'
+
 test_expect_success 'blame-tree succeeds on commit with empty tree' '
 	treehash=$(git mktree </dev/null) &&
 	commithash=$(git commit-tree -m "empty commit" $treehash) &&
@@ -234,6 +239,28 @@ test_expect_success 'blame-tree cache works across alternates' '
 	test_cmp expect actual &&
 	grep "cached-commit-true" trace-1-base &&
 	grep "cached-commit-true" trace-1-fork
+'
+
+test_expect_success 'blame-tree cache --max-depth=0 collision' '
+	test_when_finished rm -rf .git/objects/info/blame-tree &&
+	test_when_finished rm -f trace-* &&
+
+	git blame-tree HEAD --max-depth=0 >expect-0 &&
+	git blame-tree HEAD >expect-full &&
+
+	# Cache the root directory.
+	git blame-tree --cache HEAD --max-depth=0 &&
+
+	GIT_TRACE2_PERF="$(pwd)/trace-depth-0" \
+		git blame-tree HEAD --max-depth=0 >actual-0 &&
+	GIT_TRACE2_PERF="$(pwd)/trace-depth-none" \
+		git blame-tree HEAD >actual-full &&
+
+	test_cmp expect-0 actual-0 &&
+	test_cmp expect-full actual-full &&
+
+	grep "cached-commit-true.count:1" trace-depth-0 &&
+	grep "cached-commit-false.count:1" trace-depth-none
 '
 
 test_expect_success 'test cache with unicode paths' '

@@ -455,6 +455,10 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 	if (setup_revisions(argc, argv, &bt->rev, NULL) > 1)
 		die("unknown blame-tree argument: %s\n", argv[1]);
 
+	if ((flags & BLAME_TREE_WRITE_CACHE) &&
+	    !bt->rev.diffopt.max_depth_valid)
+		die("refusing to cache without --max-depth");
+
 	(void)generation_numbers_enabled(r);
 	if (r->objects->commit_graph)
 		bt->rev.bloom_filter_settings = get_bloom_filter_settings(r);
@@ -497,7 +501,9 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 		ALLOC_ARRAY(bt->writer->results, bt->writer->results_alloc);
 	}
 
-	if (!(flags & BLAME_TREE_SKIP_CACHE)) {
+	/* Skip the cache if requested _or_ if --max-depth is not provided. */
+	if (!(flags & BLAME_TREE_SKIP_CACHE) &&
+	    bt->rev.diffopt.max_depth_valid) {
 		/* look for a cache file */
 		struct object_directory *odb;
 		struct stat st;
