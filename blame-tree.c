@@ -1059,10 +1059,6 @@ static int update_cache(const char *filename, const char *revision,
 		*updated = 0;
 	}
 
-	if (res)
-		warning(_("failed to generate blame-tree cache for pathspec '%s'"),
-			pathspec);
-
 	free(pathspec);
 	return res;
 }
