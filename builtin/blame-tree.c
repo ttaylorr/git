@@ -58,7 +58,8 @@ int cmd_blame_tree(int argc, const char **argv, const char *prefix,
 	blame_tree_init(&bt, flags, argc, argv, prefix);
 	if (blame_tree_run(&bt) < 0)
 		die("error running blame-tree traversal");
-	blame_tree_release(&bt);
+	if (blame_tree_release(&bt))
+		die("error completing blame-tree operation");
 
 	return 0;
 }

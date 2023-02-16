@@ -553,8 +553,10 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 	}
 }
 
-void blame_tree_release(struct blame_tree *bt)
+int blame_tree_release(struct blame_tree *bt)
 {
+	int res = 0;
+
 	hashmap_clear_and_free(&bt->paths, struct blame_tree_entry, hashent);
 	free(bt->all_paths);
 
@@ -569,13 +571,15 @@ void blame_tree_release(struct blame_tree *bt)
 
 	if (bt->writer) {
 		if (bt->all_paths_nr)
-			write_blame_tree_cache(bt->rev.repo, bt->writer);
+			res = write_blame_tree_cache(bt->rev.repo, bt->writer);
 		else
-			unlink_blame_tree_cache(bt->rev.repo, bt->writer);
+			res = unlink_blame_tree_cache(bt->rev.repo, bt->writer);
 
 		free(bt->writer->results);
 		FREE_AND_NULL(bt->writer);
 	}
+
+	return res;
 }
 
 struct commit_active_paths {
