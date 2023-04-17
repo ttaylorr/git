@@ -28,7 +28,7 @@
 #define CRUFT_PACK 2
 
 static int pack_everything;
-static int cruft_packs;
+static int cruft_packs = -1;
 static int delta_base_offset = 1;
 static int pack_kept_objects = -1;
 static int write_bitmaps = -1;
@@ -821,6 +821,42 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 	argc = parse_options(argc, argv, prefix, builtin_repack_options,
 				git_repack_usage, 0);
 
+	if (cruft_packs == 1) {
+		/*
+		 * Throw out `--cruft` with any of `-A`, `--unpack-unreachable`,
+		 * or `-k`, if the user explicitly gave `--cruft`.
+		 */
+		if (unpack_unreachable || (pack_everything & LOOSEN_UNREACHABLE))
+			die(_("options '%s' and '%s' cannot be used together"), "--cruft", "-A");
+		if (keep_unreachable)
+			die(_("options '%s' and '%s' cannot be used together"), "--cruft", "-k");
+	}
+
+	if (cruft_packs < 0) {
+		if ((pack_everything & LOOSEN_UNREACHABLE) || unpack_unreachable || keep_unreachable) {
+			/*
+			 * If neither `--cruft` nor `--no-cruft` was
+			 * specified, interpret the command-line
+			 * arguments as if the user provided `--cruft`,
+			 * unless:
+			 *
+			 *   - they explicitly passed `--unpack-unreachable`,
+			 *   - they explicitly passed `--keep-unreachable`, or
+			 *   - they
+			 *
+			 * None of which are compatible with cruft
+			 * packs.
+			 */
+			cruft_packs = 0;
+		} else {
+			/*
+			 * Otherwise, we can proceed as if the user
+			 * provided `--cruft`.
+			 */
+			cruft_packs = 1;
+		}
+	}
+
 	if (delete_redundant && repository_format_precious_objects)
 		die(_("cannot delete packs in a precious-objects repo"));
 
@@ -828,14 +864,8 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 	    (unpack_unreachable || (pack_everything & LOOSEN_UNREACHABLE)))
 		die(_("options '%s' and '%s' cannot be used together"), "--keep-unreachable", "-A");
 
-	if (cruft_packs) {
+	if (cruft_packs)
 		pack_everything |= ALL_INTO_ONE;
-
-		if (unpack_unreachable || (pack_everything & LOOSEN_UNREACHABLE))
-			die(_("options '%s' and '%s' cannot be used together"), "--cruft", "-A");
-		if (keep_unreachable)
-			die(_("options '%s' and '%s' cannot be used together"), "--cruft", "-k");
-	}
 
 	if (write_bitmaps < 0) {
 		if (!write_midx &&

@@ -559,6 +559,69 @@ test_expect_success '-n overrides repack.updateServerInfo=true' '
 	test_server_info_missing
 '
 
+for opt in "-A" "-k"
+do
+	test_expect_success "XYZ --cruft with $opt is banned" '
+		test_must_fail git repack $opt --cruft 2>err &&
+		grep "options .--cruft. and .$opt. cannot be used together" err
+	'
+done
+
+prepare_cruft_history () {
+	test_commit base &&
+
+	test_commit --no-tag foo &&
+	test_commit --no-tag bar &&
+
+	git reset HEAD^^ &&
+	git reflog expire --all --expire=all
+}
+
+for argv in \
+	"repack -A" \
+	"repack -A --unpack-unreachable=now"
+do
+	test_expect_success "XYZ git $argv generates a cruft pack" '
+		test_when_finished "rm -fr repo" &&
+		git init repo &&
+		(
+			cd repo &&
+
+			prepare_cruft_history &&
+			git $argv &&
+
+			find .git/objects/pack -name "*.mtimes" >mtimes &&
+			sed -e 's/\.mtimes$/\.pack/g' mtimes >packs &&
+
+			test_file_not_empty packs &&
+			while read pack
+			do
+				test_path_is_file "$pack" || return 1
+			done <packs
+		)
+	'
+done
+
+for argv in \
+	"repack" \
+	"repack --unpack-unreachable=now" \
+	"repack --keep-unreachable"
+do
+	test_expect_success "XYZ git $argv does not generate a cruft pack" '
+		test_when_finished "rm -fr repo" &&
+		git init repo &&
+		(
+			cd repo &&
+
+			prepare_cruft_history &&
+			git $argv &&
+
+			find .git/objects/pack -name "*.mtimes" >mtimes &&
+			test_must_be_empty mtimes
+		)
+	'
+done
+
 test_expect_success '--expire-to stores pruned objects (now)' '
 	git init expire-to-now &&
 	(
