@@ -23,12 +23,12 @@
 
 #define ALL_INTO_ONE 1
 #define LOOSEN_UNREACHABLE 2
-#define PACK_CRUFT 4
 
 #define DELETE_PACK 1
 #define CRUFT_PACK 2
 
 static int pack_everything;
+static int cruft_packs;
 static int delta_base_offset = 1;
 static int pack_kept_objects = -1;
 static int write_bitmaps = -1;
@@ -770,9 +770,8 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 		OPT_BIT('A', NULL, &pack_everything,
 				N_("same as -a, and turn unreachable objects loose"),
 				   LOOSEN_UNREACHABLE | ALL_INTO_ONE),
-		OPT_BIT(0, "cruft", &pack_everything,
-				N_("same as -a, pack unreachable cruft objects separately"),
-				   PACK_CRUFT),
+		OPT_BOOL(0, "cruft", &cruft_packs,
+				N_("same as -a, pack unreachable cruft objects separately")),
 		OPT_STRING(0, "cruft-expiration", &cruft_expiration, N_("approxidate"),
 				N_("with --cruft, expire objects older than this")),
 		OPT_BOOL('d', NULL, &delete_redundant,
@@ -829,7 +828,7 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 	    (unpack_unreachable || (pack_everything & LOOSEN_UNREACHABLE)))
 		die(_("options '%s' and '%s' cannot be used together"), "--keep-unreachable", "-A");
 
-	if (pack_everything & PACK_CRUFT) {
+	if (cruft_packs) {
 		pack_everything |= ALL_INTO_ONE;
 
 		if (unpack_unreachable || (pack_everything & LOOSEN_UNREACHABLE))
@@ -919,8 +918,7 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 	if (pack_everything & ALL_INTO_ONE) {
 		repack_promisor_objects(&po_args, &names);
 
-		if (existing_nonkept_packs.nr && delete_redundant &&
-		    !(pack_everything & PACK_CRUFT)) {
+		if (existing_nonkept_packs.nr && delete_redundant && !cruft_packs) {
 			for_each_string_list_item(item, &names) {
 				strvec_pushf(&cmd.args, "--keep-pack=%s-%s.pack",
 					     packtmp_name, item->string);
@@ -986,7 +984,7 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 	if (!names.nr && !po_args.quiet)
 		printf_ln(_("Nothing new to pack."));
 
-	if (pack_everything & PACK_CRUFT) {
+	if (cruft_packs) {
 		const char *pack_prefix;
 		if (!skip_prefix(packtmp, packdir, &pack_prefix))
 			die(_("pack prefix %s does not begin with objdir %s"),
