@@ -302,7 +302,8 @@ static int cmp_packed_ref_records(const void *v1, const void *v2)
  * Compare a snapshot record at `rec` to the specified NUL-terminated
  * refname.
  */
-static int cmp_record_to_refname(const char *rec, const char *refname)
+static int cmp_record_to_refname(const char *rec, const char *refname,
+				 int start)
 {
 	const char *r1 = rec + the_hash_algo->hexsz + 1;
 	const char *r2 = refname;
@@ -311,7 +312,7 @@ static int cmp_record_to_refname(const char *rec, const char *refname)
 		if (*r1 == '\n')
 			return *r2 ? -1 : 0;
 		if (!*r2)
-			return 1;
+			return start ? 1 : -1;
 		if (*r1 != *r2)
 			return (unsigned char)*r1 < (unsigned char)*r2 ? -1 : +1;
 		r1++;
@@ -526,22 +527,9 @@ static int load_contents(struct snapshot *snapshot)
 	return 1;
 }
 
-/*
- * Find the place in `snapshot->buf` where the start of the record for
- * `refname` starts. If `mustexist` is true and the reference doesn't
- * exist, then return NULL. If `mustexist` is false and the reference
- * doesn't exist, then return the point where that reference would be
- * inserted, or `snapshot->eof` (which might be NULL) if it would be
- * inserted at the end of the file. In the latter mode, `refname`
- * doesn't have to be a proper reference name; for example, one could
- * search for "refs/replace/" to find the start of any replace
- * references.
- *
- * The record is sought using a binary search, so `snapshot->buf` must
- * be sorted.
- */
-static const char *find_reference_location(struct snapshot *snapshot,
-					   const char *refname, int mustexist)
+static const char *find_reference_location_1(struct snapshot *snapshot,
+					     const char *refname, int mustexist,
+					     int start)
 {
 	/*
 	 * This is not *quite* a garden-variety binary search, because
@@ -571,7 +559,7 @@ static const char *find_reference_location(struct snapshot *snapshot,
 
 		mid = lo + (hi - lo) / 2;
 		rec = find_start_of_record(lo, mid);
-		cmp = cmp_record_to_refname(rec, refname);
+		cmp = cmp_record_to_refname(rec, refname, start);
 		if (cmp < 0) {
 			lo = find_end_of_record(mid, hi);
 		} else if (cmp > 0) {
@@ -585,6 +573,26 @@ static const char *find_reference_location(struct snapshot *snapshot,
 		return NULL;
 	else
 		return lo;
+}
+
+/*
+ * Find the place in `snapshot->buf` where the start of the record for
+ * `refname` starts. If `mustexist` is true and the reference doesn't
+ * exist, then return NULL. If `mustexist` is false and the reference
+ * doesn't exist, then return the point where that reference would be
+ * inserted, or `snapshot->eof` (which might be NULL) if it would be
+ * inserted at the end of the file. In the latter mode, `refname`
+ * doesn't have to be a proper reference name; for example, one could
+ * search for "refs/replace/" to find the start of any replace
+ * references.
+ *
+ * The record is sought using a binary search, so `snapshot->buf` must
+ * be sorted.
+ */
+static const char *find_reference_location(struct snapshot *snapshot,
+					   const char *refname, int mustexist)
+{
+	return find_reference_location_1(snapshot, refname, mustexist, 1);
 }
 
 /*
