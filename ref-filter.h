@@ -67,6 +67,8 @@ struct ref_filter {
 	struct commit_list *reachable_from;
 	struct commit_list *unreachable_from;
 
+	const char *hidden_section;
+
 	unsigned int with_commit_tag_algo : 1,
 		match_as_path : 1,
 		ignore_case : 1,

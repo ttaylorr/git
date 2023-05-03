@@ -108,6 +108,13 @@ OPTIONS
 	any excluded pattern(s) are shown. Matching is done using the
 	same rules as `<pattern>` above.
 
+--exclude-hidden=[fetch|receive|uploadpack]::
+	Do not include refs that would be hidden by `git-fetch`,
+	`git-receive-pack` or `git-upload-pack` by consulting the appropriate
+	`fetch.hideRefs`, `receive.hideRefs` or `uploadpack.hideRefs`
+	configuration along with `transfer.hideRefs` (see
+	linkgit:git-config[1]).
+
 FIELD NAMES
 -----------
 

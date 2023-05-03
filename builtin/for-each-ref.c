@@ -18,6 +18,35 @@ static char const * const for_each_ref_usage[] = {
 	NULL
 };
 
+static int hide_refs_config(const char *var, const char *value, void *cb_data)
+{
+	struct ref_filter *filter = cb_data;
+
+	return parse_hide_refs_config(var, value, filter->hidden_section,
+				      &filter->exclude);
+}
+
+
+static int for_each_ref_opt_exclude_hidden(const struct option *opt,
+					   const char *arg, int unset)
+{
+	struct ref_filter *filter = opt->value;
+
+	BUG_ON_OPT_NEG(unset);
+
+	if (filter->hidden_section)
+		die(_("--exclude-hidden= passed more than once"));
+
+	if (strcmp(arg, "fetch") && strcmp(arg, "receive") && strcmp(arg, "uploadpack"))
+		die(_("unsupported section for hidden refs: %s"), arg);
+
+	filter->hidden_section = xstrdup(arg);
+
+	git_config(hide_refs_config, filter);
+
+	return 0;
+}
+
 int cmd_for_each_ref(int argc, const char **argv, const char *prefix)
 {
 	int i;
@@ -49,6 +78,10 @@ int cmd_for_each_ref(int argc, const char **argv, const char *prefix)
 		OPT_STRING(  0 , "format", &format.format, N_("format"), N_("format to use for the output")),
 		OPT__COLOR(&format.use_color, N_("respect format colors")),
 		OPT_REF_FILTER_EXCLUDE(&filter),
+		OPT_CALLBACK_F(0, "exclude-hidden", &filter,
+			       N_("section"),
+			       N_("exclude hidden references from the given section"),
+			       PARSE_OPT_NONEG, for_each_ref_opt_exclude_hidden),
 		OPT_REF_SORT(&sorting_options),
 		OPT_CALLBACK(0, "points-at", &filter.points_at,
 			     N_("object"), N_("print only refs which points at the given object"),

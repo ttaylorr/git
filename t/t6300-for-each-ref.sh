@@ -483,6 +483,37 @@ test_expect_success 'exercise patterns with pattern exclusions' '
 '
 
 cat >expected <<\EOF
+refs/heads/main
+refs/remotes/origin/main
+refs/tags/testtag
+EOF
+
+test_expect_success 'exercise patterns with hidden ref exclusions' '
+	for tag in foo/one foo/two foo/three
+	do
+		git tag "$tag" || return 1
+	done &&
+	test_when_finished "git tag -d foo/one foo/two foo/three" &&
+
+	test_config uploadpack.hiderefs refs/tags/foo/ &&
+	git for-each-ref --format="%(refname)" \
+		--exclude-hidden=uploadpack >actual &&
+	test_cmp expected actual
+'
+
+test_expect_success 'for-each-ref with multiple --exclude-hidden' '
+	test_must_fail git for-each-ref --format="%(refname)" \
+		--exclude-hidden=uploadpack --exclude-hidden=receive 2>err &&
+	grep "fatal: --exclude-hidden= passed more than once" err
+'
+
+test_expect_success 'for-each-ref with unknown --exclude-hidden' '
+	test_must_fail git for-each-ref --format="%(refname)" \
+		--exclude-hidden=bogus 2>err &&
+	grep "fatal: unsupported section for hidden refs: bogus" err
+'
+
+cat >expected <<\EOF
 'refs/heads/main'
 'refs/remotes/origin/main'
 'refs/tags/testtag'
