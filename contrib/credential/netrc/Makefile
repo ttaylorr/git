@@ -27,4 +27,10 @@ test: build
 testverbose: build
 	./t-git-credential-netrc.sh -d -v
 
-.PHONY: all build install clean test testverbose
+testgit: build
+	PATH=$$PWD:$$PATH && \
+	cd ../../../t && \
+	GIT_TEST_CREDENTIAL_HELPER=git-credential-netrc \
+	./t0303-credential-external.sh
+
+.PHONY: all build install clean test testverbose testgit
