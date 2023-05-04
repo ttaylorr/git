@@ -20,3 +20,9 @@ install: git-credential-wincred.exe
 
 clean:
 	$(RM) git-credential-wincred.exe
+
+test: all
+	PATH=$$PWD:$$PATH && \
+	cd ../../../t && \
+	GIT_TEST_CREDENTIAL_HELPER=git-credential-wincred.exe \
+	./t0303-credential-external.sh
