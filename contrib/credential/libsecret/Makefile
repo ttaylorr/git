@@ -23,3 +23,10 @@ $(MAIN): $(OBJS)
 
 clean:
 	@$(RM) $(MAIN) $(OBJS)
+
+.PHONY: tests
+test: all
+	PATH=$$PWD:$$PATH && \
+	cd ../../../t && \
+	GIT_TEST_CREDENTIAL_HELPER=libsecret \
+	./t0303-credential-external.sh
