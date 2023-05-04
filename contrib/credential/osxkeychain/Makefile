@@ -15,3 +15,11 @@ git-credential-osxkeychain.o: git-credential-osxkeychain.c
 
 clean:
 	$(RM) git-credential-osxkeychain git-credential-osxkeychain.o
+
+.PHONY: test
+test: all
+	PATH=$$PWD:$$PATH && \
+	cd ../../../t && \
+	GIT_TEST_CREDENTIAL_HELPER=osxkeychain \
+	GIT_TEST_CREDENTIAL_HELPER_SETUP='export HOME=$$USER_HOME' \
+	./t0303-credential-external.sh
