@@ -1090,13 +1090,26 @@ static int obj_in_bitmap(struct bitmap_index *bitmap_git,
 	return bitmap_get(bitmap, pos);
 }
 
-static void show_boundary_commit(struct commit *commit, void *data)
-{
-	struct object_array *boundary = data;
-	if (!(commit->object.flags & BOUNDARY))
-		return;
+struct bitmap_boundary_cb {
+	struct object_array *boundary;
+	struct bitmap_index *bitmap_git;
+	struct bitmap *base;
+};
 
-	add_object_array(&commit->object, "", boundary);
+static void show_boundary_commit(struct commit *commit, void *_data)
+{
+	struct bitmap_boundary_cb *data = _data;
+
+	if (commit->object.flags & BOUNDARY)
+		add_object_array(&commit->object, "", data->boundary);
+
+	if (commit->object.flags & UNINTERESTING) {
+		if (!obj_in_bitmap(data->bitmap_git, &commit->object,
+				   data->base))
+			return;
+
+		add_commit_to_bitmap(data->bitmap_git, &data->base, commit);
+	}
 }
 
 static void show_boundary_object(struct object *object,
@@ -1109,14 +1122,17 @@ static struct bitmap *find_boundary_objects(struct bitmap_index *bitmap_git,
 					    struct rev_info *revs,
 					    struct object_list *roots)
 {
-	struct bitmap *base = NULL;
+	struct bitmap_boundary_cb cb;
 	struct object_array boundary = OBJECT_ARRAY_INIT;
 	int any_missing = 0;
 	unsigned int i;
 	int tmp_blobs, tmp_trees, tmp_tags;
 
+	cb.bitmap_git = bitmap_git;
+	cb.base = NULL;
+	cb.boundary = &boundary;
+
 	revs->ignore_missing_links = 1;
-	revs->collect_uninteresting = 1;
 
 	/*
 	 * OR in any existing reachability bitmaps among `roots` into `base`.
@@ -1126,8 +1142,8 @@ static struct bitmap *find_boundary_objects(struct bitmap_index *bitmap_git,
 		roots = roots->next;
 
 		if (object->type == OBJ_COMMIT &&
-		    !obj_in_bitmap(bitmap_git, object, base) &&
-		    add_commit_to_bitmap(bitmap_git, &base,
+		    !obj_in_bitmap(bitmap_git, object, cb.base) &&
+		    add_commit_to_bitmap(bitmap_git, &cb.base,
 					 (struct commit *)object)) {
 			object->flags |= SEEN;
 			continue;
@@ -1155,20 +1171,6 @@ static struct bitmap *find_boundary_objects(struct bitmap_index *bitmap_git,
 		die("revision walk setup failed");
 	trace2_region_leave("pack-bitmap", "boundary-prepare", the_repository);
 
-	trace2_region_enter("pack-bitmap", "boundary-load-bitmaps", the_repository);
-	for (i = 0; i < revs->uninteresting_commits.nr; i++) {
-		struct object *obj = revs->uninteresting_commits.objects[i].item;
-		if (obj->type != OBJ_COMMIT)
-			BUG("unexpected non-commit %s marked uninteresting",
-			    oid_to_hex(&obj->oid));
-
-		if (obj_in_bitmap(bitmap_git, obj, base))
-			continue;
-
-		add_commit_to_bitmap(bitmap_git, &base, (struct commit *)obj);
-	}
-	trace2_region_leave("pack-bitmap", "boundary-load-bitmaps", the_repository);
-
 	/*
 	 * Then add the boundary commit(s) as fill-in traversal tips.
 	 */
@@ -1177,7 +1179,7 @@ static struct bitmap *find_boundary_objects(struct bitmap_index *bitmap_git,
 	traverse_commit_list_filtered(revs,
 				      show_boundary_commit,
 				      show_boundary_object,
-				      &boundary, NULL);
+				      &cb, NULL);
 	revs->boundary = 0;
 	revs->blob_objects = tmp_blobs;
 	revs->tree_objects = tmp_trees;
@@ -1195,7 +1197,7 @@ static struct bitmap *find_boundary_objects(struct bitmap_index *bitmap_git,
 		for (i = 0; i < boundary.nr; i++) {
 			obj = boundary.objects[i].item;
 
-			if (obj_in_bitmap(bitmap_git, obj, base)) {
+			if (obj_in_bitmap(bitmap_git, obj, cb.base)) {
 				obj->flags |= SEEN;
 			} else {
 				add_pending_object(revs, obj, "");
@@ -1204,16 +1206,15 @@ static struct bitmap *find_boundary_objects(struct bitmap_index *bitmap_git,
 		}
 
 		if (needs_walk)
-			base = fill_in_bitmap(bitmap_git, revs, base, NULL);
+			cb.base = fill_in_bitmap(bitmap_git, revs, cb.base, NULL);
 	}
 	trace2_region_leave("pack-bitmap", "boundary-fill-in", the_repository);
 
 
 cleanup:
 	revs->ignore_missing_links = 0;
-	revs->collect_uninteresting = 0;
 
-	return base;
+	return cb.base;
 }
 
 static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
