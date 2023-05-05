@@ -27,6 +27,7 @@
 #include "worktree.h"
 #include "pack-revindex.h"
 #include "pack-bitmap.h"
+#include "blame-tree.h"
 
 #define REACHABLE 0x0001
 #define SEEN      0x0002
@@ -58,6 +59,13 @@ static int name_objects;
 #define ERROR_MULTI_PACK_INDEX 040
 #define ERROR_PACK_REV_INDEX 0100
 #define ERROR_BITMAP 0200
+
+/*
+ * WARNING!!! This bit corresponds to 256, which overflows the exit code
+ * at the OS level! Bits at this point and above fail to be recognized as
+ * failures at the process level!
+ */
+#define ERROR_BLAME_TREE_CACHE 0400
 
 static const char *describe_object(const struct object_id *oid)
 {
@@ -1080,6 +1088,8 @@ int cmd_fsck(int argc,
 	errors_found |= check_pack_rev_indexes(the_repository, show_progress);
 	if (verify_bitmap_files(the_repository))
 		errors_found |= ERROR_BITMAP;
+	if (verify_blame_tree_caches(the_repository))
+		errors_found |= ERROR_BLAME_TREE_CACHE;
 
 	check_connectivity();
 
@@ -1119,5 +1129,9 @@ int cmd_fsck(int argc,
 		}
 	}
 
-	return errors_found;
+	/*
+	 * HACK: Lose bit-level precision about what is failing and just
+	 * report that _some_ failure occurred.
+	 */
+	return !!errors_found;
 }

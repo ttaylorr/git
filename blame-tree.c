@@ -1224,3 +1224,57 @@ int update_blame_tree_caches(const char *revision)
 
 	return res;
 }
+
+static int validate_blame_tree_cache_file(const char *path)
+{
+	struct stat st;
+	unsigned char *data;
+	int fd = git_open(path);
+	int res = 0;
+
+	/* It is OK to not have the file. */
+	if (fd < 0 || fstat(fd, &st)) {
+		if (fd >= 0)
+			close(fd);
+		return 0;
+	}
+
+	data = xmmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	close(fd);
+	if (!hashfile_checksum_valid(data, st.st_size))
+		res = error(_("blame-tree cache file '%s' has invalid checksum"),
+			    path);
+
+	munmap(data, st.st_size);
+	return res;
+}
+
+int verify_blame_tree_caches(struct repository *r)
+{
+	struct strbuf path = STRBUF_INIT;
+	struct path_and_mtime *list;
+	size_t list_nr, dirlen;
+	int res = 0;
+
+	strbuf_addstr(&path, get_blame_tree_cache_dir(r));
+	dirlen = path.len;
+	list = get_blame_tree_cache_files(&path, &list_nr);
+
+	if (!list)
+		goto cleanup;
+
+	strbuf_setlen(&path, dirlen);
+	strbuf_addch(&path, '/');
+	dirlen = path.len;
+	for (size_t i = 0; i < list_nr; i++) {
+		strbuf_setlen(&path, dirlen);
+		strbuf_addstr(&path, list[i].name);
+
+		res |= validate_blame_tree_cache_file(path.buf);
+	}
+
+cleanup:
+	strbuf_release(&path);
+	free(list);
+	return res;
+}

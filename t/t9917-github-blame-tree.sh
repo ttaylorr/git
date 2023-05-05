@@ -406,4 +406,43 @@ test_expect_success '--update-cache removes non-existent paths' '
 	test_line_count = 1 after
 '
 
+corrupt_file () {
+	chmod a+w "$1" &&
+	printf "bogus" | dd of="$1" bs=1 seek="12" conv=notrunc
+}
+
+test_expect_success 'git fsck verified blame-tree caches' '
+	rm -rf .git/objects/info/blame-tree &&
+
+	# populate with empty cache files
+	git config blameTree.limitMilliseconds 0 &&
+	for i in $(test_seq 1 5)
+	do
+		mkdir -p $i &&
+		echo $i >$i/$i &&
+		git add $i &&
+		git commit -m "add $i" &&
+		git blame-tree --max-depth=1 -- $i &&
+		file="$(ls -t .git/objects/info/blame-tree/*.btc | head -n 1)" &&
+		backtime=$((10 - i)) &&
+		test-tool chmtime =-$backtime "$file" || return 1
+	done &&
+
+	# git fsck does not see errors with empty blame-tree cache files
+	git fsck 2>err &&
+	test_must_be_empty err &&
+
+	git blame-tree --update-cache HEAD &&
+
+	# git fsck does not see errors with populated blame-tree cache files.
+	git fsck 2>err &&
+	test_must_be_empty err &&
+
+	# git fsck notices a corrupt blame-tree file
+	file="$(ls -t .git/objects/info/blame-tree/*.btc | head -n 1)" &&
+	corrupt_file $file &&
+	test_must_fail git fsck 2>err &&
+	grep "blame-tree cache file '\''$file'\'' has invalid checksum" err
+'
+
 test_done

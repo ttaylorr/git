@@ -21,4 +21,10 @@ int blame_tree_run(struct blame_tree *);
  */
 int update_blame_tree_caches(const char *revision);
 
+/*
+ * Iterate through all blame-tree cache files and
+ * verify if they are valid.
+ */
+int verify_blame_tree_caches(struct repository *);
+
 #endif /* BLAME_TREE_H */
