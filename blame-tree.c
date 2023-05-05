@@ -1111,6 +1111,51 @@ static int compare_mtime(const void *a_, const void *b_)
 	return 1;
 }
 
+static const char *get_blame_tree_cache_dir(struct repository *r)
+{
+	return repo_common_path(r, "objects/info/blame-tree");
+}
+
+static struct path_and_mtime *get_blame_tree_cache_files(
+				struct strbuf *path, size_t *list_nr)
+{
+	struct path_and_mtime *list;
+	size_t list_alloc = 16;
+	size_t dirlen;
+	DIR *dir;
+	struct dirent *de;
+
+	dir = opendir(path->buf);
+	if (!dir)
+		return NULL;
+
+	strbuf_addch(path, '/');
+	dirlen = path->len;
+
+	ALLOC_ARRAY(list, list_alloc);
+	*list_nr = 0;
+
+	while ((de = readdir(dir)) != NULL) {
+		struct stat st;
+		if (is_dot_or_dotdot(de->d_name))
+			continue;
+
+		strbuf_setlen(path, dirlen);
+		strbuf_addstr(path, de->d_name);
+
+		if (stat(path->buf, &st))
+			continue;
+
+		ALLOC_GROW(list, *list_nr + 1, list_alloc);
+		list[*list_nr].name = xstrdup(de->d_name);
+		list[*list_nr].mtime = st.st_mtime;
+		(*list_nr)++;
+	}
+
+	closedir(dir);
+	return list;
+}
+
 /*
  * Iterate through all blame-tree cache files and
  * recompute them starting at the given commit.
@@ -1118,14 +1163,11 @@ static int compare_mtime(const void *a_, const void *b_)
 int update_blame_tree_caches(const char *revision)
 {
 	struct repository *r = the_repository;
-	size_t i, res = 0;
 	struct strbuf path = STRBUF_INIT;
-	size_t dirlen;
-	DIR *dir;
-	struct dirent *de;
+	size_t i, res = 0;
 	int write_count = 0, max_writes = 10;
 	struct path_and_mtime *list;
-	size_t list_nr = 0, list_alloc = 16;
+	size_t list_nr, dirlen;
 
 	trace2_region_enter("blame-tree", "update-caches", r);
 
@@ -1134,36 +1176,20 @@ int update_blame_tree_caches(const char *revision)
 	/* update the root by default */
 	call_blame_tree_cache(0, NULL, revision);
 
-	strbuf_addstr(&path, repo_common_path(r, "objects/info/blame-tree"));
+	strbuf_addstr(&path, get_blame_tree_cache_dir(r));
+	dirlen = path.len;
+	list = get_blame_tree_cache_files(&path, &list_nr);
 
-	dir = opendir(path.buf);
-	if (!dir) {
+	if (!list) {
 		strbuf_release(&path);
 		return 0;
 	}
 
+	QSORT(list, list_nr, compare_mtime);
+
+	strbuf_setlen(&path, dirlen);
 	strbuf_addch(&path, '/');
 	dirlen = path.len;
-
-	ALLOC_ARRAY(list, list_alloc);
-	while (!res && (de = readdir(dir)) != NULL) {
-		struct stat st;
-		if (is_dot_or_dotdot(de->d_name))
-			continue;
-
-		strbuf_setlen(&path, dirlen);
-		strbuf_addstr(&path, de->d_name);
-
-		if (stat(path.buf, &st))
-			continue;
-
-		ALLOC_GROW(list, list_nr + 1, list_alloc);
-		list[list_nr].name = xstrdup(de->d_name);
-		list[list_nr].mtime = st.st_mtime;
-		list_nr++;
-	}
-
-	QSORT(list, list_nr, compare_mtime);
 
 	for (i = 0; i < list_nr && write_count < max_writes; i++) {
 		int updated = 0;
@@ -1188,8 +1214,6 @@ int update_blame_tree_caches(const char *revision)
 	for (i = 0; i < list_nr; i++)
 		free(list[i].name);
 	free(list);
-
-	closedir(dir);
 	strbuf_release(&path);
 
 	trace2_region_leave("blame-tree", "update-caches", r);
