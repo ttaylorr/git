@@ -1,5 +1,8 @@
 #include "builtin.h"
 #include "blame-tree.h"
+#include "blame-tree-internal.h"
+#include "parse-options.h"
+#include "strvec.h"
 #include "config.h"
 #include "hex.h"
 #include "parse-options.h"

@@ -1,7 +1,6 @@
 #define USE_THE_REPOSITORY_VARIABLE
 
 #include "git-compat-util.h"
-#include "blame-tree.h"
 #include "commit.h"
 #include "diff.h"
 #include "diffcore.h"
@@ -23,6 +22,8 @@
 #include "path.h"
 #include "config.h"
 #include "environment.h"
+#include "bloom.h"
+#include "blame-tree-internal.h"
 
 /*
  * This is the default blame-tree output. It is used when
@@ -592,6 +593,9 @@ struct commit_active_paths {
 define_commit_slab(active_paths, struct commit_active_paths);
 static struct active_paths active_paths;
 
+typedef void (*blame_tree_callback)(const char *path,
+				    const struct commit *commit,
+				    void *data);
 struct blame_tree_callback_data {
 	struct commit *commit;
 	struct hashmap *paths;
