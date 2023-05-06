@@ -126,4 +126,11 @@ test_expect_success 'for_each_ref__exclude(refs/heads/foo, !refs/heads/foo/1)' '
 	test_cmp expect actual
 '
 
+test_expect_failure 'for_each_ref__exclude(refs/heads/foo, !refs/heads/foo/1, refs/heads/foo)' '
+	for_each_ref__exclude refs/heads/foo \
+		refs/heads/foo !refs/heads/foo/1 refs/heads/foo >actual &&
+
+	test_must_be_empty actual
+'
+
 test_done
