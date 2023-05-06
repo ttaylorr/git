@@ -118,4 +118,12 @@ test_expect_success 'for_each_ref__exclude(refs/heads/ba*)' '
 	assert_no_skips
 '
 
+test_expect_success 'for_each_ref__exclude(refs/heads/foo, !refs/heads/foo/1)' '
+	for_each_ref__exclude refs/heads/foo refs/heads/foo !refs/heads/foo/1 \
+		>actual 2>perf &&
+	for_each_ref refs/heads/foo/1 >expect &&
+
+	test_cmp expect actual
+'
+
 test_done

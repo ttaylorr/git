@@ -995,18 +995,59 @@ static const char *ptr_max(const char *x, const char *y)
 	return y;
 }
 
+static void skip_list_insert(struct packed_ref_iterator *iter,
+			     const char *start, const char *end)
+{
+	struct skip_list_entry *e;
+
+	if (start == end)
+		return;
+
+	ALLOC_GROW(iter->skip, iter->skip_nr + 1, iter->skip_alloc);
+
+	e = &iter->skip[iter->skip_nr++];
+	e->start = start;
+	e->end = end;
+}
+
 static void populate_excluded_skip_list(struct packed_ref_iterator *iter,
 					struct snapshot *snapshot,
 					const char **excluded_patterns)
 {
+	struct skip_list_entry *included = NULL;
+	size_t included_nr, included_alloc;
 	size_t i, j;
+	const char **p;
 
 	if (!excluded_patterns)
 		return;
 
-	while (*excluded_patterns) {
-		const char *pattern = *excluded_patterns++;
+	included_nr = included_alloc = 0;
+	for (p = excluded_patterns; *p; p++) {
 		struct skip_list_entry *e;
+		/*
+		 * XXX doesn't handle redundant hidden ref rules, e.g.:
+		 *
+		 *	[transfer]
+		 *		hideRefs = refs/foo
+		 *		hideRefs = !refs/foo/bar
+		 *		hideRefs = refs/foo
+		 */
+		if (**p != '!' || has_glob_special(*p))
+			continue;
+
+		ALLOC_GROW(included, included_nr + 1, included_alloc);
+
+		e = &included[included_nr++];
+		e->start = find_reference_location(snapshot, *p + 1, 0);
+		e->end = find_reference_location_end(snapshot, *p + 1, 0);
+	}
+
+	QSORT(included, included_nr, skip_list_entry_cmp);
+
+	for (p = excluded_patterns; *p; p++) {
+		const char *p_start, *p_end;
+		size_t skips_before = iter->skip_nr;
 
 		/*
 		 * We can't feed any excludes with globs in them to the
@@ -1016,14 +1057,40 @@ static void populate_excluded_skip_list(struct packed_ref_iterator *iter,
 		 * should not exclude "foobar" (but the prefix "foo"
 		 * would match that and mark it for exclusion).
 		 */
-		if (has_glob_special(pattern))
+		if (**p == '!' || has_glob_special(*p))
 			continue;
 
-		ALLOC_GROW(iter->skip, iter->skip_nr + 1, iter->skip_alloc);
+		p_start = find_reference_location(snapshot, *p, 0);
+		p_end = find_reference_location_end(snapshot, *p, 0);
 
-		e = &iter->skip[iter->skip_nr++];
-		e->start = find_reference_location(snapshot, pattern, 0);
-		e->end = find_reference_location_end(snapshot, pattern, 0);
+		for (i = 0; i < included_nr; i++) {
+			struct skip_list_entry *include = &included[i];
+
+			if (include->start == include->end)
+				continue; /* empty region, nothing to do */
+
+			/* left overlap */
+			if (p_start <= include->start && include->start <= p_end)
+				skip_list_insert(iter, p_start, include->start);
+
+			/* right overlap */
+			if (p_start <= include->end && include->end <= p_end) {
+				const char *next, *skip_end = p_end;
+
+				next = find_end_of_record(include->end + 1,
+							  snapshot->eof - 1);
+
+				if ((i + 1 < included_nr) &&
+				    (included[i + 1].start < skip_end))
+					skip_end = included[i + 1].start;
+
+				skip_list_insert(iter, next, skip_end);
+			}
+		}
+
+		/* only skip if the region has not already been subdivided */
+		if (iter->skip_nr == skips_before)
+			skip_list_insert(iter, p_start, p_end);
 	}
 
 	if (!iter->skip_nr) {
@@ -1031,7 +1098,7 @@ static void populate_excluded_skip_list(struct packed_ref_iterator *iter,
 		 * Every entry in exclude_patterns has a meta-character,
 		 * nothing to do here.
 		 */
-		return;
+		goto done;
 	}
 
 	QSORT(iter->skip, iter->skip_nr, skip_list_entry_cmp);
@@ -1066,6 +1133,9 @@ static void populate_excluded_skip_list(struct packed_ref_iterator *iter,
 
 	iter->skip_nr = j;
 	iter->skip_pos = 0;
+
+done:
+	free(included);
 }
 
 static struct ref_iterator *packed_ref_iterator_begin(
