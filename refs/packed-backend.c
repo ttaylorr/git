@@ -596,6 +596,21 @@ static const char *find_reference_location(struct snapshot *snapshot,
 }
 
 /*
+ * Find the place in `snapshot->buf` after the end of the record for
+ * `refname`. In other words, find the location of first thing *after*
+ * `refname`.
+ *
+ * Other semantics are identical to the ones in
+ * `find_reference_location()`.
+ */
+static const char *find_reference_location_end(struct snapshot *snapshot,
+					       const char *refname,
+					       int mustexist)
+{
+	return find_reference_location_1(snapshot, refname, mustexist, 0);
+}
+
+/*
  * Create a newly-allocated `snapshot` of the `packed-refs` file in
  * its current state and return it. The return value will already have
  * its reference count incremented.
@@ -786,6 +801,13 @@ struct packed_ref_iterator {
 	/* The end of the part of the buffer that will be iterated over: */
 	const char *eof;
 
+	struct skip_list_entry {
+		const char *start;
+		const char *end;
+	} *skip;
+	size_t skip_nr, skip_alloc;
+	size_t skip_pos;
+
 	/* Scratch space for current values: */
 	struct object_id oid, peeled;
 	struct strbuf refname_buf;
@@ -803,14 +825,34 @@ struct packed_ref_iterator {
  */
 static int next_record(struct packed_ref_iterator *iter)
 {
-	const char *p = iter->pos, *eol;
+	const char *p, *eol;
 
 	strbuf_reset(&iter->refname_buf);
+
+	/*
+	 * If iter->pos is contained within a skipped region, jump past
+	 * it.
+	 *
+	 * Note that each skipped region is considered at most once,
+	 * since they are ordered based on their starting position.
+	 */
+	while (iter->skip_pos < iter->skip_nr) {
+		struct skip_list_entry *curr = &iter->skip[iter->skip_pos];
+		if (iter->pos < curr->start)
+			break; /* not to the next jump yet */
+
+		iter->skip_pos++;
+		if (iter->pos < curr->end) {
+			iter->pos = curr->end;
+			break;
+		}
+	}
 
 	if (iter->pos == iter->eof)
 		return ITER_DONE;
 
 	iter->base.flags = REF_ISPACKED;
+	p = iter->pos;
 
 	if (iter->eof - p < the_hash_algo->hexsz + 2 ||
 	    parse_oid_hex(p, &iter->oid, &p) ||
@@ -918,6 +960,7 @@ static int packed_ref_iterator_abort(struct ref_iterator *ref_iterator)
 	int ok = ITER_DONE;
 
 	strbuf_release(&iter->refname_buf);
+	free(iter->skip);
 	release_snapshot(iter->snapshot);
 	base_ref_iterator_free(ref_iterator);
 	return ok;
@@ -928,6 +971,108 @@ static struct ref_iterator_vtable packed_ref_iterator_vtable = {
 	.peel = packed_ref_iterator_peel,
 	.abort = packed_ref_iterator_abort
 };
+
+static int skip_list_entry_cmp(const void *va, const void *vb)
+{
+	const struct skip_list_entry *a = va;
+	const struct skip_list_entry *b = vb;
+
+	if (a->start < b->start)
+		return -1;
+	if (a->start > b->start)
+		return 1;
+	return 0;
+}
+
+static int has_glob_special(const char *str)
+{
+	const char *p;
+	for (p = str; *p; p++) {
+		if (is_glob_special(*p))
+			return 1;
+	}
+	return 0;
+}
+
+static const char *ptr_max(const char *x, const char *y)
+{
+	if (x > y)
+		return x;
+	return y;
+}
+
+static void populate_excluded_skip_list(struct packed_ref_iterator *iter,
+					struct snapshot *snapshot,
+					const char **excluded_patterns)
+{
+	size_t i, j;
+	const char **pattern;
+
+	if (!excluded_patterns)
+		return;
+
+	for (pattern = excluded_patterns; *pattern; pattern++) {
+		struct skip_list_entry *e;
+
+		/*
+		 * We can't feed any excludes with globs in them to the
+		 * refs machinery.  It only understands prefix matching.
+		 * We likewise can't even feed the string leading up to
+		 * the first meta-character, as something like "foo[a]"
+		 * should not exclude "foobar" (but the prefix "foo"
+		 * would match that and mark it for exclusion).
+		 */
+		if (has_glob_special(*pattern))
+			continue;
+
+		ALLOC_GROW(iter->skip, iter->skip_nr + 1, iter->skip_alloc);
+
+		e = &iter->skip[iter->skip_nr++];
+		e->start = find_reference_location(snapshot, *pattern, 0);
+		e->end = find_reference_location_end(snapshot, *pattern, 0);
+	}
+
+	if (!iter->skip_nr) {
+		/*
+		 * Every entry in exclude_patterns has a meta-character,
+		 * nothing to do here.
+		 */
+		return;
+	}
+
+	QSORT(iter->skip, iter->skip_nr, skip_list_entry_cmp);
+
+	/*
+	 * As an optimization, merge adjacent entries in the skip list
+	 * to jump forwards as far as possible when entering a skipped
+	 * region.
+	 *
+	 * For example, if we have two skipped regions:
+	 *
+	 *	[[A, B], [B, C]]
+	 *
+	 * we want to combine that into a single entry jumping from A to
+	 * C.
+	 */
+	for (i = 1, j = 1; i < iter->skip_nr; i++) {
+		struct skip_list_entry *ours = &iter->skip[i];
+		struct skip_list_entry *prev = &iter->skip[i - 1];
+
+		if (ours->start == ours->end) {
+			/* ignore empty regions (no matching entries) */
+			continue;
+		} else if (prev->end >= ours->start) {
+			/* overlapping regions extend the previous one */
+			prev->end = ptr_max(prev->end, ours->end);
+		} else {
+			/* otherwise, insert a new region */
+			iter->skip[j++] = *ours;
+		}
+	}
+
+	iter->skip_nr = j;
+	iter->skip_pos = 0;
+}
 
 static struct ref_iterator *packed_ref_iterator_begin(
 		struct ref_store *ref_store,
@@ -963,6 +1108,9 @@ static struct ref_iterator *packed_ref_iterator_begin(
 	CALLOC_ARRAY(iter, 1);
 	ref_iterator = &iter->base;
 	base_ref_iterator_init(ref_iterator, &packed_ref_iterator_vtable, 1);
+
+	if (exclude_patterns)
+		populate_excluded_skip_list(iter, snapshot, exclude_patterns);
 
 	iter->snapshot = snapshot;
 	acquire_snapshot(snapshot);
