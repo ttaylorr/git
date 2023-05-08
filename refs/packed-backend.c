@@ -11,6 +11,7 @@
 #include "../chdir-notify.h"
 #include "../wrapper.h"
 #include "../write-or-die.h"
+#include "../trace2.h"
 
 enum mmap_strategy {
 	/*
@@ -844,6 +845,7 @@ static int next_record(struct packed_ref_iterator *iter)
 		iter->skip_pos++;
 		if (iter->pos < curr->end) {
 			iter->pos = curr->end;
+			trace2_counter_add(TRACE2_COUNTER_ID_PACKED_REFS_SKIPS, 1);
 			break;
 		}
 	}
