@@ -113,6 +113,28 @@ test_expect_success 'do not bother loosening old objects' '
 	test_must_fail git cat-file -p $obj2
 '
 
+test_expect_success 'extra recent tips are kept regardless of age' '
+	obj1=$(echo one | git hash-object -w --stdin) &&
+	obj2=$(echo two | git hash-object -w --stdin) &&
+	pack1=$(echo $obj1 | git pack-objects .git/objects/pack/pack) &&
+	pack2=$(echo $obj2 | git pack-objects .git/objects/pack/pack) &&
+	git prune-packed &&
+
+	git cat-file -p $obj1 &&
+	git cat-file -p $obj2 &&
+
+	write_script extra-tips <<-EOF &&
+	echo $obj2
+	EOF
+	git config pack.recentObjectsHook ./extra-tips &&
+
+	test-tool chmtime =-86400 .git/objects/pack/pack-$pack2.pack &&
+	git repack -A -d --unpack-unreachable=1.hour.ago &&
+
+	git cat-file -p $obj1 &&
+	git cat-file -p $obj2
+'
+
 test_expect_success 'keep packed objects found only in index' '
 	echo my-unique-content >file &&
 	git add file &&
