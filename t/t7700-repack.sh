@@ -213,16 +213,16 @@ test_expect_success 'repack --keep-pack' '
 	test_create_repo keep-pack &&
 	(
 		cd keep-pack &&
-		# avoid producing difference packs to delta/base choices
+		# avoid producing different packs due to delta/base choices
 		git config pack.window 0 &&
 		P1=$(commit_and_pack 1) &&
 		P2=$(commit_and_pack 2) &&
 		P3=$(commit_and_pack 3) &&
 		P4=$(commit_and_pack 4) &&
-		ls .git/objects/pack/*.pack >old-counts &&
+		find .git/objects/pack -name "*.pack" -type f | sort >old-counts &&
 		test_line_count = 4 old-counts &&
 		git repack -a -d --keep-pack $P1 --keep-pack $P4 &&
-		ls .git/objects/pack/*.pack >new-counts &&
+		find .git/objects/pack -name "*.pack" -type f | sort >new-counts &&
 		grep -q $P1 new-counts &&
 		grep -q $P4 new-counts &&
 		test_line_count = 3 new-counts &&
@@ -239,11 +239,48 @@ test_expect_success 'repack --keep-pack' '
 			mv "$from" "$to" || return 1
 		done &&
 
-		git repack --cruft -d --keep-pack $P1 --keep-pack $P4 &&
+		# A .idx file without a .pack should not stop us from
+		# repacking what we can.
+		touch .git/objects/pack/pack-does-not-exist.idx &&
 
-		ls .git/objects/pack/*.pack >newer-counts &&
-		test_cmp new-counts newer-counts &&
+		find .git/objects/pack -name "*.pack" -type f | sort >packs.before &&
+		git repack --cruft -d --keep-pack $P1 --keep-pack $P4 &&
+		find .git/objects/pack -name "*.pack" -type f | sort >packs.after &&
+
+		test_cmp packs.before packs.after &&
 		git fsck
+	)
+'
+
+test_expect_success 'repacking fails when missing .pack actually means missing objects' '
+	test_create_repo idx-without-pack &&
+	(
+		cd idx-without-pack &&
+
+		# Avoid producing different packs due to delta/base choices
+		git config pack.window 0 &&
+		P1=$(commit_and_pack 1) &&
+		P2=$(commit_and_pack 2) &&
+		P3=$(commit_and_pack 3) &&
+		P4=$(commit_and_pack 4) &&
+		find .git/objects/pack -name "*.pack" -type f | sort >old-counts &&
+		test_line_count = 4 old-counts &&
+
+		# Remove one .pack file
+		rm .git/objects/pack/$P2 &&
+
+		find .git/objects/pack -name "*.pack" -type f |
+			sort >before-pack-dir &&
+
+		test_must_fail git fsck &&
+		test_must_fail git repack --cruft -d 2>err &&
+		grep "bad object" err &&
+
+		# Before failing, the repack did not modify the
+		# pack directory.
+		find .git/objects/pack -name "*.pack" -type f |
+			sort >after-pack-dir &&
+		test_cmp before-pack-dir after-pack-dir
 	)
 '
 
