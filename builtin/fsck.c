@@ -1073,7 +1073,9 @@ int cmd_fsck(int argc, const char **argv, const char *prefix)
 			child_process_init(&commit_graph_verify);
 			commit_graph_verify.git_cmd = 1;
 			strvec_pushl(&commit_graph_verify.args, "commit-graph",
-				     "verify", "--object-dir", odb->path, NULL);
+				     "verify",
+				     show_progress ? "--progress" : "--no-progress",
+				     "--object-dir", odb->path, NULL);
 			if (run_command(&commit_graph_verify))
 				errors_found |= ERROR_COMMIT_GRAPH;
 		}
