@@ -20,11 +20,11 @@ graph_git_behavior() {
 	BRANCH=$3
 	COMPARE=$4
 	test_expect_success "check normal git operations: $MSG" '
-		graph_git_two_modes "-C $DIR log --oneline $BRANCH" &&
-		graph_git_two_modes "-C $DIR log --topo-order $BRANCH" &&
-		graph_git_two_modes "-C $DIR log --graph $COMPARE..$BRANCH" &&
-		graph_git_two_modes "-C $DIR branch -vv" &&
-		graph_git_two_modes "-C $DIR merge-base -a $BRANCH $COMPARE"
+		graph_git_two_modes "${DIR:+-C $DIR} log --oneline $BRANCH" &&
+		graph_git_two_modes "${DIR:+-C $DIR} log --topo-order $BRANCH" &&
+		graph_git_two_modes "${DIR:+-C $DIR} log --graph $COMPARE..$BRANCH" &&
+		graph_git_two_modes "${DIR:+-C $DIR} branch -vv" &&
+		graph_git_two_modes "${DIR:+-C $DIR} merge-base -a $BRANCH $COMPARE"
 	'
 }
 
