@@ -2681,16 +2681,16 @@ static int verify_one_commit_graph(struct repository *r,
 			graph_report(_("commit-graph parent list for commit %s terminates early"),
 				     oid_to_hex(&cur_oid));
 
-		if (!commit_graph_generation_from_graph(graph_commit)) {
-			if (generation_zero == GENERATION_NUMBER_EXISTS)
-				graph_report(_("commit-graph has generation number zero for commit %s, but non-zero elsewhere"),
-					     oid_to_hex(&cur_oid));
-			generation_zero = GENERATION_ZERO_EXISTS;
-		} else {
+		if (commit_graph_generation_from_graph(graph_commit)) {
 			if (generation_zero == GENERATION_ZERO_EXISTS)
 				graph_report(_("commit-graph has non-zero generation number for commit %s, but zero elsewhere"),
 					     oid_to_hex(&cur_oid));
 			generation_zero = GENERATION_NUMBER_EXISTS;
+		} else {
+			if (generation_zero == GENERATION_NUMBER_EXISTS)
+				graph_report(_("commit-graph has generation number zero for commit %s, but non-zero elsewhere"),
+					     oid_to_hex(&cur_oid));
+			generation_zero = GENERATION_ZERO_EXISTS;
 		}
 
 		if (generation_zero == GENERATION_ZERO_EXISTS)
