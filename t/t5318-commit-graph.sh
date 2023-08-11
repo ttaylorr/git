@@ -628,6 +628,20 @@ test_expect_success 'detect mixed generation numbers (zero to non-zero)' '
 		"but zero elsewhere"
 '
 
+test_expect_success 'detect mixed generation numbers (flip-flop)' '
+	corrupt_graph_setup &&
+	for pos in \
+		$GRAPH_BYTE_COMMIT_GENERATION \
+		$GRAPH_BYTE_COMMIT_GENERATION_LAST
+	do
+		printf "\0\0\0\0" | dd of="full/$objdir/info/commit-graph" bs=1 \
+		seek="$pos" conv=notrunc || return 1
+	done &&
+
+	test_must_fail git -C full commit-graph verify 2>err &&
+	test 1 -eq "$(grep -c "generation number" err)"
+'
+
 test_expect_success 'git fsck (checks commit-graph when config set to true)' '
 	git -C full fsck &&
 	corrupt_graph_and_verify $GRAPH_BYTE_FOOTER "\00" \
