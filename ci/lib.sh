@@ -227,7 +227,7 @@ export SKIP_DASHED_BUILT_INS=YesPlease
 
 case "$runs_on_pool" in
 ubuntu-*)
-	if test "$jobname" = "linux-gcc-default"
+	if test "$jobname" = "linux-gcc-default" || test "$jobname" = "coverity"
 	then
 		break
 	fi

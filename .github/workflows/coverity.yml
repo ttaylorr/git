@@ -1,0 +1,22 @@
+name: Coverity
+
+on: [push, pull_request]
+
+jobs:
+  coverity:
+    if: (vars.ENABLE_COVERITY == 'true') &&
+      (vars.COVERITY_BRANCHES == '' ||
+       contains(vars.COVERITY_BRANCHES, github.ref_name) ||
+       contains(vars.COVERITY_BRANCHES, '*'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ci/install-dependencies.sh
+        env:
+          jobname: coverity
+      - uses: vapier/coverity-scan-action@cae3c096a2eb21c431961a49375ac17aea2670ce
+        with:
+          email: ${{ secrets.COVERITY_SCAN_EMAIL }}
+          token: ${{ secrets.COVERITY_SCAN_TOKEN }}
+          command: make -j8
+
