@@ -1,0 +1,35 @@
+name: Coverity
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'
+
+jobs:
+  coverity:
+    runs-on: ubuntu-latest
+    env:
+      HAVE_COVERITY_TOKEN: ${{ secrets.COVERITY_SCAN_EMAIL != '' && secrets.COVERITY_SCAN_TOKEN != '' }}
+    steps:
+      - id: check-coverity
+        name: check whether Coverity token is configured
+        run: |
+          echo "enabled=$HAVE_COVERITY_TOKEN" >>$GITHUB_OUTPUT
+      - uses: actions/checkout@v3
+        if: steps.check-coverity.outputs.enabled == 'true'
+      - run: ci/install-dependencies.sh
+        env:
+          CC: gcc
+          CC_PACKAGE: gcc-9
+          jobname: linux-gcc-default
+          runs_on_pool: ubuntu-latest
+        if: steps.check-coverity.outputs.enabled == 'true'
+      - uses: vapier/coverity-scan-action@v1
+        if: steps.check-coverity.outputs.enabled == 'true'
+        with:
+          email: ${{ secrets.COVERITY_SCAN_EMAIL }}
+          token: ${{ secrets.COVERITY_SCAN_TOKEN }}
+          command: make -j8
+
