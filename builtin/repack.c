@@ -26,8 +26,6 @@
 #define LOOSEN_UNREACHABLE 2
 #define PACK_CRUFT 4
 
-#define DELETE_PACK 1
-
 static int pack_everything;
 static int delta_base_offset = 1;
 static int pack_kept_objects = -1;
@@ -96,6 +94,10 @@ static int repack_config(const char *var, const char *value,
 
 struct existing_packs {
 	struct string_list kept_packs;
+	/*
+	 * for both non_kept_packs, and cruft_packs, a non-NULL
+	 * 'util' field indicates the pack should be deleted.
+	 */
 	struct string_list non_kept_packs;
 	struct string_list cruft_packs;
 };
@@ -130,7 +132,7 @@ static void mark_packs_for_deletion_1(struct string_list *names,
 		 * (if `-d` was given).
 		 */
 		if (!string_list_has_string(names, sha1))
-			item->util = (void*)(uintptr_t)((size_t)item->util | DELETE_PACK);
+			item->util = (void*)1;
 	}
 }
 
@@ -158,7 +160,7 @@ static void remove_redundant_packs_1(struct string_list *packs)
 {
 	struct string_list_item *item;
 	for_each_string_list_item(item, packs) {
-		if (!((uintptr_t)item->util & DELETE_PACK))
+		if (!item->util)
 			continue;
 		remove_redundant_pack(packdir, item->string);
 	}
@@ -695,20 +697,20 @@ static void midx_included_packs(struct string_list *include,
 
 		for_each_string_list_item(item, &existing->cruft_packs) {
 			/*
-			 * no need to check DELETE_PACK, since we're not
-			 * doing an ALL_INTO_ONE repack
+			 * no need to check for deleted packs, since we're
+			 * not doing an ALL_INTO_ONE repack
 			 */
 			string_list_insert(include, xstrfmt("%s.idx", item->string));
 		}
 	} else {
 		for_each_string_list_item(item, &existing->non_kept_packs) {
-			if ((uintptr_t)item->util & DELETE_PACK)
+			if (item->util)
 				continue;
 			string_list_insert(include, xstrfmt("%s.idx", item->string));
 		}
 
 		for_each_string_list_item(item, &existing->cruft_packs) {
-			if ((uintptr_t)item->util & DELETE_PACK)
+			if (item->util)
 				continue;
 			string_list_insert(include, xstrfmt("%s.idx", item->string));
 		}
