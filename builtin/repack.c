@@ -26,6 +26,9 @@
 #define LOOSEN_UNREACHABLE 2
 #define PACK_CRUFT 4
 
+#define DELETE_PACK ((void*)(uintptr_t)1)
+#define RETAIN_PACK ((uintptr_t)(1<<1))
+
 static int pack_everything;
 static int delta_base_offset = 1;
 static int pack_kept_objects = -1;
@@ -113,6 +116,11 @@ static int has_existing_non_kept_packs(const struct existing_packs *existing)
 	return existing->non_kept_packs.nr || existing->cruft_packs.nr;
 }
 
+static int pack_is_retained(struct string_list_item *item)
+{
+	return (uintptr_t)item->util & RETAIN_PACK;
+}
+
 static void mark_packs_for_deletion_1(struct string_list *names,
 				      struct string_list *list)
 {
@@ -125,15 +133,37 @@ static void mark_packs_for_deletion_1(struct string_list *names,
 		if (len < hexsz)
 			continue;
 		sha1 = item->string + len - hexsz;
-		/*
-		 * Mark this pack for deletion, which ensures that this
-		 * pack won't be included in a MIDX (if `--write-midx`
-		 * was given) and that we will actually delete this pack
-		 * (if `-d` was given).
-		 */
-		if (!string_list_has_string(names, sha1))
-			item->util = (void*)1;
+
+		if (pack_is_retained(item)) {
+			item->util = NULL;
+		} else if (!string_list_has_string(names, sha1)) {
+			/*
+			 * Mark this pack for deletion, which ensures
+			 * that this pack won't be included in a MIDX
+			 * (if `--write-midx` was given) and that we
+			 * will actually delete this pack (if `-d` was
+			 * given).
+			 */
+			item->util = DELETE_PACK;
+		}
 	}
+}
+
+static void retain_cruft_pack(struct existing_packs *existing,
+			      struct packed_git *cruft)
+{
+	struct strbuf buf = STRBUF_INIT;
+	struct string_list_item *item;
+
+	strbuf_addstr(&buf, pack_basename(cruft));
+	strbuf_strip_suffix(&buf, ".pack");
+
+	item = string_list_lookup(&existing->cruft_packs, buf.buf);
+	if (!item)
+		BUG("could not find cruft pack '%s'", pack_basename(cruft));
+
+	item->util = (void*)RETAIN_PACK;
+	strbuf_release(&buf);
 }
 
 static void mark_packs_for_deletion(struct existing_packs *existing,
@@ -217,6 +247,8 @@ static void collect_pack_filenames(struct existing_packs *existing,
 	}
 
 	string_list_sort(&existing->kept_packs);
+	string_list_sort(&existing->non_kept_packs);
+	string_list_sort(&existing->cruft_packs);
 	strbuf_release(&buf);
 }
 
@@ -799,6 +831,72 @@ static void remove_redundant_bitmaps(struct string_list *include,
 	strbuf_release(&path);
 }
 
+static int existing_cruft_pack_cmp(const void *va, const void *vb)
+{
+	struct packed_git *a = *(struct packed_git **)va;
+	struct packed_git *b = *(struct packed_git **)vb;
+
+	if (a->pack_size < b->pack_size)
+		return -1;
+	if (a->pack_size > b->pack_size)
+		return 1;
+	return 0;
+}
+
+static void collapse_small_cruft_packs(FILE *in, unsigned long max_size,
+				       struct existing_packs *existing)
+{
+	struct packed_git **existing_cruft, *p;
+	struct strbuf buf = STRBUF_INIT;
+	unsigned long total_size = 0;
+	size_t existing_cruft_nr = 0;
+	size_t i;
+
+	ALLOC_ARRAY(existing_cruft, existing->cruft_packs.nr);
+
+	for (p = get_all_packs(the_repository); p; p = p->next) {
+		if (!(p->is_cruft && p->pack_local))
+			continue;
+
+		strbuf_reset(&buf);
+		strbuf_addstr(&buf, pack_basename(p));
+		strbuf_strip_suffix(&buf, ".pack");
+
+		if (!string_list_has_string(&existing->cruft_packs, buf.buf))
+			continue;
+
+		if (existing_cruft_nr >= existing->cruft_packs.nr)
+			BUG("too many cruft packs (found %"PRIuMAX", but knew "
+			    "of %"PRIuMAX")",
+			    (uintmax_t)existing_cruft_nr + 1,
+			    (uintmax_t)existing->cruft_packs.nr);
+		existing_cruft[existing_cruft_nr++] = p;
+	}
+
+	QSORT(existing_cruft, existing_cruft_nr, existing_cruft_pack_cmp);
+
+	for (i = 0; i < existing_cruft_nr; i++) {
+		off_t proposed;
+
+		p = existing_cruft[i];
+		proposed = st_add(total_size, p->pack_size);
+
+		if (proposed <= max_size) {
+			total_size = proposed;
+			fprintf(in, "-%s\n", pack_basename(p));
+		} else {
+			retain_cruft_pack(existing, p);
+			fprintf(in, "%s\n", pack_basename(p));
+		}
+	}
+
+	for (i = 0; i < existing->non_kept_packs.nr; i++)
+		fprintf(in, "-%s.pack\n",
+			existing->non_kept_packs.items[i].string);
+
+	strbuf_release(&buf);
+}
+
 static int write_cruft_pack(const struct pack_objects_args *args,
 			    const char *destination,
 			    const char *pack_prefix,
@@ -846,10 +944,18 @@ static int write_cruft_pack(const struct pack_objects_args *args,
 	in = xfdopen(cmd.in, "w");
 	for_each_string_list_item(item, names)
 		fprintf(in, "%s-%s.pack\n", pack_prefix, item->string);
-	for_each_string_list_item(item, &existing->non_kept_packs)
-		fprintf(in, "-%s.pack\n", item->string);
-	for_each_string_list_item(item, &existing->cruft_packs)
-		fprintf(in, "-%s.pack\n", item->string);
+	if (args->max_pack_size && !cruft_expiration) {
+		unsigned long max_pack_size;
+		if (!git_parse_ulong(args->max_pack_size, &max_pack_size))
+			return error(_("could not parse --cruft-max-size: '%s'"),
+				     args->max_pack_size);
+		collapse_small_cruft_packs(in, max_pack_size, existing);
+	} else {
+		for_each_string_list_item(item, &existing->non_kept_packs)
+			fprintf(in, "-%s.pack\n", item->string);
+		for_each_string_list_item(item, &existing->cruft_packs)
+			fprintf(in, "-%s.pack\n", item->string);
+	}
 	for_each_string_list_item(item, &existing->kept_packs)
 		fprintf(in, "%s.pack\n", item->string);
 	fclose(in);
@@ -912,6 +1018,9 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 				   PACK_CRUFT),
 		OPT_STRING(0, "cruft-expiration", &cruft_expiration, N_("approxidate"),
 				N_("with --cruft, expire objects older than this")),
+		OPT_STRING(0, "cruft-max-size", &cruft_po_args.max_pack_size,
+				N_("bytes"),
+				N_("with --cruft, limit the size of new cruft packs")),
 		OPT_BOOL('d', NULL, &delete_redundant,
 				N_("remove redundant packs, and run git-prune-packed")),
 		OPT_BOOL('f', NULL, &po_args.no_reuse_delta,

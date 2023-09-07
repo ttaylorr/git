@@ -303,6 +303,33 @@ test_expect_success 'gc.bigPackThreshold ignores cruft packs' '
 	)
 '
 
+cruft_max_size_opts="git repack -d -l --cruft --cruft-expiration=2.weeks.ago"
+
+test_expect_success 'setup for --cruft-max-size tests' '
+	git init cruft--max-size &&
+	(
+		cd cruft--max-size &&
+		prepare_cruft_history
+	)
+'
+
+test_expect_success '--cruft-max-size sets appropriate repack options' '
+	GIT_TRACE2_EVENT=$(pwd)/trace2.txt git -C cruft--max-size \
+		gc --cruft --cruft-max-size=1M &&
+	test_subcommand $cruft_max_size_opts --cruft-max-size=1M <trace2.txt
+'
+
+test_expect_success 'gc.cruftMaxSize sets appropriate repack options' '
+	GIT_TRACE2_EVENT=$(pwd)/trace2.txt \
+		git -C cruft--max-size -c gc.cruftMaxSize=2M gc --cruft &&
+	test_subcommand $cruft_max_size_opts --cruft-max-size=2M <trace2.txt &&
+
+	GIT_TRACE2_EVENT=$(pwd)/trace2.txt \
+		git -C cruft--max-size -c gc.cruftMaxSize=2M gc --cruft \
+		--cruft-max-size=3M &&
+	test_subcommand $cruft_max_size_opts --cruft-max-size=3M <trace2.txt
+'
+
 run_and_wait_for_auto_gc () {
 	# We read stdout from gc for the side effect of waiting until the
 	# background gc process exits, closing its fd 9.  Furthermore, the
