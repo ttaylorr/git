@@ -224,7 +224,81 @@ static int stream_to_pack(struct bulk_checkin_packfile *state,
 		case Z_STREAM_END:
 			continue;
 		default:
-			die("unexpected deflate failure: %d", status);
+			die(_("unexpected deflate failure: %d"), status);
+		}
+	}
+	git_deflate_end(&s);
+	return 0;
+}
+
+/*
+ * Write 'size' bytes from the memory address specified by 'ptr' to
+ * the packfile in 'state' while updating the hash in 'ctx'.
+ *
+ * Signal a failure by returning a negative value when the resulting
+ * pack would exceed the pack size limit and this is not the first
+ * object in the pack, so that the caller can discard what we wrote
+ * from the current pack by truncating it and opening a new one. The
+ * caller will then call us again.
+ *
+ * The already_hashed_to pointer is kept untouched by the caller to
+ * make sure we do not hash the same byte when we are called again.
+ * This way, the caller does not have to checkpoint its hash status
+ * before calling us just in case we ask it to call us again with a
+ * new pack.
+ */
+static int write_to_pack(struct bulk_checkin_packfile *state,
+			 git_hash_ctx *ctx, off_t *already_hashed_to,
+			 void *ptr, size_t size, enum object_type type,
+			 unsigned flags)
+{
+	git_zstream s;
+	unsigned char obuf[16384];
+	unsigned hdrlen;
+	int status = Z_OK;
+
+	git_deflate_init(&s, pack_compression_level);
+
+	hdrlen = encode_in_pack_object_header(obuf, sizeof(obuf), type, size);
+	s.next_out = obuf + hdrlen;
+	s.avail_out = sizeof(obuf) - hdrlen;
+	s.next_in = ptr;
+	s.avail_in = size;
+
+	if (*already_hashed_to < size) {
+		size_t hsize = size - *already_hashed_to;
+		if (hsize)
+			the_hash_algo->update_fn(ctx, ptr, hsize);
+		*already_hashed_to = size;
+	}
+
+	while (status != Z_STREAM_END) {
+		status = git_deflate(&s, Z_FINISH);
+		if (!s.avail_out || status == Z_STREAM_END) {
+			if (flags & HASH_WRITE_OBJECT) {
+				size_t written = s.next_out - obuf;
+
+				if (state->nr_written &&
+				    pack_size_limit_cfg &&
+				    pack_size_limit_cfg < state->offset + written) {
+					git_deflate_abort(&s);
+					return -1;
+				}
+
+				hashwrite(state->f, obuf, written);
+				state->offset += written;
+			}
+			s.next_out = obuf;
+			s.avail_out = sizeof(obuf);
+		}
+
+		switch (status) {
+		case Z_OK:
+		case Z_BUF_ERROR:
+		case Z_STREAM_END:
+			continue;
+		default:
+			die(_("unexpected deflate failure: %d"), status);
 		}
 	}
 	git_deflate_end(&s);
