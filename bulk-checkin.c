@@ -247,6 +247,20 @@ static void prepare_to_stream(struct bulk_checkin_packfile *state,
 		die_errno("unable to write pack header");
 }
 
+static void init_obuf_header(git_hash_ctx *ctx,
+			     struct hashfile_checkpoint *checkpoint,
+			     enum object_type type, size_t size)
+{
+	unsigned char obuf[16384];
+	unsigned header_len;
+
+	header_len = format_object_header((char *)obuf, sizeof(obuf),
+					  type, size);
+	the_hash_algo->init_fn(ctx);
+	the_hash_algo->update_fn(ctx, obuf, header_len);
+	the_hash_algo->init_fn(&checkpoint->ctx);
+}
+
 static int deflate_to_pack(struct bulk_checkin_packfile *state,
 			   struct object_id *result_oid,
 			   int fd, size_t size,
@@ -255,8 +269,6 @@ static int deflate_to_pack(struct bulk_checkin_packfile *state,
 {
 	off_t seekback, already_hashed_to;
 	git_hash_ctx ctx;
-	unsigned char obuf[16384];
-	unsigned header_len;
 	struct hashfile_checkpoint checkpoint = {0};
 	struct pack_idx_entry *idx = NULL;
 
@@ -264,11 +276,7 @@ static int deflate_to_pack(struct bulk_checkin_packfile *state,
 	if (seekback == (off_t) -1)
 		return error("cannot find the current offset");
 
-	header_len = format_object_header((char *)obuf, sizeof(obuf),
-					  type, size);
-	the_hash_algo->init_fn(&ctx);
-	the_hash_algo->update_fn(&ctx, obuf, header_len);
-	the_hash_algo->init_fn(&checkpoint.ctx);
+	init_obuf_header(&ctx, &checkpoint, type, size);
 
 	/* Note: idx is non-NULL when we are writing */
 	if ((flags & HASH_WRITE_OBJECT) != 0)
