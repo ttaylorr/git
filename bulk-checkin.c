@@ -400,6 +400,57 @@ static int deflate_to_pack(struct bulk_checkin_packfile *state,
 	return 0;
 }
 
+static int deflate_to_pack_mem(struct bulk_checkin_packfile *state,
+			       struct object_id *result_oid,
+			       void *ptr, size_t size,
+			       enum object_type type, unsigned flags)
+{
+	off_t already_hashed_to = 0;
+	git_hash_ctx ctx;
+	struct hashfile_checkpoint checkpoint = {0};
+	struct pack_idx_entry *idx = NULL;
+
+	init_obuf_header(&ctx, &checkpoint, type, size);
+
+	/* Note: idx is non-NULL when we are writing */
+	if ((flags & HASH_WRITE_OBJECT) != 0)
+		CALLOC_ARRAY(idx, 1);
+
+	while (1) {
+		prepare_to_stream(state, flags);
+		if (idx) {
+			hashfile_checkpoint(state->f, &checkpoint);
+			idx->offset = state->offset;
+			crc32_begin(state->f);
+		}
+		if (!write_to_pack(state, &ctx, &already_hashed_to, ptr, size,
+				   type, flags))
+			break;
+		if (!idx)
+			BUG("should not happen");
+		hashfile_truncate(state->f, &checkpoint);
+		state->offset = checkpoint.offset;
+		flush_bulk_checkin_packfile(state);
+	}
+	the_hash_algo->final_oid_fn(result_oid, &ctx);
+	if (!idx)
+		return 0;
+
+	idx->crc32 = crc32_end(state->f);
+	if (already_written(state, result_oid)) {
+		hashfile_truncate(state->f, &checkpoint);
+		state->offset = checkpoint.offset;
+		free(idx);
+	} else {
+		oidcpy(&idx->oid, result_oid);
+		ALLOC_GROW(state->written,
+			   state->nr_written + 1,
+			   state->alloc_written);
+		state->written[state->nr_written++] = idx;
+	}
+	return 0;
+}
+
 void prepare_loose_object_bulk_checkin(void)
 {
 	/*
