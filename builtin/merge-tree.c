@@ -18,6 +18,7 @@
 #include "quote.h"
 #include "tree.h"
 #include "config.h"
+#include "bulk-checkin.h"
 
 static int line_termination = '\n';
 
@@ -515,6 +516,7 @@ int cmd_merge_tree(int argc, const char **argv, const char *prefix)
 	struct merge_tree_options o = { .show_messages = -1 };
 	int expected_remaining_argc;
 	int original_argc;
+	int ret;
 	const char *merge_base = NULL;
 
 	const char * const merge_tree_usage[] = {
@@ -633,9 +635,17 @@ int cmd_merge_tree(int argc, const char **argv, const char *prefix)
 
 	git_config(git_default_config, NULL);
 
+	if (git_env_bool("GIT_TEST_ORT_BULK_CHECKIN", 0))
+		begin_odb_transaction();
+
 	/* Do the relevant type of merge */
 	if (o.mode == MODE_REAL)
-		return real_merge(&o, merge_base, argv[0], argv[1], prefix);
+		ret = real_merge(&o, merge_base, argv[0], argv[1], prefix);
 	else
-		return trivial_merge(argv[0], argv[1], argv[2]);
+		ret = trivial_merge(argv[0], argv[1], argv[2]);
+
+	if (git_env_bool("GIT_TEST_ORT_BULK_CHECKIN", 0))
+		end_odb_transaction();
+
+	return ret;
 }

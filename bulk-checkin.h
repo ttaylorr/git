@@ -13,6 +13,9 @@ int index_bulk_checkin(struct object_id *oid,
 		       int fd, size_t size, enum object_type type,
 		       const char *path, unsigned flags);
 
+int index_bulk_checkin_mem(struct object_id *oid, void *ptr, size_t size,
+			   enum object_type type, unsigned flags);
+
 /*
  * Tell the object database to optimize for adding
  * multiple objects. end_odb_transaction must be called

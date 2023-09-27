@@ -495,6 +495,16 @@ int index_bulk_checkin(struct object_id *oid,
 	return status;
 }
 
+int index_bulk_checkin_mem(struct object_id *oid, void *ptr, size_t size,
+			   enum object_type type, unsigned flags)
+{
+	int status = deflate_to_pack_mem(&bulk_checkin_packfile, oid, ptr, size,
+					 type, flags);
+	if (!odb_transaction_nesting)
+		flush_bulk_checkin_packfile(&bulk_checkin_packfile);
+	return status;
+}
+
 void begin_odb_transaction(void)
 {
 	odb_transaction_nesting += 1;

@@ -48,6 +48,7 @@
 #include "tree.h"
 #include "unpack-trees.h"
 #include "xdiff-interface.h"
+#include "bulk-checkin.h"
 
 /*
  * We have many arrays of size 3.  Whenever we have such an array, the
@@ -2107,10 +2108,19 @@ static int handle_content_merge(struct merge_options *opt,
 		if ((merge_status < 0) || !result_buf.ptr)
 			ret = error(_("failed to execute internal merge"));
 
-		if (!ret &&
-		    write_object_file(result_buf.ptr, result_buf.size,
-				      OBJ_BLOB, &result->oid))
-			ret = error(_("unable to add %s to database"), path);
+		if (git_env_bool("GIT_TEST_ORT_BULK_CHECKIN", 0)) {
+			if (!ret && index_bulk_checkin_mem(&result->oid,
+							   result_buf.ptr,
+							   result_buf.size,
+							   OBJ_BLOB, 1)) {
+				ret = error(_("unable to add %s to database"), path);
+			}
+		} else {
+			if (!ret && write_object_file(result_buf.ptr, result_buf.size,
+						      OBJ_BLOB, &result->oid))
+				ret = error(_("unable to add %s to database"), path);
+		}
+
 
 		free(result_buf.ptr);
 		if (ret)
@@ -3629,9 +3639,15 @@ static int write_tree(struct object_id *result_oid,
 		strbuf_add(&buf, ri->oid.hash, hash_size);
 	}
 
-	/* Write this object file out, and record in result_oid */
-	if (write_object_file(buf.buf, buf.len, OBJ_TREE, result_oid))
-		ret = -1;
+	if (git_env_bool("GIT_TEST_ORT_BULK_CHECKIN", 0)) {
+		if (index_bulk_checkin_mem(result_oid, buf.buf, buf.len,
+					   OBJ_TREE, 1))
+			ret = -1;
+	} else {
+		/* Write this object file out, and record in result_oid */
+		if (write_object_file(buf.buf, buf.len, OBJ_TREE, result_oid))
+			ret = -1;
+	}
 	strbuf_release(&buf);
 	return ret;
 }
