@@ -438,6 +438,7 @@ static int deflate_to_pack_mem(struct bulk_checkin_packfile *state,
 
 	idx->crc32 = crc32_end(state->f);
 	if (already_written(state, result_oid)) {
+		oidcpy(&idx->oid, result_oid);
 		hashfile_truncate(state->f, &checkpoint);
 		state->offset = checkpoint.offset;
 		free(idx);
