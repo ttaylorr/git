@@ -69,6 +69,10 @@ OPTIONS
 	specify a merge-base for the merge, and specifying multiple bases is
 	currently not supported. This option is incompatible with `--stdin`.
 
+--write-pack::
+	Write any new objects into a separate packfile instead of as
+	individual loose objects.
+
 [[OUTPUT]]
 OUTPUT
 ------

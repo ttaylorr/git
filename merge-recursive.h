@@ -48,6 +48,7 @@ struct merge_options {
 	unsigned renormalize : 1;
 	unsigned record_conflict_msgs_as_headers : 1;
 	const char *msg_header_prefix;
+	unsigned write_pack : 1;
 
 	/* internal fields used by the implementation */
 	struct merge_options_internal *priv;
