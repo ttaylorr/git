@@ -273,6 +273,22 @@ static void prepare_checkpoint(struct bulk_checkin_packfile *state,
 	}
 }
 
+static void truncate_checkpoint(struct bulk_checkin_packfile *state,
+				struct hashfile_checkpoint *checkpoint,
+				struct pack_idx_entry *idx)
+{
+	/*
+	 * Writing this object to the current pack will make
+	 * it too big; we need to truncate it, start a new
+	 * pack, and write into it.
+	 */
+	if (!idx)
+		BUG("should not happen");
+	hashfile_truncate(state->f, checkpoint);
+	state->offset = checkpoint->offset;
+	flush_bulk_checkin_packfile(state);
+}
+
 static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 				struct object_id *result_oid,
 				int fd, size_t size,
@@ -300,16 +316,7 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 		if (!stream_blob_to_pack(state, &ctx, &already_hashed_to,
 					 fd, size, path, flags))
 			break;
-		/*
-		 * Writing this object to the current pack will make
-		 * it too big; we need to truncate it, start a new
-		 * pack, and write into it.
-		 */
-		if (!idx)
-			BUG("should not happen");
-		hashfile_truncate(state->f, &checkpoint);
-		state->offset = checkpoint.offset;
-		flush_bulk_checkin_packfile(state);
+		truncate_checkpoint(state, &checkpoint, idx);
 		if (lseek(fd, seekback, SEEK_SET) == (off_t) -1)
 			return error("cannot seek back");
 	}
