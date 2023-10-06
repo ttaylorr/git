@@ -247,6 +247,19 @@ static void prepare_to_stream(struct bulk_checkin_packfile *state,
 		die_errno("unable to write pack header");
 }
 
+static void format_object_header_hash(const struct git_hash_algo *algop,
+				      git_hash_ctx *ctx, enum object_type type,
+				      size_t size)
+{
+	unsigned char header[16384];
+	unsigned header_len = format_object_header((char *)header,
+						   sizeof(header),
+						   type, size);
+
+	algop->init_fn(ctx);
+	algop->update_fn(ctx, header, header_len);
+}
+
 static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 				struct object_id *result_oid,
 				int fd, size_t size,
@@ -254,8 +267,6 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 {
 	off_t seekback, already_hashed_to;
 	git_hash_ctx ctx;
-	unsigned char obuf[16384];
-	unsigned header_len;
 	struct hashfile_checkpoint checkpoint = {0};
 	struct pack_idx_entry *idx = NULL;
 
@@ -263,10 +274,7 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 	if (seekback == (off_t) -1)
 		return error("cannot find the current offset");
 
-	header_len = format_object_header((char *)obuf, sizeof(obuf),
-					  OBJ_BLOB, size);
-	the_hash_algo->init_fn(&ctx);
-	the_hash_algo->update_fn(&ctx, obuf, header_len);
+	format_object_header_hash(the_hash_algo, &ctx, OBJ_BLOB, size);
 
 	/* Note: idx is non-NULL when we are writing */
 	if ((flags & HASH_WRITE_OBJECT) != 0)
