@@ -140,6 +140,69 @@ static int already_written(struct bulk_checkin_packfile *state, struct object_id
 	return 0;
 }
 
+static int stream_obj_to_pack_incore(struct bulk_checkin_packfile *state,
+				     git_hash_ctx *ctx,
+				     off_t *already_hashed_to,
+				     const void *buf, size_t size,
+				     enum object_type type,
+				     const char *path, unsigned flags)
+{
+	git_zstream s;
+	unsigned char obuf[16384];
+	unsigned hdrlen;
+	int status = Z_OK;
+	int write_object = (flags & HASH_WRITE_OBJECT);
+
+	git_deflate_init(&s, pack_compression_level);
+
+	hdrlen = encode_in_pack_object_header(obuf, sizeof(obuf), type, size);
+	s.next_out = obuf + hdrlen;
+	s.avail_out = sizeof(obuf) - hdrlen;
+
+	if (*already_hashed_to < size) {
+		size_t hsize = size - *already_hashed_to;
+		if (hsize) {
+			the_hash_algo->update_fn(ctx, buf, hsize);
+		}
+		*already_hashed_to = size;
+	}
+	s.next_in = (void *)buf;
+	s.avail_in = size;
+
+	while (status != Z_STREAM_END) {
+		status = git_deflate(&s, Z_FINISH);
+		if (!s.avail_out || status == Z_STREAM_END) {
+			if (write_object) {
+				size_t written = s.next_out - obuf;
+
+				/* would we bust the size limit? */
+				if (state->nr_written &&
+				    pack_size_limit_cfg &&
+				    pack_size_limit_cfg < state->offset + written) {
+					git_deflate_abort(&s);
+					return -1;
+				}
+
+				hashwrite(state->f, obuf, written);
+				state->offset += written;
+			}
+			s.next_out = obuf;
+			s.avail_out = sizeof(obuf);
+		}
+
+		switch (status) {
+		case Z_OK:
+		case Z_BUF_ERROR:
+		case Z_STREAM_END:
+			continue;
+		default:
+			die("unexpected deflate failure: %d", status);
+		}
+	}
+	git_deflate_end(&s);
+	return 0;
+}
+
 /*
  * Read the contents from fd for size bytes, streaming it to the
  * packfile in state while updating the hash in ctx. Signal a failure
@@ -313,6 +376,48 @@ static void finalize_checkpoint(struct bulk_checkin_packfile *state,
 	}
 }
 
+static int deflate_obj_contents_to_pack_incore(struct bulk_checkin_packfile *state,
+					       git_hash_ctx *ctx,
+					       struct object_id *result_oid,
+					       const void *buf, size_t size,
+					       enum object_type type,
+					       const char *path, unsigned flags)
+{
+	struct hashfile_checkpoint checkpoint = {0};
+	struct pack_idx_entry *idx = NULL;
+	off_t already_hashed_to = 0;
+
+	/* Note: idx is non-NULL when we are writing */
+	if (flags & HASH_WRITE_OBJECT)
+		CALLOC_ARRAY(idx, 1);
+
+	while (1) {
+		prepare_checkpoint(state, &checkpoint, idx, flags);
+		if (!stream_obj_to_pack_incore(state, ctx, &already_hashed_to,
+					       buf, size, type, path, flags))
+			break;
+		truncate_checkpoint(state, &checkpoint, idx);
+	}
+
+	finalize_checkpoint(state, ctx, &checkpoint, idx, result_oid);
+
+	return 0;
+}
+
+static int deflate_blob_to_pack_incore(struct bulk_checkin_packfile *state,
+				       struct object_id *result_oid,
+				       const void *buf, size_t size,
+				       const char *path, unsigned flags)
+{
+	git_hash_ctx ctx;
+
+	format_object_header_hash(the_hash_algo, &ctx, OBJ_BLOB, size);
+
+	return deflate_obj_contents_to_pack_incore(state, &ctx, result_oid,
+						   buf, size, OBJ_BLOB, path,
+						   flags);
+}
+
 static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 				struct object_id *result_oid,
 				int fd, size_t size,
@@ -387,6 +492,17 @@ int index_blob_bulk_checkin(struct object_id *oid,
 {
 	int status = deflate_blob_to_pack(&bulk_checkin_packfile, oid, fd, size,
 					  path, flags);
+	if (!odb_transaction_nesting)
+		flush_bulk_checkin_packfile(&bulk_checkin_packfile);
+	return status;
+}
+
+int index_blob_bulk_checkin_incore(struct object_id *oid,
+				   const void *buf, size_t size,
+				   const char *path, unsigned flags)
+{
+	int status = deflate_blob_to_pack_incore(&bulk_checkin_packfile, oid,
+						 buf, size, path, flags);
 	if (!odb_transaction_nesting)
 		flush_bulk_checkin_packfile(&bulk_checkin_packfile);
 	return status;
