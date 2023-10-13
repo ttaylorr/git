@@ -330,18 +330,6 @@ static int graph_read_oid_lookup(const unsigned char *chunk_start,
 	return 0;
 }
 
-static int graph_read_bloom_index(const unsigned char *chunk_start,
-				  size_t chunk_size, void *data)
-{
-	struct commit_graph *g = data;
-	if (chunk_size != g->num_commits * 4) {
-		warning("commit-graph changed-path index chunk is too small");
-		return -1;
-	}
-	g->chunk_bloom_indexes = chunk_start;
-	return 0;
-}
-
 static int graph_read_bloom_data(const unsigned char *chunk_start,
 				  size_t chunk_size, void *data)
 {
@@ -461,8 +449,10 @@ struct commit_graph *parse_commit_graph(struct repo_settings *s,
 	}
 
 	if (s->commit_graph_read_changed_paths) {
-		read_chunk(cf, GRAPH_CHUNKID_BLOOMINDEXES,
-			   graph_read_bloom_index, graph);
+		if (pair_chunk_expect(cf, GRAPH_CHUNKID_BLOOMINDEXES,
+				      &graph->chunk_bloom_indexes,
+				      st_mult(graph->num_commits, 4)) == -1)
+			warning(_("commit-graph changed-path index chunk is too small (%d)"), graph->num_commits * 4);
 		read_chunk(cf, GRAPH_CHUNKID_BLOOMDATA,
 			   graph_read_bloom_data, graph);
 	}
