@@ -61,19 +61,6 @@ void get_midx_rev_filename(struct strbuf *out, struct multi_pack_index *m)
 	strbuf_addf(out, "-%s.rev", hash_to_hex(get_midx_checksum(m)));
 }
 
-static int midx_read_object_offsets(const unsigned char *chunk_start,
-				    size_t chunk_size, void *data)
-{
-	struct multi_pack_index *m = data;
-	m->chunk_object_offsets = chunk_start;
-
-	if (chunk_size != st_mult(m->num_objects, MIDX_CHUNK_OFFSET_WIDTH)) {
-		error(_("multi-pack-index object offset chunk is the wrong size"));
-		return 1;
-	}
-	return 0;
-}
-
 struct multi_pack_index *load_multi_pack_index(const char *object_dir, int local)
 {
 	struct multi_pack_index *m = NULL;
@@ -158,8 +145,12 @@ struct multi_pack_index *load_multi_pack_index(const char *object_dir, int local
 		error(_("multi-pack-index OID lookup chunk is the wrong size"));
 		die(_("multi-pack-index required OID lookup chunk missing or corrupted"));
 	}
-	if (read_chunk(cf, MIDX_CHUNKID_OBJECTOFFSETS, midx_read_object_offsets, m))
+	if (pair_chunk_expect(cf, MIDX_CHUNKID_OBJECTOFFSETS,
+			      &m->chunk_object_offsets,
+			      st_mult(m->num_objects, MIDX_CHUNK_OFFSET_WIDTH))) {
+		error(_("multi-pack-index object offset chunk is the wrong size"));
 		die(_("multi-pack-index required object offsets chunk missing or corrupted"));
+	}
 
 	pair_chunk(cf, MIDX_CHUNKID_LARGEOFFSETS, &m->chunk_large_offsets,
 		   &m->chunk_large_offsets_len);
