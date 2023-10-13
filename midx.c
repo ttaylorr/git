@@ -61,19 +61,6 @@ void get_midx_rev_filename(struct strbuf *out, struct multi_pack_index *m)
 	strbuf_addf(out, "-%s.rev", hash_to_hex(get_midx_checksum(m)));
 }
 
-static int midx_read_oid_lookup(const unsigned char *chunk_start,
-				size_t chunk_size, void *data)
-{
-	struct multi_pack_index *m = data;
-	m->chunk_oid_lookup = chunk_start;
-
-	if (chunk_size != st_mult(m->hash_len, m->num_objects)) {
-		error(_("multi-pack-index OID lookup chunk is the wrong size"));
-		return 1;
-	}
-	return 0;
-}
-
 static int midx_read_object_offsets(const unsigned char *chunk_start,
 				    size_t chunk_size, void *data)
 {
@@ -166,8 +153,11 @@ struct multi_pack_index *load_multi_pack_index(const char *object_dir, int local
 		die(_("multi-pack-index required OID fanout chunk missing or corrupted"));
 	}
 	m->num_objects = ntohl(m->chunk_oid_fanout[255]);
-	if (read_chunk(cf, MIDX_CHUNKID_OIDLOOKUP, midx_read_oid_lookup, m))
+	if (pair_chunk_expect(cf, MIDX_CHUNKID_OIDLOOKUP, &m->chunk_oid_lookup,
+			      st_mult(m->hash_len, m->num_objects))) {
+		error(_("multi-pack-index OID lookup chunk is the wrong size"));
 		die(_("multi-pack-index required OID lookup chunk missing or corrupted"));
+	}
 	if (read_chunk(cf, MIDX_CHUNKID_OBJECTOFFSETS, midx_read_object_offsets, m))
 		die(_("multi-pack-index required object offsets chunk missing or corrupted"));
 
