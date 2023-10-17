@@ -2007,34 +2007,54 @@ int reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 				       struct bitmap **reuse_out)
 {
 	struct repository *r = the_repository;
-	struct bitmapped_pack pack;
+	struct bitmapped_pack *packs = NULL;
 	struct bitmap *result = bitmap_git->result;
 	struct bitmap *reuse;
 	uint32_t objects_nr = 0;
 	size_t word_alloc;
+	size_t packs_nr = 0, packs_alloc = 0;
+	size_t i;
 
 	load_reverse_index(r, bitmap_git);
 
 	if (bitmap_is_midx(bitmap_git)) {
-		pack.p = bitmap_git->midx->packs[midx_preferred_pack(bitmap_git)];
-		pack.bitmap_nr = pack.p->num_objects;
-		pack.bitmap_pos = 0;
-		pack.disjoint = 1;
+		for (i = 0; i < bitmap_git->midx->num_packs; i++) {
+			struct bitmapped_pack pack = { 0 };
+
+			nth_bitmapped_pack(r, bitmap_git->midx, &pack, i);
+			if (!pack.disjoint)
+				continue;
+
+			ALLOC_GROW(packs, packs_nr + 1, packs_alloc);
+			memcpy(&packs[packs_nr++], &pack, sizeof(pack));
+
+			objects_nr += pack.p->num_objects;
+		}
 	} else {
-		pack.p = bitmap_git->pack;
-		pack.bitmap_nr = pack.p->num_objects;
-		pack.bitmap_pos = 0;
-		pack.disjoint = 1;
+		ALLOC_GROW(packs, packs_nr + 1, packs_alloc);
+
+		packs[packs_nr].p = bitmap_git->pack;
+		packs[packs_nr].bitmap_nr = bitmap_git->pack->num_objects;
+		packs[packs_nr].bitmap_pos = 0;
+		packs[packs_nr].disjoint = 1;
+
+		objects_nr = packs[packs_nr].bitmap_nr;
+
+		packs_nr++;
 	}
 
-	objects_nr = pack.bitmap_nr;
+	if (packs_nr != 1)
+		BUG("expected 1 disjoint pack from %s, got: %d",
+		    bitmap_is_midx(bitmap_git) ? "midx" : "pack", (int)packs_nr);
 
 	word_alloc = objects_nr / BITS_IN_EWORD;
 	if (objects_nr % BITS_IN_EWORD)
 		word_alloc++;
 	reuse = bitmap_word_alloc(word_alloc);
 
-	reuse_partial_packfile_from_bitmap_one(bitmap_git, &pack, reuse);
+	for (i = 0; i < packs_nr; i++)
+		reuse_partial_packfile_from_bitmap_one(bitmap_git, &packs[i],
+						       reuse);
 
 	*entries = bitmap_popcount(reuse);
 	if (!*entries) {
@@ -2047,7 +2067,7 @@ int reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	 * need to be handled separately.
 	 */
 	bitmap_and_not(result, reuse);
-	*packfile_out = pack.p;
+	*packfile_out = packs_nr ? packs[0].p : NULL; /* HACK */
 	*reuse_out = reuse;
 	return 0;
 }
