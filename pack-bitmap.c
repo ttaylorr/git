@@ -1905,74 +1905,136 @@ uint32_t midx_preferred_pack(struct bitmap_index *bitmap_git)
 	return nth_midxed_pack_int_id(m, pack_pos_to_midx(bitmap_git->midx, 0));
 }
 
+static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_git,
+						   struct bitmapped_pack *pack,
+						   struct bitmap *reuse)
+{
+	struct pack_window *w_curs = NULL;
+
+	struct bitmap *result = bitmap_git->result;
+	size_t i, start, end;
+	unsigned complete_prefix = 1; /* until proven otherwise */
+
+	/* check any bits at the front */
+	if (pack->bitmap_pos % BITS_IN_EWORD) {
+		size_t pos = pack->bitmap_pos / BITS_IN_EWORD;
+		size_t offset;
+		eword_t word = result->words[pos];
+
+		for (offset = pack->bitmap_pos % BITS_IN_EWORD;
+		     offset < BITS_IN_EWORD; offset++) {
+
+			if (pos * BITS_IN_EWORD + offset >= pack->bitmap_pos + pack->bitmap_nr)
+				break;
+
+			if ((word >> offset) == 0) {
+				complete_prefix = 0;
+				break;
+			}
+
+			offset += ewah_bit_ctz64(word >> offset);
+			if (!bitmap_get(result, pos + offset)) {
+				complete_prefix = 0;
+				break;
+			}
+		}
+	}
+
+	start = pack->bitmap_pos / BITS_IN_EWORD;
+	end = (pack->bitmap_pos + pack->bitmap_nr) / BITS_IN_EWORD;
+	if (pack->bitmap_pos % BITS_IN_EWORD)
+		start++;
+
+	i = start;
+
+	/*
+	 * Assuming that all of the first bits that occur before the
+	 * first eword boundary are marked, then see how many full words
+	 * we can mark (i.e, words in which all objects are wanted in
+	 * the result set) in this pack.
+	 *
+	 * If not all of those early bits were marked, we cannot take
+	 * advantage of this optimization. That is because even if an
+	 * eword is marked as all ones, one or more of its objects may
+	 * be an OFS_DELTA or REF_DELTA referring to an object in the
+	 * first few bits that we aren't going to send.
+	 */
+	if (complete_prefix && start < end) {
+		while (i < end && i < result->word_alloc &&
+		       result->words[i] == (eword_t)~0)
+			i++;
+
+		memset(reuse->words + start, 0xFF, i * sizeof(eword_t));
+	}
+
+	if ((pack->bitmap_pos + pack->bitmap_nr) % BITS_IN_EWORD)
+		end++;
+
+	/*
+	 * Check any remaining bits in this pack.
+	 *
+	 * If we saw a complete prefix, then our "whole words" optimization
+	 * above kicked in, and we only need to check the bits in the next
+	 * eword_t that correspond to this pack.
+	 *
+	 * If we did not see a complete prefix, we may be at any point within
+	 * the pack, and need to check each object individually with
+	 * try_partial_reuse().
+	 */
+	for (; i < result->word_alloc && i < end; i++) {
+		eword_t word = result->words[i];
+		size_t pos = (i * BITS_IN_EWORD);
+		size_t offset;
+
+		for (offset = 0; offset < BITS_IN_EWORD; ++offset) {
+			size_t pack_pos;
+			if ((word >> offset) == 0)
+				break;
+
+			offset += ewah_bit_ctz64(word >> offset);
+			pack_pos = pos + offset - pack->bitmap_pos;
+
+			try_partial_reuse(pack->p, pack_pos, reuse, &w_curs);
+		}
+	}
+
+	unuse_pack(&w_curs);
+}
+
 int reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 				       struct packed_git **packfile_out,
 				       uint32_t *entries,
 				       struct bitmap **reuse_out)
 {
 	struct repository *r = the_repository;
-	struct packed_git *pack;
+	struct bitmapped_pack pack;
 	struct bitmap *result = bitmap_git->result;
 	struct bitmap *reuse;
-	struct pack_window *w_curs = NULL;
-	size_t i = 0;
-	uint32_t offset;
-	uint32_t objects_nr;
-
-	assert(result);
+	uint32_t objects_nr = 0;
+	size_t word_alloc;
 
 	load_reverse_index(r, bitmap_git);
 
-	if (bitmap_is_midx(bitmap_git))
-		pack = bitmap_git->midx->packs[midx_preferred_pack(bitmap_git)];
-	else
-		pack = bitmap_git->pack;
-	objects_nr = pack->num_objects;
-
-	while (i < result->word_alloc && result->words[i] == (eword_t)~0)
-		i++;
-
-	/*
-	 * Don't mark objects not in the packfile or preferred pack. This bitmap
-	 * marks objects eligible for reuse, but the pack-reuse code only
-	 * understands how to reuse a single pack. Since the preferred pack is
-	 * guaranteed to have all bases for its deltas (in a multi-pack bitmap),
-	 * we use it instead of another pack. In single-pack bitmaps, the choice
-	 * is made for us.
-	 */
-	if (i > objects_nr / BITS_IN_EWORD)
-		i = objects_nr / BITS_IN_EWORD;
-
-	reuse = bitmap_word_alloc(i);
-	memset(reuse->words, 0xFF, i * sizeof(eword_t));
-
-	for (; i < result->word_alloc; ++i) {
-		eword_t word = result->words[i];
-		size_t pos = (i * BITS_IN_EWORD);
-
-		for (offset = 0; offset < BITS_IN_EWORD; ++offset) {
-			if ((word >> offset) == 0)
-				break;
-
-			offset += ewah_bit_ctz64(word >> offset);
-			if (try_partial_reuse(pack, pos + offset,
-					      reuse, &w_curs) < 0) {
-				/*
-				 * try_partial_reuse indicated we couldn't reuse
-				 * any bits, so there is no point in trying more
-				 * bits in the current word, or any other words
-				 * in result.
-				 *
-				 * Jump out of both loops to avoid future
-				 * unnecessary calls to try_partial_reuse.
-				 */
-				goto done;
-			}
-		}
+	if (bitmap_is_midx(bitmap_git)) {
+		pack.p = bitmap_git->midx->packs[midx_preferred_pack(bitmap_git)];
+		pack.bitmap_nr = pack.p->num_objects;
+		pack.bitmap_pos = 0;
+		pack.disjoint = 1;
+	} else {
+		pack.p = bitmap_git->pack;
+		pack.bitmap_nr = pack.p->num_objects;
+		pack.bitmap_pos = 0;
+		pack.disjoint = 1;
 	}
 
-done:
-	unuse_pack(&w_curs);
+	objects_nr = pack.bitmap_nr;
+
+	word_alloc = objects_nr / BITS_IN_EWORD;
+	if (objects_nr % BITS_IN_EWORD)
+		word_alloc++;
+	reuse = bitmap_word_alloc(word_alloc);
+
+	reuse_partial_packfile_from_bitmap_one(bitmap_git, &pack, reuse);
 
 	*entries = bitmap_popcount(reuse);
 	if (!*entries) {
@@ -1985,7 +2047,7 @@ done:
 	 * need to be handled separately.
 	 */
 	bitmap_and_not(result, reuse);
-	*packfile_out = pack;
+	*packfile_out = pack.p;
 	*reuse_out = reuse;
 	return 0;
 }
