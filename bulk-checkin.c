@@ -423,6 +423,22 @@ static int deflate_blob_to_pack_incore(struct bulk_checkin_packfile *state,
 						   OBJ_BLOB, path, flags);
 }
 
+static int deflate_tree_to_pack_incore(struct bulk_checkin_packfile *state,
+				       struct object_id *result_oid,
+				       const void *buf, size_t size,
+				       const char *path, unsigned flags)
+{
+	git_hash_ctx ctx;
+	struct hashfile_checkpoint checkpoint = {0};
+
+	format_object_header_hash(the_hash_algo, &ctx, &checkpoint, OBJ_TREE,
+				  size);
+
+	return deflate_obj_contents_to_pack_incore(state, &ctx, &checkpoint,
+						   result_oid, buf, size,
+						   OBJ_TREE, path, flags);
+}
+
 static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 				struct object_id *result_oid,
 				int fd, size_t size,
@@ -508,6 +524,17 @@ int index_blob_bulk_checkin_incore(struct object_id *oid,
 				   const char *path, unsigned flags)
 {
 	int status = deflate_blob_to_pack_incore(&bulk_checkin_packfile, oid,
+						 buf, size, path, flags);
+	if (!odb_transaction_nesting)
+		flush_bulk_checkin_packfile(&bulk_checkin_packfile);
+	return status;
+}
+
+int index_tree_bulk_checkin_incore(struct object_id *oid,
+				   const void *buf, size_t size,
+				   const char *path, unsigned flags)
+{
+	int status = deflate_tree_to_pack_incore(&bulk_checkin_packfile, oid,
 						 buf, size, path, flags);
 	if (!odb_transaction_nesting)
 		flush_bulk_checkin_packfile(&bulk_checkin_packfile);
