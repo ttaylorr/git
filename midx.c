@@ -33,6 +33,7 @@
 
 #define MIDX_CHUNK_ALIGNMENT 4
 #define MIDX_CHUNKID_PACKNAMES 0x504e414d /* "PNAM" */
+#define MIDX_CHUNKID_DISJOINTPACKS 0x44495350 /* "DISP" */
 #define MIDX_CHUNKID_OIDFANOUT 0x4f494446 /* "OIDF" */
 #define MIDX_CHUNKID_OIDLOOKUP 0x4f49444c /* "OIDL" */
 #define MIDX_CHUNKID_OBJECTOFFSETS 0x4f4f4646 /* "OOFF" */
@@ -457,11 +458,18 @@ static size_t write_midx_header(struct hashfile *f,
 	return MIDX_HEADER_SIZE;
 }
 
+#define BITMAP_POS_UNKNOWN (~((uint32_t)0))
+
 struct pack_info {
 	uint32_t orig_pack_int_id;
 	char *pack_name;
 	struct packed_git *p;
-	unsigned expired : 1;
+
+	uint32_t bitmap_pos;
+	uint32_t bitmap_nr;
+
+	unsigned expired : 1,
+		 disjoint : 1;
 };
 
 static void fill_pack_info(struct pack_info *info,
@@ -473,6 +481,7 @@ static void fill_pack_info(struct pack_info *info,
 	info->orig_pack_int_id = orig_pack_int_id;
 	info->pack_name = pack_name;
 	info->p = p;
+	info->bitmap_pos = BITMAP_POS_UNKNOWN;
 }
 
 static int pack_info_compare(const void *_a, const void *_b)
@@ -569,7 +578,8 @@ struct pack_midx_entry {
 	uint32_t pack_int_id;
 	time_t pack_mtime;
 	uint64_t offset;
-	unsigned preferred : 1;
+	unsigned preferred : 1,
+		 disjoint : 1;
 };
 
 static int midx_oid_compare(const void *_a, const void *_b)
@@ -624,7 +634,7 @@ static void fill_pack_entry(uint32_t pack_int_id,
 	entry->pack_mtime = p->mtime;
 
 	entry->offset = nth_packed_object_offset(p, cur_object);
-	entry->preferred = !!preferred;
+	entry->preferred = entry->disjoint = !!preferred;
 }
 
 struct midx_fanout {
@@ -672,6 +682,7 @@ static void midx_fanout_add_midx_fanout(struct midx_fanout *fanout,
 					   &fanout->entries[fanout->nr],
 					   cur_object);
 		fanout->entries[fanout->nr].preferred = 0;
+		fanout->entries[fanout->nr].disjoint = 0;
 		fanout->nr++;
 	}
 }
@@ -697,6 +708,7 @@ static void midx_fanout_add_pack_fanout(struct midx_fanout *fanout,
 				cur_object,
 				&fanout->entries[fanout->nr],
 				preferred);
+		fanout->entries[fanout->nr].disjoint = 0;
 		fanout->nr++;
 	}
 }
@@ -812,6 +824,28 @@ static int write_midx_pack_names(struct hashfile *f, void *data)
 		hashwrite(f, padding, i);
 	}
 
+	return 0;
+}
+
+static int write_midx_disjoint_packs(struct hashfile *f, void *data)
+{
+	struct write_midx_context *ctx = data;
+	size_t i;
+
+	for (i = 0; i < ctx->nr; i++) {
+		if (ctx->info[i].expired)
+			continue;
+
+		hashwrite_be32(f, ctx->info[i].bitmap_pos);
+		hashwrite_be32(f, ctx->info[i].bitmap_nr);
+		hashwrite_be32(f, !!ctx->info[i].disjoint);
+
+		if (ctx->info[i].disjoint && ctx->info[i].bitmap_pos)
+			BUG("expected disjoint pack '%s' to have "
+			    "bitmap_pos=0, got: bitmap_pos=%"PRIuMAX,
+			    pack_basename(ctx->info[i].p),
+			    (uintmax_t)ctx->info[i].bitmap_pos);
+	}
 	return 0;
 }
 
@@ -982,8 +1016,14 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 	QSORT(data, ctx->entries_nr, midx_pack_order_cmp);
 
 	ALLOC_ARRAY(pack_order, ctx->entries_nr);
-	for (i = 0; i < ctx->entries_nr; i++)
+	for (i = 0; i < ctx->entries_nr; i++) {
+		struct pack_midx_entry *e = &ctx->entries[data[i].nr];
+		struct pack_info *pack = &ctx->info[ctx->pack_perm[e->pack_int_id]];
+		if (pack->bitmap_pos == BITMAP_POS_UNKNOWN)
+			pack->bitmap_pos = i;
+		pack->bitmap_nr++;
 		pack_order[i] = data[i].nr;
+	}
 	free(data);
 
 	trace2_region_leave("midx", "midx_pack_order", the_repository);
@@ -1284,6 +1324,7 @@ static int write_midx_internal(const char *object_dir,
 	struct hashfile *f = NULL;
 	struct lock_file lk;
 	struct write_midx_context ctx = { 0 };
+	int pack_disjoint_concat_len = 0;
 	int pack_name_concat_len = 0;
 	int dropped_packs = 0;
 	int result = 0;
@@ -1429,13 +1470,14 @@ static int write_midx_internal(const char *object_dir,
 	}
 
 	if (ctx.preferred_pack_idx > -1) {
-		struct packed_git *preferred = ctx.info[ctx.preferred_pack_idx].p;
-		if (!preferred->num_objects) {
+		struct pack_info *preferred = &ctx.info[ctx.preferred_pack_idx];
+		if (!preferred->p->num_objects) {
 			error(_("cannot select preferred pack %s with no objects"),
-			      preferred->pack_name);
+			      preferred->p->pack_name);
 			result = 1;
 			goto cleanup;
 		}
+		preferred->disjoint = 1;
 	}
 
 	ctx.entries = get_sorted_entries(ctx.m, ctx.info, ctx.nr, &ctx.entries_nr,
@@ -1496,8 +1538,10 @@ static int write_midx_internal(const char *object_dir,
 	}
 
 	for (i = 0; i < ctx.nr; i++) {
-		if (!ctx.info[i].expired)
-			pack_name_concat_len += strlen(ctx.info[i].pack_name) + 1;
+		if (ctx.info[i].expired)
+			continue;
+		pack_name_concat_len += strlen(ctx.info[i].pack_name) + 1;
+		pack_disjoint_concat_len += 3 * sizeof(uint32_t);
 	}
 
 	/* Check that the preferred pack wasn't expired (if given). */
@@ -1557,6 +1601,8 @@ static int write_midx_internal(const char *object_dir,
 		add_chunk(cf, MIDX_CHUNKID_REVINDEX,
 			  st_mult(ctx.entries_nr, sizeof(uint32_t)),
 			  write_midx_revindex);
+		add_chunk(cf, MIDX_CHUNKID_DISJOINTPACKS,
+			  pack_disjoint_concat_len, write_midx_disjoint_packs);
 	}
 
 	write_midx_header(f, get_num_chunks(cf), ctx.nr - dropped_packs);
