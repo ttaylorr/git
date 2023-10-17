@@ -2001,6 +2001,16 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 	unuse_pack(&w_curs);
 }
 
+static int bitmapped_pack_cmp(const void *va, const void *vb)
+{
+	const struct bitmapped_pack *a = va, *b = vb;
+	if (a->bitmap_pos < b->bitmap_pos)
+		return -1;
+	else if (a->bitmap_pos > b->bitmap_pos)
+		return 1;
+	return 0;
+}
+
 int reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 				       struct packed_git **packfile_out,
 				       uint32_t *entries,
@@ -2051,6 +2061,8 @@ int reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	if (objects_nr % BITS_IN_EWORD)
 		word_alloc++;
 	reuse = bitmap_word_alloc(word_alloc);
+
+	QSORT(packs, packs_nr, bitmapped_pack_cmp);
 
 	for (i = 0; i < packs_nr; i++)
 		reuse_partial_packfile_from_bitmap_one(bitmap_git, &packs[i],
