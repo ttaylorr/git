@@ -1319,11 +1319,6 @@ static int write_midx_internal(const char *object_dir,
 		for (i = 0; i < ctx.m->num_packs; i++) {
 			ALLOC_GROW(ctx.info, ctx.nr + 1, ctx.alloc);
 
-			ctx.info[ctx.nr].orig_pack_int_id = i;
-			ctx.info[ctx.nr].pack_name = xstrdup(ctx.m->pack_names[i]);
-			ctx.info[ctx.nr].p = ctx.m->packs[i];
-			ctx.info[ctx.nr].expired = 0;
-
 			if (flags & MIDX_WRITE_REV_INDEX) {
 				/*
 				 * If generating a reverse index, need to have
@@ -1339,10 +1334,10 @@ static int write_midx_internal(const char *object_dir,
 				if (open_pack_index(ctx.m->packs[i]))
 					die(_("could not open index for %s"),
 					    ctx.m->packs[i]->pack_name);
-				ctx.info[ctx.nr].p = ctx.m->packs[i];
 			}
 
-			ctx.nr++;
+			fill_pack_info(&ctx.info[ctx.nr++], ctx.m->packs[i],
+				       xstrdup(ctx.m->pack_names[i]), i);
 		}
 	}
 
