@@ -2012,7 +2012,8 @@ static int bitmapped_pack_cmp(const void *va, const void *vb)
 }
 
 void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
-					struct packed_git **packfile_out,
+					struct bitmapped_pack **reused_packs,
+					size_t *reused_packs_nr,
 					struct bitmap **reuse_out)
 {
 	struct repository *r = the_repository;
@@ -2072,7 +2073,8 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	 * need to be handled separately.
 	 */
 	bitmap_and_not(result, reuse);
-	*packfile_out = packs_nr ? packs[0].p : NULL; /* HACK */
+	*reused_packs = packs;
+	*reused_packs_nr = packs_nr;
 	*reuse_out = reuse;
 }
 
