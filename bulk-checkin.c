@@ -263,6 +263,19 @@ static void format_object_header_hash(const struct git_hash_algo *algop,
 	algop->init_fn(&checkpoint->ctx);
 }
 
+static void prepare_checkpoint(struct bulk_checkin_packfile *state,
+			       struct hashfile_checkpoint *checkpoint,
+			       struct pack_idx_entry *idx,
+			       unsigned flags)
+{
+	prepare_to_stream(state, flags);
+	if (idx) {
+		hashfile_checkpoint(state->f, checkpoint);
+		idx->offset = state->offset;
+		crc32_begin(state->f);
+	}
+}
+
 static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 				struct object_id *result_oid,
 				int fd, size_t size,
@@ -287,12 +300,7 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 	already_hashed_to = 0;
 
 	while (1) {
-		prepare_to_stream(state, flags);
-		if (idx) {
-			hashfile_checkpoint(state->f, &checkpoint);
-			idx->offset = state->offset;
-			crc32_begin(state->f);
-		}
+		prepare_checkpoint(state, &checkpoint, idx, flags);
 		if (!stream_blob_to_pack(state, &ctx, &already_hashed_to,
 					 fd, size, path, flags))
 			break;
