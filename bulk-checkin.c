@@ -370,6 +370,59 @@ static void finalize_checkpoint(struct bulk_checkin_packfile *state,
 	}
 }
 
+static int deflate_obj_contents_to_pack_incore(struct bulk_checkin_packfile *state,
+					       git_hash_ctx *ctx,
+					       struct hashfile_checkpoint *checkpoint,
+					       struct object_id *result_oid,
+					       const void *buf, size_t size,
+					       enum object_type type,
+					       const char *path, unsigned flags)
+{
+	struct pack_idx_entry *idx = NULL;
+	off_t already_hashed_to = 0;
+	struct bulk_checkin_source source = {
+		.type = SOURCE_INCORE,
+		.buf = buf,
+		.size = size,
+		.read = 0,
+		.path = path,
+	};
+
+	/* Note: idx is non-NULL when we are writing */
+	if (flags & HASH_WRITE_OBJECT)
+		CALLOC_ARRAY(idx, 1);
+
+	while (1) {
+		prepare_checkpoint(state, checkpoint, idx, flags);
+
+		if (!stream_obj_to_pack(state, ctx, &already_hashed_to, &source,
+					type, flags))
+			break;
+		truncate_checkpoint(state, checkpoint, idx);
+		bulk_checkin_source_seek_to(&source, 0);
+	}
+
+	finalize_checkpoint(state, ctx, checkpoint, idx, result_oid);
+
+	return 0;
+}
+
+static int deflate_blob_to_pack_incore(struct bulk_checkin_packfile *state,
+				       struct object_id *result_oid,
+				       const void *buf, size_t size,
+				       const char *path, unsigned flags)
+{
+	git_hash_ctx ctx;
+	struct hashfile_checkpoint checkpoint = {0};
+
+	format_object_header_hash(the_hash_algo, &ctx, &checkpoint, OBJ_BLOB,
+				  size);
+
+	return deflate_obj_contents_to_pack_incore(state, &ctx, &checkpoint,
+						   result_oid, buf, size,
+						   OBJ_BLOB, path, flags);
+}
+
 static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 				struct object_id *result_oid,
 				int fd, size_t size,
@@ -451,6 +504,17 @@ int index_blob_bulk_checkin(struct object_id *oid,
 {
 	int status = deflate_blob_to_pack(&bulk_checkin_packfile, oid, fd, size,
 					  path, flags);
+	if (!odb_transaction_nesting)
+		flush_bulk_checkin_packfile(&bulk_checkin_packfile);
+	return status;
+}
+
+int index_blob_bulk_checkin_incore(struct object_id *oid,
+				   const void *buf, size_t size,
+				   const char *path, unsigned flags)
+{
+	int status = deflate_blob_to_pack_incore(&bulk_checkin_packfile, oid,
+						 buf, size, path, flags);
 	if (!odb_transaction_nesting)
 		flush_bulk_checkin_packfile(&bulk_checkin_packfile);
 	return status;
