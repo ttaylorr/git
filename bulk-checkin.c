@@ -141,10 +141,14 @@ static int already_written(struct bulk_checkin_packfile *state, struct object_id
 }
 
 struct bulk_checkin_source {
-	enum { SOURCE_FILE } type;
+	enum { SOURCE_FILE, SOURCE_INCORE } type;
 
 	/* SOURCE_FILE fields */
 	int fd;
+
+	/* SOURCE_INCORE fields */
+	const void *buf;
+	size_t read;
 
 	/* common fields */
 	size_t size;
@@ -157,6 +161,11 @@ static off_t bulk_checkin_source_seek_to(struct bulk_checkin_source *source,
 	switch (source->type) {
 	case SOURCE_FILE:
 		return lseek(source->fd, offset, SEEK_SET);
+	case SOURCE_INCORE:
+		if (!(0 <= offset && offset < source->size))
+			return (off_t)-1;
+		source->read = offset;
+		return source->read;
 	default:
 		BUG("unknown bulk-checkin source: %d", source->type);
 	}
@@ -168,6 +177,13 @@ static ssize_t bulk_checkin_source_read(struct bulk_checkin_source *source,
 	switch (source->type) {
 	case SOURCE_FILE:
 		return read_in_full(source->fd, buf, nr);
+	case SOURCE_INCORE:
+		assert(source->read <= source->size);
+		if (nr > source->size - source->read)
+			nr = source->size - source->read;
+		memcpy(buf, (unsigned char *)source->buf + source->read, nr);
+		source->read += nr;
+		return nr;
 	default:
 		BUG("unknown bulk-checkin source: %d", source->type);
 	}
