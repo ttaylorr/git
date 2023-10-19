@@ -368,6 +368,23 @@ static int deflate_obj_to_pack(struct bulk_checkin_packfile *state,
 	return 0;
 }
 
+static int deflate_obj_to_pack_incore(struct bulk_checkin_packfile *state,
+				       struct object_id *result_oid,
+				       const void *buf, size_t size,
+				       const char *path, enum object_type type,
+				       unsigned flags)
+{
+	struct bulk_checkin_source source = {
+		.type = SOURCE_INCORE,
+		.buf = buf,
+		.size = size,
+		.read = 0,
+		.path = path,
+	};
+
+	return deflate_obj_to_pack(state, result_oid, &source, type, 0, flags);
+}
+
 static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 				struct object_id *result_oid,
 				int fd, size_t size,
@@ -426,6 +443,18 @@ int index_blob_bulk_checkin(struct object_id *oid,
 {
 	int status = deflate_blob_to_pack(&bulk_checkin_packfile, oid, fd, size,
 					  path, flags);
+	if (!odb_transaction_nesting)
+		flush_bulk_checkin_packfile(&bulk_checkin_packfile);
+	return status;
+}
+
+int index_blob_bulk_checkin_incore(struct object_id *oid,
+				   const void *buf, size_t size,
+				   const char *path, unsigned flags)
+{
+	int status = deflate_obj_to_pack_incore(&bulk_checkin_packfile, oid,
+						buf, size, path, OBJ_BLOB,
+						flags);
 	if (!odb_transaction_nesting)
 		flush_bulk_checkin_packfile(&bulk_checkin_packfile);
 	return status;
