@@ -188,10 +188,10 @@ static ssize_t bulk_checkin_source_read(struct bulk_checkin_source *source,
  * status before calling us just in case we ask it to call us again
  * with a new pack.
  */
-static int stream_blob_to_pack(struct bulk_checkin_packfile *state,
-			       git_hash_ctx *ctx, off_t *already_hashed_to,
-			       struct bulk_checkin_source *source,
-			       unsigned flags)
+static int stream_obj_to_pack(struct bulk_checkin_packfile *state,
+			      git_hash_ctx *ctx, off_t *already_hashed_to,
+			      struct bulk_checkin_source *source,
+			      enum object_type type, unsigned flags)
 {
 	git_zstream s;
 	unsigned char ibuf[16384];
@@ -204,8 +204,7 @@ static int stream_blob_to_pack(struct bulk_checkin_packfile *state,
 
 	git_deflate_init(&s, pack_compression_level);
 
-	hdrlen = encode_in_pack_object_header(obuf, sizeof(obuf), OBJ_BLOB,
-					      size);
+	hdrlen = encode_in_pack_object_header(obuf, sizeof(obuf), type, size);
 	s.next_out = obuf + hdrlen;
 	s.avail_out = sizeof(obuf) - hdrlen;
 
@@ -327,8 +326,8 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 			idx->offset = state->offset;
 			crc32_begin(state->f);
 		}
-		if (!stream_blob_to_pack(state, &ctx, &already_hashed_to,
-					 &source, flags))
+		if (!stream_obj_to_pack(state, &ctx, &already_hashed_to,
+					&source, OBJ_BLOB, flags))
 			break;
 		/*
 		 * Writing this object to the current pack will make
