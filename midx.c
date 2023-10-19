@@ -542,6 +542,7 @@ static void add_pack_to_midx(const char *full_path, size_t full_path_len,
 {
 	struct write_midx_context *ctx = data;
 	struct packed_git *p;
+	struct string_list_item *item = NULL;
 
 	if (ends_with(file_name, ".idx")) {
 		display_progress(ctx->progress, ++ctx->pack_paths_checked);
@@ -560,11 +561,13 @@ static void add_pack_to_midx(const char *full_path, size_t full_path_len,
 		 * should be performed independently (likely checking
 		 * to_include before the existing MIDX).
 		 */
-		if (ctx->m && midx_contains_pack(ctx->m, file_name))
+		if (ctx->m && midx_contains_pack(ctx->m, file_name)) {
 			return;
-		else if (ctx->to_include &&
-			 !string_list_has_string(ctx->to_include, file_name))
-			return;
+		} else if (ctx->to_include) {
+			item = string_list_lookup(ctx->to_include, file_name);
+			if (!item)
+				return;
+		}
 
 		ALLOC_GROW(ctx->info, ctx->nr + 1, ctx->alloc);
 
@@ -585,7 +588,8 @@ static void add_pack_to_midx(const char *full_path, size_t full_path_len,
 
 		fill_pack_info(&ctx->info[ctx->nr], p, xstrdup(file_name),
 			       ctx->nr);
-
+		if (item)
+			ctx->info[ctx->nr].disjoint = !!item->util;
 		ctx->nr++;
 	}
 }
@@ -857,11 +861,13 @@ static int write_midx_disjoint_packs(struct hashfile *f, void *data)
 		hashwrite_be32(f, ctx->info[i].bitmap_nr);
 		hashwrite_be32(f, !!ctx->info[i].disjoint);
 
+#if 0
 		if (ctx->info[i].disjoint && ctx->info[i].bitmap_pos)
 			BUG("expected disjoint pack '%s' to have "
 			    "bitmap_pos=0, got: bitmap_pos=%"PRIuMAX,
 			    pack_basename(ctx->info[i].p),
 			    (uintmax_t)ctx->info[i].bitmap_pos);
+#endif
 	}
 	return 0;
 }

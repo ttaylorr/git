@@ -421,6 +421,9 @@ static void copy_pack_data(struct hashfile *f,
 	unsigned char *in;
 	unsigned long avail;
 
+	warning("copy_pack_data(%s, %"PRIuMAX", %"PRIuMAX")",
+		pack_basename(p), (uintmax_t)offset, (uintmax_t)len);
+
 	while (len) {
 		in = use_pack(p, w_curs, offset, &avail);
 		if (avail > len)
@@ -1022,6 +1025,8 @@ static void write_reused_pack_one(struct packed_git *reuse_packfile,
 	enum object_type type;
 	unsigned long size;
 
+	warning("write_reused_pack_one(%s, %"PRIuMAX")", pack_basename(reuse_packfile), pos);
+
 	offset = pack_pos_to_offset(reuse_packfile, pos);
 	next = pack_pos_to_offset(reuse_packfile, pos + 1);
 
@@ -1097,15 +1102,22 @@ static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_pack,
 					 struct hashfile *out,
 					 struct pack_window **w_curs)
 {
-	size_t pos = 0;
+	size_t start = reuse_pack->bitmap_pos / BITS_IN_EWORD;
+	size_t end = start + reuse_pack->bitmap_nr / BITS_IN_EWORD;
+	size_t pos = start;
 
-	while (pos < reuse_packfile_bitmap->word_alloc &&
+	/* TODO(@ttaylorr): should try and record a whole chunk for preceding bits */
+	while (pos < reuse_packfile_bitmap->word_alloc && pos < end &&
 			reuse_packfile_bitmap->words[pos] == (eword_t)~0)
 		pos++;
+
+	warning("write_reused_pack_verbatim(%s, pos=%"PRIuMAX")",
+		pack_basename(reuse_pack->p), (uintmax_t)pos);
 
 	if (pos) {
 		off_t to_write;
 
+		BUG("not implemented");
 		written = (pos * BITS_IN_EWORD);
 		to_write = pack_pos_to_offset(reuse_pack->p, written)
 			- sizeof(struct pack_header);
@@ -1124,10 +1136,11 @@ static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_pack,
 static void write_reused_pack(struct bitmapped_pack *reuse_pack,
 			      struct hashfile *f)
 {
-	size_t i = 0;
+	size_t i = reuse_pack->bitmap_nr / BITS_IN_EWORD;
 	uint32_t offset;
 	struct pack_window *w_curs = NULL;
 
+	warning("write_reused_pack(%s)", pack_basename(reuse_pack->p));
 	if (allow_ofs_delta)
 		i = write_reused_pack_verbatim(reuse_pack, f, &w_curs);
 
@@ -1136,20 +1149,27 @@ static void write_reused_pack(struct bitmapped_pack *reuse_pack,
 		size_t pos = (i * BITS_IN_EWORD);
 
 		for (offset = 0; offset < BITS_IN_EWORD; ++offset) {
+			size_t pack_pos;
 			if ((word >> offset) == 0)
 				break;
 
 			offset += ewah_bit_ctz64(word >> offset);
+			pack_pos = pos + offset - reuse_pack->bitmap_pos;
+			if (pack_pos >= reuse_pack->p->num_objects)
+				goto done;
 			/*
+			 * TODO(@ttaylorr): update me!
+			 *
 			 * Can use bit positions directly, even for MIDX
 			 * bitmaps. See comment in try_partial_reuse()
 			 * for why.
 			 */
-			write_reused_pack_one(reuse_pack->p, pos + offset, f, &w_curs);
+			write_reused_pack_one(reuse_pack->p, pack_pos, f, &w_curs);
 			display_progress(progress_state, ++written);
 		}
 	}
 
+done:
 	unuse_pack(&w_curs);
 }
 
@@ -3956,6 +3976,7 @@ static int get_object_list_from_bitmap(struct rev_info *revs)
 						   &reused_packs_nr,
 						   &reuse_packfile_bitmap);
 		reuse_packfile_objects = bitmap_popcount(reuse_packfile_bitmap);
+		warning("bitmap_popcount(reuse)=%"PRIuMAX, reuse_packfile_objects);
 
 		if (reuse_packfile_objects) {
 			nr_result += reuse_packfile_objects;

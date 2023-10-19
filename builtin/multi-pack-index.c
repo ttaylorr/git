@@ -106,11 +106,17 @@ static int git_multi_pack_index_write_config(const char *var, const char *value,
 	return 0;
 }
 
+#define DISJOINT ((void*)(uintptr_t)1)
+
 static void read_packs_from_stdin(struct string_list *to)
 {
 	struct strbuf buf = STRBUF_INIT;
-	while (strbuf_getline(&buf, stdin) != EOF)
-		string_list_append(to, buf.buf);
+	while (strbuf_getline(&buf, stdin) != EOF) {
+		if (*buf.buf == '+')
+			string_list_append(to, buf.buf + 1)->util = DISJOINT;
+		else
+			string_list_append(to, buf.buf);
+	}
 	string_list_sort(to);
 
 	strbuf_release(&buf);

@@ -1807,7 +1807,7 @@ cleanup:
  * -1 means "stop trying further objects"; 0 means we may or may not have
  * reused, but you can keep feeding bits.
  */
-static int try_partial_reuse(struct packed_git *pack,
+static int try_partial_reuse(struct bitmapped_pack *pack,
 			     size_t pos,
 			     struct bitmap *reuse,
 			     struct pack_window **w_curs)
@@ -1839,11 +1839,11 @@ static int try_partial_reuse(struct packed_git *pack,
 	 * preferred pack precede all bits from other packs.
 	 */
 
-	if (pos >= pack->num_objects)
+	if (pos >= pack->p->num_objects)
 		return -1; /* not actually in the pack or MIDX preferred pack */
 
-	offset = delta_obj_offset = pack_pos_to_offset(pack, pos);
-	type = unpack_object_header(pack, w_curs, &offset, &size);
+	offset = delta_obj_offset = pack_pos_to_offset(pack->p, pos);
+	type = unpack_object_header(pack->p, w_curs, &offset, &size);
 	if (type < 0)
 		return -1; /* broken packfile, punt */
 
@@ -1859,11 +1859,11 @@ static int try_partial_reuse(struct packed_git *pack,
 		 * and the normal slow path will complain about it in
 		 * more detail.
 		 */
-		base_offset = get_delta_base(pack, w_curs, &offset, type,
+		base_offset = get_delta_base(pack->p, w_curs, &offset, type,
 					     delta_obj_offset);
 		if (!base_offset)
 			return 0;
-		if (offset_to_pack_pos(pack, base_offset, &base_pos) < 0)
+		if (offset_to_pack_pos(pack->p, base_offset, &base_pos) < 0)
 			return 0;
 
 		/*
@@ -1893,7 +1893,8 @@ static int try_partial_reuse(struct packed_git *pack,
 	/*
 	 * If we got here, then the object is OK to reuse. Mark it.
 	 */
-	bitmap_set(reuse, pos);
+	bitmap_set(reuse, pack->bitmap_pos + pos);
+	warning("reusing %"PRIuMAX, (uintmax_t)pos);
 	return 0;
 }
 
@@ -1905,6 +1906,24 @@ uint32_t midx_preferred_pack(struct bitmap_index *bitmap_git)
 	return nth_midxed_pack_int_id(m, pack_pos_to_midx(bitmap_git->midx, 0));
 }
 
+static void dump(struct bitmap *b)
+{
+	struct strbuf buf = STRBUF_INIT;
+	size_t pos, offset;
+	for (pos = 0; pos < b->word_alloc; pos++) {
+		eword_t word = b->words[pos];
+		for (offset = 0; offset < BITS_IN_EWORD; offset++) {
+			if ((word >> offset) == 0)
+				break;
+			offset += ewah_bit_ctz64(word >> offset);
+			strbuf_addch(&buf, bitmap_get(b, pos + offset) ?
+				     '1' : '0');
+		}
+	}
+	warning("%9s", buf.buf);
+	strbuf_release(&buf);
+}
+
 static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_git,
 						   struct bitmapped_pack *pack,
 						   struct bitmap *reuse)
@@ -1912,19 +1931,48 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 	struct pack_window *w_curs = NULL;
 
 	struct bitmap *result = bitmap_git->result;
-	size_t i, start, end;
+	size_t i, j;
+	size_t start = pack->bitmap_pos;
+	size_t end = start + pack->bitmap_nr;
 	unsigned complete_prefix = 1; /* until proven otherwise */
 
 	/* check any bits at the front */
-	if (pack->bitmap_pos % BITS_IN_EWORD) {
+	if (start % BITS_IN_EWORD) {
+		size_t pos = pack->bitmap_pos / BITS_IN_EWORD;
+		size_t offset;
+		eword_t word = result->words[pos];
+
+		for (offset = start % BITS_IN_EWORD; offset < BITS_IN_EWORD;
+		     offset++) {
+			warning("offset=%d, pos=%d", offset, pos);
+			if (pos * BITS_IN_EWORD + offset >= end)
+				break;
+			if ((word >> offset) == 0) {
+				complete_prefix = 0;
+				break;
+			}
+
+			offset += ewah_bit_ctz64(word >> offset);
+			if (bitmap_get(result, pos + offset)) {
+				bitmap_set(reuse, pos + offset);
+				dump(reuse);
+				warning("have want at bit position %"PRIuMAX", reusing", pos+offset);
+			} else {
+				warning("missing want at bit position %"PRIuMAX, pos+offset);
+				complete_prefix = 0;
+				break;
+			}
+		}
+
+#if 0
 		size_t pos = pack->bitmap_pos / BITS_IN_EWORD;
 		size_t offset;
 		eword_t word = result->words[pos];
 
 		for (offset = pack->bitmap_pos % BITS_IN_EWORD;
 		     offset < BITS_IN_EWORD; offset++) {
-
-			if (pos * BITS_IN_EWORD + offset >= pack->bitmap_pos + pack->bitmap_nr)
+			size_t x = pos * BITS_IN_EWORD + offset;
+			if (x >= pack->bitmap_pos + pack->bitmap_nr)
 				break;
 
 			if ((word >> offset) == 0) {
@@ -1934,18 +1982,20 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 
 			offset += ewah_bit_ctz64(word >> offset);
 			if (!bitmap_get(result, pos + offset)) {
+			warning("missing want at bit position %"PRIuMAX, pos+offset);
 				complete_prefix = 0;
 				break;
+			} else {
+			warning("have want at bit position %"PRIuMAX, pos+offset);
 			}
 		}
+#endif
 	}
 
-	start = pack->bitmap_pos / BITS_IN_EWORD;
-	end = (pack->bitmap_pos + pack->bitmap_nr) / BITS_IN_EWORD;
-	if (pack->bitmap_pos % BITS_IN_EWORD)
-		start++;
-
-	i = start;
+	i = pack->bitmap_pos;
+	if ((i % BITS_IN_EWORD) != 0)
+		i += BITS_IN_EWORD - (i % BITS_IN_EWORD);
+	j = i;
 
 	/*
 	 * Assuming that all of the first bits that occur before the
@@ -1959,16 +2009,14 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 	 * be an OFS_DELTA or REF_DELTA referring to an object in the
 	 * first few bits that we aren't going to send.
 	 */
-	if (complete_prefix && start < end) {
-		while (i < end && i < result->word_alloc &&
-		       result->words[i] == (eword_t)~0)
-			i++;
+	if (complete_prefix) {
+		assert(start <= end);
+		while (i < end && i * BITS_IN_EWORD < result->word_alloc &&
+		       result->words[i / BITS_IN_EWORD] == (eword_t)~0)
+			i += BITS_IN_EWORD;
 
-		memset(reuse->words + start, 0xFF, i * sizeof(eword_t));
+		memset(reuse->words + start, 0xFF, (i - j) / BITS_IN_EWORD);
 	}
-
-	if ((pack->bitmap_pos + pack->bitmap_nr) % BITS_IN_EWORD)
-		end++;
 
 	/*
 	 * Check any remaining bits in this pack.
@@ -1981,8 +2029,8 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 	 * the pack, and need to check each object individually with
 	 * try_partial_reuse().
 	 */
-	for (; i < result->word_alloc && i < end; i++) {
-		eword_t word = result->words[i];
+	for (; i < end; i++) {
+		eword_t word = result->words[i / BITS_IN_EWORD];
 		size_t pos = (i * BITS_IN_EWORD);
 		size_t offset;
 
@@ -1993,11 +2041,18 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 
 			offset += ewah_bit_ctz64(word >> offset);
 			pack_pos = pos + offset - pack->bitmap_pos;
+			warning("bit_pos=%d, pack_pos=%d", pos + offset,
+				pack_pos);
+			if (pack_pos >= pack->p->num_objects)
+				goto done;
 
-			try_partial_reuse(pack->p, pack_pos, reuse, &w_curs);
+			warning("try_partial_reuse(%s, %"PRIuMAX")",
+				pack_basename(pack->p), (uintmax_t)pack_pos);
+
+			try_partial_reuse(pack, pack_pos, reuse, &w_curs);
 		}
 	}
-
+done:
 	unuse_pack(&w_curs);
 }
 
@@ -2053,10 +2108,6 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 		packs_nr++;
 	}
 
-	if (packs_nr != 1)
-		BUG("expected 1 disjoint pack from %s, got: %d",
-		    bitmap_is_midx(bitmap_git) ? "midx" : "pack", (int)packs_nr);
-
 	word_alloc = objects_nr / BITS_IN_EWORD;
 	if (objects_nr % BITS_IN_EWORD)
 		word_alloc++;
@@ -2064,9 +2115,11 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 
 	QSORT(packs, packs_nr, bitmapped_pack_cmp);
 
-	for (i = 0; i < packs_nr; i++)
+	for (i = 0; i < packs_nr; i++) {
+		warning("reusing objects from %s", pack_basename(packs[i].p));
 		reuse_partial_packfile_from_bitmap_one(bitmap_git, &packs[i],
 						       reuse);
+	}
 
 	/*
 	 * Drop any reused objects from the result, since they will not
