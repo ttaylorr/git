@@ -48,6 +48,7 @@
 #include "tree.h"
 #include "unpack-trees.h"
 #include "xdiff-interface.h"
+#include "bulk-checkin.h"
 
 /*
  * We have many arrays of size 3.  Whenever we have such an array, the
@@ -2108,10 +2109,19 @@ static int handle_content_merge(struct merge_options *opt,
 		if ((merge_status < 0) || !result_buf.ptr)
 			ret = error(_("failed to execute internal merge"));
 
-		if (!ret &&
-		    write_object_file(result_buf.ptr, result_buf.size,
-				      OBJ_BLOB, &result->oid))
-			ret = error(_("unable to add %s to database"), path);
+		if (!ret) {
+			ret = opt->write_pack
+				? index_blob_bulk_checkin_incore(&result->oid,
+								 result_buf.ptr,
+								 result_buf.size,
+								 path, 1)
+				: write_object_file(result_buf.ptr,
+						    result_buf.size,
+						    OBJ_BLOB, &result->oid);
+			if (ret)
+				ret = error(_("unable to add %s to database"),
+					    path);
+		}
 
 		free(result_buf.ptr);
 		if (ret)
@@ -3597,7 +3607,8 @@ static int tree_entry_order(const void *a_, const void *b_)
 				 b->string, strlen(b->string), bmi->result.mode);
 }
 
-static int write_tree(struct object_id *result_oid,
+static int write_tree(struct merge_options *opt,
+		      struct object_id *result_oid,
 		      struct string_list *versions,
 		      unsigned int offset,
 		      size_t hash_size)
@@ -3631,8 +3642,14 @@ static int write_tree(struct object_id *result_oid,
 	}
 
 	/* Write this object file out, and record in result_oid */
-	if (write_object_file(buf.buf, buf.len, OBJ_TREE, result_oid))
+	ret = opt->write_pack
+		? index_tree_bulk_checkin_incore(result_oid,
+						 buf.buf, buf.len, "", 1)
+		: write_object_file(buf.buf, buf.len, OBJ_TREE, result_oid);
+
+	if (ret)
 		ret = -1;
+
 	strbuf_release(&buf);
 	return ret;
 }
@@ -3797,8 +3814,8 @@ static int write_completed_directory(struct merge_options *opt,
 		 */
 		dir_info->is_null = 0;
 		dir_info->result.mode = S_IFDIR;
-		if (write_tree(&dir_info->result.oid, &info->versions, offset,
-			       opt->repo->hash_algo->rawsz) < 0)
+		if (write_tree(opt, &dir_info->result.oid, &info->versions,
+			       offset, opt->repo->hash_algo->rawsz) < 0)
 			ret = -1;
 	}
 
@@ -4332,9 +4349,13 @@ static int process_entries(struct merge_options *opt,
 		fflush(stdout);
 		BUG("dir_metadata accounting completely off; shouldn't happen");
 	}
-	if (write_tree(result_oid, &dir_metadata.versions, 0,
+	if (write_tree(opt, result_oid, &dir_metadata.versions, 0,
 		       opt->repo->hash_algo->rawsz) < 0)
 		ret = -1;
+
+	if (opt->write_pack)
+		end_odb_transaction();
+
 cleanup:
 	string_list_clear(&plist, 0);
 	string_list_clear(&dir_metadata.versions, 0);
@@ -4877,6 +4898,9 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 	 * a small subset of the overall paths that have special output.
 	 */
 	strmap_init(&opt->priv->conflicts);
+
+	if (opt->write_pack)
+		begin_odb_transaction();
 
 	trace2_region_leave("merge", "allocate/init", opt->repo);
 }

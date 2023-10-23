@@ -945,4 +945,97 @@ test_expect_success 'check the input format when --stdin is passed' '
 	test_cmp expect actual
 '
 
+packdir=".git/objects/pack"
+
+test_expect_success 'merge-tree can pack its result with --write-pack' '
+	test_when_finished "rm -rf repo" &&
+	git init repo &&
+
+	# base has lines [3, 4, 5]
+	#   - side adds to the beginning, resulting in [1, 2, 3, 4, 5]
+	#   - other adds to the end, resulting in [3, 4, 5, 6, 7]
+	#
+	# merging the two should result in a new blob object containing
+	# [1, 2, 3, 4, 5, 6, 7], along with a new tree.
+	test_commit -C repo base file "$(test_seq 3 5)" &&
+	git -C repo branch -M main &&
+	git -C repo checkout -b side main &&
+	test_commit -C repo side file "$(test_seq 1 5)" &&
+	git -C repo checkout -b other main &&
+	test_commit -C repo other file "$(test_seq 3 7)" &&
+
+	find repo/$packdir -type f -name "pack-*.idx" >packs.before &&
+	tree="$(git -C repo merge-tree --write-pack \
+		refs/tags/side refs/tags/other)" &&
+	blob="$(git -C repo rev-parse $tree:file)" &&
+	find repo/$packdir -type f -name "pack-*.idx" >packs.after &&
+
+	test_must_be_empty packs.before &&
+	test_line_count = 1 packs.after &&
+
+	git show-index <$(cat packs.after) >objects &&
+	test_line_count = 2 objects &&
+	grep "^[1-9][0-9]* $tree" objects &&
+	grep "^[1-9][0-9]* $blob" objects
+'
+
+test_expect_success 'merge-tree can write multiple packs with --write-pack' '
+	test_when_finished "rm -rf repo" &&
+	git init repo &&
+	(
+		cd repo &&
+
+		git config pack.packSizeLimit 512 &&
+
+		test_seq 512 >f &&
+
+		# "f" contains roughly ~2,000 bytes.
+		#
+		# Each side ("foo" and "bar") adds a small amount of data at the
+		# beginning and end of "base", respectively.
+		git add f &&
+		test_tick &&
+		git commit -m base &&
+		git branch -M main &&
+
+		git checkout -b foo main &&
+		{
+			echo foo && cat f
+		} >f.tmp &&
+		mv f.tmp f &&
+		git add f &&
+		test_tick &&
+		git commit -m foo &&
+
+		git checkout -b bar main &&
+		echo bar >>f &&
+		git add f &&
+		test_tick &&
+		git commit -m bar &&
+
+		find $packdir -type f -name "pack-*.idx" >packs.before &&
+		# Merging either side should result in a new object which is
+		# larger than 1M, thus the result should be split into two
+		# separate packs.
+		tree="$(git merge-tree --write-pack \
+			refs/heads/foo refs/heads/bar)" &&
+		blob="$(git rev-parse $tree:f)" &&
+		find $packdir -type f -name "pack-*.idx" >packs.after &&
+
+		test_must_be_empty packs.before &&
+		test_line_count = 2 packs.after &&
+		for idx in $(cat packs.after)
+		do
+			git show-index <$idx || return 1
+		done >objects &&
+
+		# The resulting set of packs should contain one copy of both
+		# objects, each in a separate pack.
+		test_line_count = 2 objects &&
+		grep "^[1-9][0-9]* $tree" objects &&
+		grep "^[1-9][0-9]* $blob" objects
+
+	)
+'
+
 test_done
