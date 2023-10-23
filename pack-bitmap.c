@@ -2111,6 +2111,8 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 
 	load_reverse_index(r, bitmap_git);
 
+	warning("REUSE");
+
 	if (bitmap_is_midx(bitmap_git)) {
 		for (i = 0; i < bitmap_git->midx->num_packs; i++) {
 			struct bitmapped_pack pack = { 0 };
