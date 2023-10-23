@@ -148,6 +148,10 @@ struct bulk_checkin_source {
 		struct {
 			int fd;
 		} from_fd;
+		struct {
+			const void *buf;
+			size_t nr_read;
+		} incore;
 	} data;
 
 	size_t size;
@@ -166,6 +170,36 @@ static off_t bulk_checkin_source_seek_from_fd(struct bulk_checkin_source *source
 	return lseek(source->data.from_fd.fd, offset, SEEK_SET);
 }
 
+static off_t bulk_checkin_source_read_incore(struct bulk_checkin_source *source,
+					     void *buf, size_t nr)
+{
+	const unsigned char *src = source->data.incore.buf;
+
+	if (source->data.incore.nr_read > source->size)
+		BUG("read beyond bulk-checkin source buffer end "
+		    "(%"PRIuMAX" > %"PRIuMAX")",
+		    (uintmax_t)source->data.incore.nr_read,
+		    (uintmax_t)source->size);
+
+	if (nr > source->size - source->data.incore.nr_read)
+		nr = source->size - source->data.incore.nr_read;
+
+	src += source->data.incore.nr_read;
+
+	memcpy(buf, src, nr);
+	source->data.incore.nr_read += nr;
+	return nr;
+}
+
+static off_t bulk_checkin_source_seek_incore(struct bulk_checkin_source *source,
+					     off_t offset)
+{
+	if (!(0 <= offset && offset < source->size))
+		return (off_t)-1;
+	source->data.incore.nr_read = offset;
+	return source->data.incore.nr_read;
+}
+
 static void init_bulk_checkin_source_from_fd(struct bulk_checkin_source *source,
 					     int fd, size_t size,
 					     const char *path)
@@ -176,6 +210,22 @@ static void init_bulk_checkin_source_from_fd(struct bulk_checkin_source *source,
 	source->seek = bulk_checkin_source_seek_from_fd;
 
 	source->data.from_fd.fd = fd;
+
+	source->size = size;
+	source->path = path;
+}
+
+static void init_bulk_checkin_source_incore(struct bulk_checkin_source *source,
+					    const void *buf, size_t size,
+					    const char *path)
+{
+	memset(source, 0, sizeof(struct bulk_checkin_source));
+
+	source->read = bulk_checkin_source_read_incore;
+	source->seek = bulk_checkin_source_seek_incore;
+
+	source->data.incore.buf = buf;
+	source->data.incore.nr_read = 0;
 
 	source->size = size;
 	source->path = path;
@@ -359,6 +409,19 @@ static int deflate_obj_to_pack(struct bulk_checkin_packfile *state,
 	return 0;
 }
 
+static int deflate_obj_to_pack_incore(struct bulk_checkin_packfile *state,
+				       struct object_id *result_oid,
+				       const void *buf, size_t size,
+				       const char *path, enum object_type type,
+				       unsigned flags)
+{
+	struct bulk_checkin_source source;
+
+	init_bulk_checkin_source_incore(&source, buf, size, path);
+
+	return deflate_obj_to_pack(state, result_oid, &source, type, 0, flags);
+}
+
 static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 				struct object_id *result_oid,
 				int fd, size_t size,
@@ -416,6 +479,18 @@ int index_blob_bulk_checkin(struct object_id *oid,
 {
 	int status = deflate_blob_to_pack(&bulk_checkin_packfile, oid, fd, size,
 					  path, flags);
+	if (!odb_transaction_nesting)
+		flush_bulk_checkin_packfile(&bulk_checkin_packfile);
+	return status;
+}
+
+int index_blob_bulk_checkin_incore(struct object_id *oid,
+				   const void *buf, size_t size,
+				   const char *path, unsigned flags)
+{
+	int status = deflate_obj_to_pack_incore(&bulk_checkin_packfile, oid,
+						buf, size, path, OBJ_BLOB,
+						flags);
 	if (!odb_transaction_nesting)
 		flush_bulk_checkin_packfile(&bulk_checkin_packfile);
 	return status;
