@@ -196,10 +196,10 @@ static void init_bulk_checkin_source_from_fd(struct bulk_checkin_source *source,
  * status before calling us just in case we ask it to call us again
  * with a new pack.
  */
-static int stream_blob_to_pack(struct bulk_checkin_packfile *state,
-			       git_hash_ctx *ctx, off_t *already_hashed_to,
-			       struct bulk_checkin_source *source,
-			       unsigned flags)
+static int stream_obj_to_pack(struct bulk_checkin_packfile *state,
+			      git_hash_ctx *ctx, off_t *already_hashed_to,
+			      struct bulk_checkin_source *source,
+			      enum object_type type, unsigned flags)
 {
 	git_zstream s;
 	unsigned char ibuf[16384];
@@ -212,8 +212,7 @@ static int stream_blob_to_pack(struct bulk_checkin_packfile *state,
 
 	git_deflate_init(&s, pack_compression_level);
 
-	hdrlen = encode_in_pack_object_header(obuf, sizeof(obuf), OBJ_BLOB,
-					      size);
+	hdrlen = encode_in_pack_object_header(obuf, sizeof(obuf), type, size);
 	s.next_out = obuf + hdrlen;
 	s.avail_out = sizeof(obuf) - hdrlen;
 
@@ -293,27 +292,23 @@ static void prepare_to_stream(struct bulk_checkin_packfile *state,
 		die_errno("unable to write pack header");
 }
 
-static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
-				struct object_id *result_oid,
-				int fd, size_t size,
-				const char *path, unsigned flags)
+
+static int deflate_obj_to_pack(struct bulk_checkin_packfile *state,
+			       struct object_id *result_oid,
+			       struct bulk_checkin_source *source,
+			       enum object_type type,
+			       off_t seekback,
+			       unsigned flags)
 {
-	off_t seekback, already_hashed_to;
+	off_t already_hashed_to = 0;
 	git_hash_ctx ctx;
 	unsigned char obuf[16384];
 	unsigned header_len;
 	struct hashfile_checkpoint checkpoint = {0};
 	struct pack_idx_entry *idx = NULL;
-	struct bulk_checkin_source source;
 
-	init_bulk_checkin_source_from_fd(&source, fd, size, path);
-
-	seekback = lseek(fd, 0, SEEK_CUR);
-	if (seekback == (off_t) -1)
-		return error("cannot find the current offset");
-
-	header_len = format_object_header((char *)obuf, sizeof(obuf),
-					  OBJ_BLOB, size);
+	header_len = format_object_header((char *)obuf, sizeof(obuf), type,
+					  source->size);
 	the_hash_algo->init_fn(&ctx);
 	the_hash_algo->update_fn(&ctx, obuf, header_len);
 	the_hash_algo->init_fn(&checkpoint.ctx);
@@ -322,8 +317,6 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 	if ((flags & HASH_WRITE_OBJECT) != 0)
 		CALLOC_ARRAY(idx, 1);
 
-	already_hashed_to = 0;
-
 	while (1) {
 		prepare_to_stream(state, flags);
 		if (idx) {
@@ -331,8 +324,8 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 			idx->offset = state->offset;
 			crc32_begin(state->f);
 		}
-		if (!stream_blob_to_pack(state, &ctx, &already_hashed_to,
-					 &source, flags))
+		if (!stream_obj_to_pack(state, &ctx, &already_hashed_to,
+					source, type, flags))
 			break;
 		/*
 		 * Writing this object to the current pack will make
@@ -344,7 +337,7 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 		hashfile_truncate(state->f, &checkpoint);
 		state->offset = checkpoint.offset;
 		flush_bulk_checkin_packfile(state);
-		if (source.seek(&source, seekback) == (off_t)-1)
+		if (source->seek(source, seekback) == (off_t)-1)
 			return error("cannot seek back");
 	}
 	the_hash_algo->final_oid_fn(result_oid, &ctx);
@@ -364,6 +357,24 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 		state->written[state->nr_written++] = idx;
 	}
 	return 0;
+}
+
+static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
+				struct object_id *result_oid,
+				int fd, size_t size,
+				const char *path, unsigned flags)
+{
+	struct bulk_checkin_source source;
+	off_t seekback;
+
+	init_bulk_checkin_source_from_fd(&source, fd, size, path);
+
+	seekback = lseek(fd, 0, SEEK_CUR);
+	if (seekback == (off_t) -1)
+		return error("cannot find the current offset");
+
+	return deflate_obj_to_pack(state, result_oid, &source, OBJ_BLOB,
+				   seekback, flags);
 }
 
 void prepare_loose_object_bulk_checkin(void)
