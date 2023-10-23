@@ -140,8 +140,49 @@ static int already_written(struct bulk_checkin_packfile *state, struct object_id
 	return 0;
 }
 
+struct bulk_checkin_source {
+	off_t (*read)(struct bulk_checkin_source *, void *, size_t);
+	off_t (*seek)(struct bulk_checkin_source *, off_t);
+
+	union {
+		struct {
+			int fd;
+		} from_fd;
+	} data;
+
+	size_t size;
+	const char *path;
+};
+
+static off_t bulk_checkin_source_read_from_fd(struct bulk_checkin_source *source,
+					      void *buf, size_t nr)
+{
+	return read_in_full(source->data.from_fd.fd, buf, nr);
+}
+
+static off_t bulk_checkin_source_seek_from_fd(struct bulk_checkin_source *source,
+					      off_t offset)
+{
+	return lseek(source->data.from_fd.fd, offset, SEEK_SET);
+}
+
+static void init_bulk_checkin_source_from_fd(struct bulk_checkin_source *source,
+					     int fd, size_t size,
+					     const char *path)
+{
+	memset(source, 0, sizeof(struct bulk_checkin_source));
+
+	source->read = bulk_checkin_source_read_from_fd;
+	source->seek = bulk_checkin_source_seek_from_fd;
+
+	source->data.from_fd.fd = fd;
+
+	source->size = size;
+	source->path = path;
+}
+
 /*
- * Read the contents from fd for size bytes, streaming it to the
+ * Read the contents from 'source' for 'size' bytes, streaming it to the
  * packfile in state while updating the hash in ctx. Signal a failure
  * by returning a negative value when the resulting pack would exceed
  * the pack size limit and this is not the first object in the pack,
@@ -157,7 +198,7 @@ static int already_written(struct bulk_checkin_packfile *state, struct object_id
  */
 static int stream_blob_to_pack(struct bulk_checkin_packfile *state,
 			       git_hash_ctx *ctx, off_t *already_hashed_to,
-			       int fd, size_t size, const char *path,
+			       struct bulk_checkin_source *source,
 			       unsigned flags)
 {
 	git_zstream s;
@@ -167,22 +208,27 @@ static int stream_blob_to_pack(struct bulk_checkin_packfile *state,
 	int status = Z_OK;
 	int write_object = (flags & HASH_WRITE_OBJECT);
 	off_t offset = 0;
+	size_t size = source->size;
 
 	git_deflate_init(&s, pack_compression_level);
 
-	hdrlen = encode_in_pack_object_header(obuf, sizeof(obuf), OBJ_BLOB, size);
+	hdrlen = encode_in_pack_object_header(obuf, sizeof(obuf), OBJ_BLOB,
+					      size);
 	s.next_out = obuf + hdrlen;
 	s.avail_out = sizeof(obuf) - hdrlen;
 
 	while (status != Z_STREAM_END) {
 		if (size && !s.avail_in) {
 			ssize_t rsize = size < sizeof(ibuf) ? size : sizeof(ibuf);
-			ssize_t read_result = read_in_full(fd, ibuf, rsize);
+			ssize_t read_result;
+
+			read_result = source->read(source, ibuf, rsize);
 			if (read_result < 0)
-				die_errno("failed to read from '%s'", path);
+				die_errno("failed to read from '%s'",
+					  source->path);
 			if (read_result != rsize)
 				die("failed to read %d bytes from '%s'",
-				    (int)rsize, path);
+				    (int)rsize, source->path);
 			offset += rsize;
 			if (*already_hashed_to < offset) {
 				size_t hsize = offset - *already_hashed_to;
@@ -258,6 +304,9 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 	unsigned header_len;
 	struct hashfile_checkpoint checkpoint = {0};
 	struct pack_idx_entry *idx = NULL;
+	struct bulk_checkin_source source;
+
+	init_bulk_checkin_source_from_fd(&source, fd, size, path);
 
 	seekback = lseek(fd, 0, SEEK_CUR);
 	if (seekback == (off_t) -1)
@@ -283,7 +332,7 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 			crc32_begin(state->f);
 		}
 		if (!stream_blob_to_pack(state, &ctx, &already_hashed_to,
-					 fd, size, path, flags))
+					 &source, flags))
 			break;
 		/*
 		 * Writing this object to the current pack will make
@@ -295,7 +344,7 @@ static int deflate_blob_to_pack(struct bulk_checkin_packfile *state,
 		hashfile_truncate(state->f, &checkpoint);
 		state->offset = checkpoint.offset;
 		flush_bulk_checkin_packfile(state);
-		if (lseek(fd, seekback, SEEK_SET) == (off_t) -1)
+		if (source.seek(&source, seekback) == (off_t)-1)
 			return error("cannot seek back");
 	}
 	the_hash_algo->final_oid_fn(result_oid, &ctx);
