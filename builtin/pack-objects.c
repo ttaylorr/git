@@ -1207,6 +1207,8 @@ static void write_reused_pack(struct bitmapped_pack *reuse_pack,
 				break;
 
 			offset += ewah_bit_ctz64(word >> offset);
+			if (pos + offset < reuse_pack->bitmap_pos)
+				continue;
 			if (pos + offset >= end)
 				goto done;
 
@@ -4040,7 +4042,7 @@ static int get_object_list_from_bitmap(struct rev_info *revs)
 						   &reuse_packfile_bitmap);
 		reuse_packfile_objects = bitmap_popcount(reuse_packfile_bitmap);
 #ifdef DEBUG
-		warning("bitmap_popcount(reuse)=%"PRIuMAX, reuse_packfile_objects);
+		warning("bitmap_popcount(reuse)=%"PRIuMAX, (uintmax_t)reuse_packfile_objects);
 #endif
 
 		if (reuse_packfile_objects) {

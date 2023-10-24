@@ -1889,7 +1889,7 @@ static int try_partial_reuse(struct bitmapped_pack *pack,
 		 * to REF_DELTA on the fly. Better to just let the normal
 		 * object_entry code path handle it.
 		 */
-		if (!bitmap_get(reuse, base_pos))
+		if (!bitmap_get(reuse, pack->bitmap_pos + base_pos))
 			return 0;
 	}
 
@@ -1964,19 +1964,10 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 			pack_pos = pos * BITS_IN_EWORD + offset - pack->bitmap_pos;
 			nth_packed_object_id(&oid, pack->p, pack_pos_to_index(pack->p, pack_pos));
 
-			if (bitmap_get(result, pos + offset)) {
-				bitmap_set(reuse, pos + offset);
-#ifdef DEBUG
-				warning("(fast) reusing object %s at pack_pos=%"PRIuMAX", bit_pos=%"PRIuMAX,
-					oid_to_hex(&oid), pack_pos, pack_pos + pack->bitmap_pos);
-#endif
-			} else {
-#ifdef DEBUG
-				warning("(fast) not reusing object %s at pack_pos=%"PRIuMAX", bit_pos=%"PRIuMAX,
-					oid_to_hex(&oid), pack_pos, pack_pos + pack->bitmap_pos);
-#endif
+			try_partial_reuse(pack, pack_pos, reuse, &w_curs);
+			if (!bitmap_get(reuse, pos * BITS_IN_EWORD + offset))
 				complete_prefix = 0;
-			}
+
 		}
 
 		/* Move up to the next word boundary. */
@@ -1998,7 +1989,9 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 		 */
 		size_t start = pos;
 		size_t end = start + (pack->bitmap_nr / BITS_IN_EWORD);
+#ifdef DEBUG
 		size_t reused = 0;
+#endif
 
 		if (pack->bitmap_pos % BITS_IN_EWORD)
 			start++;
@@ -2018,8 +2011,8 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 			}
 #ifdef DEBUG
 			warning("DONE start=%"PRIuMAX", end=%"PRIuMAX", pos=%"PRIuMAX, (uintmax_t)start, (uintmax_t)end, (uintmax_t)pos);
-#endif
 			reused = pos - start;
+#endif
 			memset(reuse->words + start, 0xFF, pos - start);
 		}
 
