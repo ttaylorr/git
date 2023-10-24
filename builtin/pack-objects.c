@@ -223,6 +223,7 @@ static struct progress *progress_state;
 
 static struct bitmapped_pack *reused_packs;
 static size_t reused_packs_nr;
+static size_t reused_packs_used_nr;
 static uint32_t reuse_packfile_objects;
 static struct bitmap *reuse_packfile_bitmap;
 
@@ -1276,6 +1277,8 @@ static void write_pack_file(void)
 
 				reused_chunks_nr = 0;
 				write_reused_pack(&reused_packs[j], f, pack_start);
+				if (reused_chunks_nr)
+					reused_packs_used_nr++;
 			}
 			offset = hashfile_total(f);
 		}
@@ -4604,8 +4607,8 @@ int cmd_pack_objects(int argc, const char **argv, const char *prefix)
 			     " reused %"PRIu32" (delta %"PRIu32"),"
 			     " pack-reused %"PRIu32" (%"PRIuMAX" %s)"),
 			   written, written_delta, reused, reused_delta,
-			   reuse_packfile_objects, (uintmax_t)reused_packs_nr,
-			   reused_packs_nr == 1 ? "pack" : "packs");
+			   reuse_packfile_objects, (uintmax_t)reused_packs_used_nr,
+			   reused_packs_used_nr == 1 ? "pack" : "packs");
 
 cleanup:
 	list_objects_filter_release(&filter_options);
