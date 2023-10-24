@@ -1103,17 +1103,11 @@ static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_pack,
 	size_t pos = reuse_pack->bitmap_pos / BITS_IN_EWORD;
 	size_t offset = reuse_pack->bitmap_pos % BITS_IN_EWORD;
 	size_t start, end;
-#ifdef DEBUG
-	warning("%s:%d: pos=%"PRIuMAX, __FILE__, __LINE__, (uintmax_t)pos);
-#endif
 
 	if (offset) {
 		eword_t word = reuse_packfile_bitmap->words[pos];
 		size_t last, pack_pos;
 
-#ifdef DEBUG
-		warning("%s:%d: offset=%"PRIuMAX, __FILE__, __LINE__, (uintmax_t)offset);
-#endif
 		if (reuse_pack->bitmap_nr < (BITS_IN_EWORD - (offset % BITS_IN_EWORD)))
 			last = offset + reuse_pack->bitmap_nr;
 		else
@@ -1190,9 +1184,6 @@ static void write_reused_pack(struct bitmapped_pack *reuse_pack,
 	uint32_t offset;
 	struct pack_window *w_curs = NULL;
 
-#ifdef DEBUG
-	warning("write_reused_pack(%s)", pack_basename(reuse_pack->p));
-#endif
 	if (allow_ofs_delta)
 		i = write_reused_pack_verbatim(reuse_pack, f, pack_start,
 					       &w_curs);
@@ -1213,9 +1204,6 @@ static void write_reused_pack(struct bitmapped_pack *reuse_pack,
 				goto done;
 
 			pack_pos = pos + offset - reuse_pack->bitmap_pos;
-#ifdef DEBUG
-			warning("bit position: %"PRIuMAX", pack position: %"PRIuMAX, (uintmax_t)(pos + offset), (uintmax_t)pack_pos);
-#endif
 			/*
 			 * TODO(@ttaylorr): update me!
 			 *
@@ -1288,9 +1276,6 @@ static void write_pack_file(void)
 
 				reused_chunks_nr = 0;
 				write_reused_pack(&reused_packs[j], f, pack_start);
-#ifdef DEBUG
-				warning("reused %d chunk(s)", reused_chunks_nr);
-#endif
 			}
 			offset = hashfile_total(f);
 		}
@@ -4041,9 +4026,6 @@ static int get_object_list_from_bitmap(struct rev_info *revs)
 						   &reused_packs_nr,
 						   &reuse_packfile_bitmap);
 		reuse_packfile_objects = bitmap_popcount(reuse_packfile_bitmap);
-#ifdef DEBUG
-		warning("bitmap_popcount(reuse)=%"PRIuMAX, (uintmax_t)reuse_packfile_objects);
-#endif
 
 		if (reuse_packfile_objects) {
 			nr_result += reuse_packfile_objects;

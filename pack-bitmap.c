@@ -1896,10 +1896,6 @@ static int try_partial_reuse(struct bitmapped_pack *pack,
 	/*
 	 * If we got here, then the object is OK to reuse. Mark it.
 	 */
-#ifdef DEBUG
-	warning("reusing object %s at pack_pos=%"PRIuMAX", bit_pos=%"PRIuMAX,
-		oid_to_hex(&oid), pos, pack->bitmap_pos + pos);
-#endif
 	bitmap_set(reuse, pack->bitmap_pos + pos);
 	return 0;
 }
@@ -1951,13 +1947,8 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 		for (; offset < last; offset++) {
 			size_t pack_pos;
 			struct object_id oid;
-			if (word >> offset == 0) {
-#ifdef DEBUG
-				warning("missing want at bit position %"PRIuMAX", "
-					"not reusing", (uintmax_t)(pos+offset));
-#endif
+			if (word >> offset == 0)
 				complete_prefix = 0;
-			}
 
 			offset += ewah_bit_ctz64(word >> offset);
 
@@ -1989,38 +1980,17 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 		 */
 		size_t start = pos;
 		size_t end = start + (pack->bitmap_nr / BITS_IN_EWORD);
-#ifdef DEBUG
-		size_t reused = 0;
-#endif
 
 		if (pack->bitmap_pos % BITS_IN_EWORD)
 			start++;
 
-#ifdef DEBUG
-		warning("start=%"PRIuMAX", end=%"PRIuMAX, (uintmax_t)start, (uintmax_t)end);
-#endif
-
 		if (start <= end) {
 			while (start <= pos && pos <= end &&
 			       pos < result->word_alloc &&
-			       result->words[pos] == (eword_t)~0) {
+			       result->words[pos] == (eword_t)~0)
 				pos++;
-#ifdef DEBUG
-				warning("advancing pos=%"PRIuMAX"", (uintmax_t)pos);
-#endif
-			}
-#ifdef DEBUG
-			warning("DONE start=%"PRIuMAX", end=%"PRIuMAX", pos=%"PRIuMAX, (uintmax_t)start, (uintmax_t)end, (uintmax_t)pos);
-			reused = pos - start;
-#endif
 			memset(reuse->words + start, 0xFF, pos - start);
 		}
-
-#ifdef DEBUG
-		warning("reused %"PRIuMAX" word(s) starting at %"PRIuMAX,
-			(uintmax_t)reused,
-			(uintmax_t)start);
-#endif
 	}
 
 	/*
@@ -2055,23 +2025,7 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 				BUG("advanced beyond the end of pack %s",
 				    pack_basename(pack->p));
 
-			if (try_partial_reuse(pack, pack_pos, reuse, &w_curs)) {
-#ifdef DEBUG
-				warning("(slow) not reusing pack position %"PRIuMAX
-					" (%"PRIuMAX")",
-					(uintmax_t)pack_pos,
-					(uintmax_t)bit_pos);
-#endif
-				;
-			} else {
-#ifdef DEBUG
-				warning("(slow) maybe reusing pack position %"PRIuMAX
-					" (%"PRIuMAX")?",
-					(uintmax_t)pack_pos,
-					(uintmax_t)bit_pos);
-#endif
-				;
-			}
+			try_partial_reuse(pack, pack_pos, reuse, &w_curs);
 		}
 	}
 done:
@@ -2103,8 +2057,6 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	size_t i;
 
 	load_reverse_index(r, bitmap_git);
-
-	warning("REUSE");
 
 	if (bitmap_is_midx(bitmap_git)) {
 		for (i = 0; i < bitmap_git->midx->num_packs; i++) {
@@ -2139,13 +2091,9 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 
 	QSORT(packs, packs_nr, bitmapped_pack_cmp);
 
-	for (i = 0; i < packs_nr; i++) {
-#ifdef DEBUG
-		warning("reusing objects from %s", pack_basename(packs[i].p));
-#endif
+	for (i = 0; i < packs_nr; i++)
 		reuse_partial_packfile_from_bitmap_one(bitmap_git, &packs[i],
 						       reuse);
-	}
 
 	/*
 	 * Drop any reused objects from the result, since they will not
