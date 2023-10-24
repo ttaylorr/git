@@ -183,6 +183,9 @@ struct multi_pack_index *load_multi_pack_index(const char *object_dir, int local
 
 	pair_chunk(cf, MIDX_CHUNKID_LARGEOFFSETS, &m->chunk_large_offsets,
 		   &m->chunk_large_offsets_len);
+	pair_chunk(cf, MIDX_CHUNKID_DISJOINTPACKS,
+		   (const unsigned char **)&m->chunk_disjoint_packs,
+		   &m->chunk_disjoint_packs_len);
 
 	if (git_env_bool("GIT_TEST_MIDX_READ_RIDX", 1))
 		pair_chunk(cf, MIDX_CHUNKID_REVINDEX, &m->chunk_revindex,
@@ -274,6 +277,20 @@ int prepare_midx_pack(struct repository *r, struct multi_pack_index *m, uint32_t
 	list_add_tail(&p->mru, &r->objects->packed_git_mru);
 
 	return 0;
+}
+
+void nth_bitmapped_pack(struct repository *r, struct multi_pack_index *m,
+			struct bitmapped_pack *bp, uint32_t pack_int_id)
+{
+	if (prepare_midx_pack(r, m, pack_int_id)) {
+		warning(_("could not load disjoint pack %"PRIu32), pack_int_id);
+		return;
+	}
+
+	bp->p = m->packs[pack_int_id];
+	bp->bitmap_pos = get_be32(m->chunk_disjoint_packs + 3 * pack_int_id);
+	bp->bitmap_nr = get_be32(m->chunk_disjoint_packs + 3 * pack_int_id + 1);
+	bp->disjoint = !!get_be32(m->chunk_disjoint_packs + 3 * pack_int_id + 2);
 }
 
 int bsearch_midx(const struct object_id *oid, struct multi_pack_index *m, uint32_t *result)
