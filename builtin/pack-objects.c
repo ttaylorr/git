@@ -207,6 +207,7 @@ static int have_non_local_packs;
 static int incremental;
 static int ignore_packed_keep_on_disk;
 static int ignore_packed_keep_in_core;
+static int ignore_midx_disjoint_packs;
 static int allow_ofs_delta;
 static struct pack_idx_option pack_idx_opts;
 static const char *base_name;
@@ -1403,7 +1404,8 @@ static int want_found_object(const struct object_id *oid, int exclude,
 	/*
 	 * Then handle .keep first, as we have a fast(er) path there.
 	 */
-	if (ignore_packed_keep_on_disk || ignore_packed_keep_in_core) {
+	if (ignore_packed_keep_on_disk || ignore_packed_keep_in_core ||
+	    ignore_midx_disjoint_packs) {
 		/*
 		 * Set the flags for the kept-pack cache to be the ones we want
 		 * to ignore.
@@ -1417,6 +1419,8 @@ static int want_found_object(const struct object_id *oid, int exclude,
 			flags |= ON_DISK_KEEP_PACKS;
 		if (ignore_packed_keep_in_core)
 			flags |= IN_CORE_KEEP_PACKS;
+		if (ignore_midx_disjoint_packs)
+			flags |= MIDX_DISJOINT_PACKS;
 
 		if (ignore_packed_keep_on_disk && p->pack_keep)
 			return 0;
@@ -4266,6 +4270,8 @@ int cmd_pack_objects(int argc, const char **argv, const char *prefix)
 			 N_("create packs suitable for shallow fetches")),
 		OPT_BOOL(0, "honor-pack-keep", &ignore_packed_keep_on_disk,
 			 N_("ignore packs that have companion .keep file")),
+		OPT_BOOL(0, "ignore-disjoint", &ignore_midx_disjoint_packs,
+			 N_("ignore packs that are marked disjoint in the MIDX")),
 		OPT_STRING_LIST(0, "keep-pack", &keep_pack_list, N_("name"),
 				N_("ignore this pack")),
 		OPT_INTEGER(0, "compression", &pack_compression_level,
