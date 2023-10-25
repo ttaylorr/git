@@ -58,6 +58,7 @@ struct pack_objects_args {
 	int no_reuse_object;
 	int quiet;
 	int local;
+	int ignore_disjoint;
 	struct list_objects_filter_options filter_options;
 };
 
@@ -293,6 +294,8 @@ static void prepare_pack_objects(struct child_process *cmd,
 		strvec_push(&cmd->args,  "--local");
 	if (args->quiet)
 		strvec_push(&cmd->args,  "--quiet");
+	if (args->ignore_disjoint)
+		strvec_push(&cmd->args,  "--ignore-disjoint");
 	if (delta_base_offset)
 		strvec_push(&cmd->args,  "--delta-base-offset");
 	strvec_push(&cmd->args, out);
@@ -1190,6 +1193,8 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 			   N_("pack prefix to store a pack containing pruned objects")),
 		OPT_STRING(0, "filter-to", &filter_to, N_("dir"),
 			   N_("pack prefix to store a pack containing filtered out objects")),
+		OPT_BOOL(0, "ignore-disjoint", &po_args.ignore_disjoint,
+			 N_("pass --ignore-disjoint to git-pack-objects")),
 		OPT_END()
 	};
 
@@ -1387,6 +1392,7 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 
 		cruft_po_args.local = po_args.local;
 		cruft_po_args.quiet = po_args.quiet;
+		cruft_po_args.ignore_disjoint = po_args.ignore_disjoint;
 
 		ret = write_cruft_pack(&cruft_po_args, packtmp, pack_prefix,
 				       cruft_expiration, &names,
