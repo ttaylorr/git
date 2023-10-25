@@ -464,6 +464,17 @@ struct pack_info {
 	unsigned expired : 1;
 };
 
+static void fill_pack_info(struct pack_info *info,
+			   struct packed_git *p, char *pack_name,
+			   uint32_t orig_pack_int_id)
+{
+	memset(info, 0, sizeof(struct pack_info));
+
+	info->orig_pack_int_id = orig_pack_int_id;
+	info->pack_name = pack_name;
+	info->p = p;
+}
+
 static int pack_info_compare(const void *_a, const void *_b)
 {
 	struct pack_info *a = (struct pack_info *)_a;
@@ -504,6 +515,8 @@ static void add_pack_to_midx(const char *full_path, size_t full_path_len,
 			     const char *file_name, void *data)
 {
 	struct write_midx_context *ctx = data;
+	struct packed_git *p;
+	struct string_list_item *item = NULL;
 
 	if (ends_with(file_name, ".idx")) {
 		display_progress(ctx->progress, ++ctx->pack_paths_checked);
@@ -522,25 +535,24 @@ static void add_pack_to_midx(const char *full_path, size_t full_path_len,
 		 * should be performed independently (likely checking
 		 * to_include before the existing MIDX).
 		 */
-		if (ctx->m && midx_contains_pack(ctx->m, file_name))
+		if (ctx->m && midx_contains_pack(ctx->m, file_name)) {
 			return;
-		else if (ctx->to_include &&
-			 !string_list_has_string(ctx->to_include, file_name))
-			return;
+		} else if (ctx->to_include) {
+			item = string_list_lookup(ctx->to_include, file_name);
+			if (!item)
+				return;
+		}
 
 		ALLOC_GROW(ctx->info, ctx->nr + 1, ctx->alloc);
 
-		ctx->info[ctx->nr].p = add_packed_git(full_path,
-						      full_path_len,
-						      0);
-
-		if (!ctx->info[ctx->nr].p) {
+		p = add_packed_git(full_path, full_path_len, 0);
+		if (!p) {
 			warning(_("failed to add packfile '%s'"),
 				full_path);
 			return;
 		}
 
-		if (open_pack_index(ctx->info[ctx->nr].p)) {
+		if (open_pack_index(p)) {
 			warning(_("failed to open pack-index '%s'"),
 				full_path);
 			close_pack(ctx->info[ctx->nr].p);
@@ -548,9 +560,8 @@ static void add_pack_to_midx(const char *full_path, size_t full_path_len,
 			return;
 		}
 
-		ctx->info[ctx->nr].pack_name = xstrdup(file_name);
-		ctx->info[ctx->nr].orig_pack_int_id = ctx->nr;
-		ctx->info[ctx->nr].expired = 0;
+		fill_pack_info(&ctx->info[ctx->nr], p, xstrdup(file_name),
+			       ctx->nr);
 		ctx->nr++;
 	}
 }
@@ -1310,11 +1321,6 @@ static int write_midx_internal(const char *object_dir,
 		for (i = 0; i < ctx.m->num_packs; i++) {
 			ALLOC_GROW(ctx.info, ctx.nr + 1, ctx.alloc);
 
-			ctx.info[ctx.nr].orig_pack_int_id = i;
-			ctx.info[ctx.nr].pack_name = xstrdup(ctx.m->pack_names[i]);
-			ctx.info[ctx.nr].p = ctx.m->packs[i];
-			ctx.info[ctx.nr].expired = 0;
-
 			if (flags & MIDX_WRITE_REV_INDEX) {
 				/*
 				 * If generating a reverse index, need to have
@@ -1330,10 +1336,10 @@ static int write_midx_internal(const char *object_dir,
 				if (open_pack_index(ctx.m->packs[i]))
 					die(_("could not open index for %s"),
 					    ctx.m->packs[i]->pack_name);
-				ctx.info[ctx.nr].p = ctx.m->packs[i];
 			}
 
-			ctx.nr++;
+			fill_pack_info(&ctx.info[ctx.nr++], ctx.m->packs[i],
+				       xstrdup(ctx.m->pack_names[i]), i);
 		}
 	}
 
@@ -1425,10 +1431,10 @@ static int write_midx_internal(const char *object_dir,
 	}
 
 	if (ctx.preferred_pack_idx > -1) {
-		struct packed_git *preferred = ctx.info[ctx.preferred_pack_idx].p;
-		if (!preferred->num_objects) {
+		struct pack_info *preferred = &ctx.info[ctx.preferred_pack_idx];
+		if (!preferred->p->num_objects) {
 			error(_("cannot select preferred pack %s with no objects"),
-			      preferred->pack_name);
+			      preferred->p->pack_name);
 			result = 1;
 			goto cleanup;
 		}
