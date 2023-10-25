@@ -2106,7 +2106,8 @@ static struct packed_git **kept_pack_cache(struct repository *r, unsigned flags)
 
 				if (!midx_locate_pack(m, pack_basename(p), &pos))
 					continue;
-				nth_bitmapped_pack(r, m, &bp, pos);
+				if (nth_bitmapped_pack(r, m, &bp, pos) < 0)
+					die(_("could not construct kept-pack cache"));
 				if (bp.disjoint) {
 					ALLOC_GROW(packs, nr + 1, alloc);
 					packs[nr++] = p;

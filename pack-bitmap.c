@@ -2046,7 +2046,7 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	struct repository *r = the_repository;
 	struct bitmapped_pack *packs = NULL;
 	struct bitmap *result = bitmap_git->result;
-	struct bitmap *reuse;
+	struct bitmap *reuse = NULL;
 	uint32_t objects_nr = 0;
 	size_t word_alloc;
 	size_t packs_nr = 0, packs_alloc = 0;
@@ -2058,7 +2058,8 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 		for (i = 0; i < bitmap_git->midx->num_packs; i++) {
 			struct bitmapped_pack pack = { 0 };
 
-			nth_bitmapped_pack(r, bitmap_git->midx, &pack, i);
+			if (nth_bitmapped_pack(r, bitmap_git->midx, &pack, i) < 0)
+				goto done;
 			if (!pack.disjoint)
 				continue;
 
@@ -2111,6 +2112,7 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	 * need to be handled separately.
 	 */
 	bitmap_and_not(result, reuse);
+done:
 	*reused_packs = packs;
 	*reused_packs_nr = packs_nr;
 	*reuse_out = reuse;

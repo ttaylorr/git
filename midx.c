@@ -279,18 +279,18 @@ int prepare_midx_pack(struct repository *r, struct multi_pack_index *m, uint32_t
 	return 0;
 }
 
-void nth_bitmapped_pack(struct repository *r, struct multi_pack_index *m,
-			struct bitmapped_pack *bp, uint32_t pack_int_id)
+int nth_bitmapped_pack(struct repository *r, struct multi_pack_index *m,
+		       struct bitmapped_pack *bp, uint32_t pack_int_id)
 {
-	if (prepare_midx_pack(r, m, pack_int_id)) {
-		warning(_("could not load disjoint pack %"PRIu32), pack_int_id);
-		return;
-	}
+	if (prepare_midx_pack(r, m, pack_int_id))
+		return error(_("could not load disjoint pack %"PRIu32), pack_int_id);
 
 	bp->p = m->packs[pack_int_id];
 	bp->bitmap_pos = get_be32(m->chunk_disjoint_packs + 3 * pack_int_id);
 	bp->bitmap_nr = get_be32(m->chunk_disjoint_packs + 3 * pack_int_id + 1);
 	bp->disjoint = !!get_be32(m->chunk_disjoint_packs + 3 * pack_int_id + 2);
+
+	return 0;
 }
 
 int bsearch_midx(const struct object_id *oid, struct multi_pack_index *m, uint32_t *result)
@@ -1343,9 +1343,9 @@ cleanup:
 	return result;
 }
 
-static void midx_retain_existing_disjoint(struct repository *r,
-					  struct multi_pack_index *from,
-					  struct write_midx_context *ctx)
+static int midx_retain_existing_disjoint(struct repository *r,
+					 struct multi_pack_index *from,
+					 struct write_midx_context *ctx)
 {
 	struct bitmapped_pack bp;
 	uint32_t i, midx_pos;
@@ -1367,9 +1367,11 @@ static void midx_retain_existing_disjoint(struct repository *r,
 		if (!midx_locate_pack(from, info->pack_name, &midx_pos))
 			continue;
 
-		nth_bitmapped_pack(r, from, &bp, midx_pos);
+		if (nth_bitmapped_pack(r, from, &bp, midx_pos) < 0)
+			return -1;
 		info->disjoint = bp.disjoint;
 	}
+	return 0;
 }
 
 static int write_midx_internal(const char *object_dir,
@@ -1459,8 +1461,11 @@ static int write_midx_internal(const char *object_dir,
 		if (!m)
 			m = lookup_multi_pack_index(the_repository, object_dir);
 
-		if (m)
-			midx_retain_existing_disjoint(the_repository, m, &ctx);
+		if (m) {
+			result = midx_retain_existing_disjoint(the_repository, m, &ctx);
+			if (result)
+				goto cleanup;
+		}
 	}
 
 	if ((ctx.m && ctx.nr == ctx.m->num_packs) &&

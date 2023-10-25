@@ -113,7 +113,8 @@ static int read_midx_disjoint_packs(const char *object_dir)
 		return 1;
 
 	for (i = 0; i < midx->num_packs; i++) {
-		nth_bitmapped_pack(the_repository, midx, &pack, i);
+		if (nth_bitmapped_pack(the_repository, midx, &pack, i) < 0)
+			return 1;
 
 		printf("%s\n", pack_basename(pack.p));
 		printf("  bitmap_pos: %"PRIuMAX"\n", (uintmax_t)pack.bitmap_pos);
