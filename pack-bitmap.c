@@ -1914,11 +1914,12 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 {
 	struct pack_window *w_curs = NULL;
 	struct bitmap *result = bitmap_git->result;
-	size_t pos, offset;
+	size_t pos, offset, word_end;
 	unsigned complete_prefix = 1;
 
 	pos = pack->bitmap_pos / BITS_IN_EWORD;
 	offset = pack->bitmap_pos % BITS_IN_EWORD;
+	word_end = (pack->bitmap_pos + pack->bitmap_nr) / BITS_IN_EWORD;
 
 	/*
 	 * If the position of our first object is not on an eword_t
@@ -1979,17 +1980,13 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 		 * have already checked above.
 		 */
 		size_t start = pos;
-		size_t end = start + (pack->bitmap_nr / BITS_IN_EWORD);
-
-		if (pack->bitmap_pos % BITS_IN_EWORD)
-			start++;
-
-		if (start <= end) {
-			while (start <= pos && pos <= end &&
+		if (start < word_end) {
+			while (start <= pos && pos < word_end &&
 			       pos < result->word_alloc &&
 			       result->words[pos] == (eword_t)~0)
 				pos++;
-			memset(reuse->words + start, 0xFF, pos - start);
+
+			memset(reuse->words + start, 0xFF, (pos - start) * sizeof(eword_t));
 		}
 	}
 
@@ -2008,17 +2005,16 @@ static void reuse_partial_packfile_from_bitmap_one(struct bitmap_index *bitmap_g
 		eword_t word = result->words[pos];
 
 		for (offset = 0; offset < BITS_IN_EWORD; offset++) {
-			size_t pack_pos;
-			size_t bit_pos = pos * BITS_IN_EWORD + offset;
-
+			size_t bit_pos, pack_pos;
 			if (word >> offset == 0)
 				break;
+
+			offset += ewah_bit_ctz64(word >> offset);
+			bit_pos = pos * BITS_IN_EWORD + offset;
 
 			if (bit_pos >= pack->bitmap_pos + pack->bitmap_nr)
 				goto done;
 
-			offset += ewah_bit_ctz64(word >> offset);
-			bit_pos = pos * BITS_IN_EWORD + offset;
 			pack_pos = bit_pos - pack->bitmap_pos;
 
 			if (pack_pos >= pack->p->num_objects)

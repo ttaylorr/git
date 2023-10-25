@@ -1110,7 +1110,7 @@ static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_pack,
 		eword_t word = reuse_packfile_bitmap->words[pos];
 		size_t last, pack_pos;
 
-		if (reuse_pack->bitmap_nr < (BITS_IN_EWORD - (offset % BITS_IN_EWORD)))
+		if (reuse_pack->bitmap_nr < BITS_IN_EWORD - offset)
 			last = offset + reuse_pack->bitmap_nr;
 		else
 			last = BITS_IN_EWORD;
@@ -1131,9 +1131,6 @@ static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_pack,
 			display_progress(progress_state, ++written);
 		}
 
-		if (pos * BITS_IN_EWORD + offset >= reuse_pack->bitmap_pos)
-			return pos + 1;
-
 		pos++;
 		offset = 0;
 	}
@@ -1153,25 +1150,26 @@ static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_pack,
 	while (pos < end && reuse_packfile_bitmap->words[pos] == (eword_t)~0)
 		pos++;
 
-	if (pos) {
-		off_t pack_start, pack_end;
-		pack_start = pack_pos_to_offset(reuse_pack->p,
-						start * BITS_IN_EWORD - reuse_pack->bitmap_pos);
-		pack_end = pack_pos_to_offset(reuse_pack->p,
-						end * BITS_IN_EWORD - reuse_pack->bitmap_pos);
-#if 0
-		to_write = pack_pos_to_offset(reuse_pack->p, pack_end)
-			- pack_pos_to_offset(reuse_pack->p, pack_start);
-			- sizeof(struct pack_header); ???
-#endif
+	if (pos - start > 0) {
+		off_t pack_start_off, pack_end_off;
+		uint32_t pack_start_pos = start * BITS_IN_EWORD;
+		uint32_t pack_end_pos = pos * BITS_IN_EWORD;
 
-		written += (end - start) * BITS_IN_EWORD;
+		/* adjust relative to the beginning of the pack */
+		pack_start_pos -= reuse_pack->bitmap_pos;
+		pack_end_pos -= reuse_pack->bitmap_pos;
+
+		pack_start_off = pack_pos_to_offset(reuse_pack->p, pack_start_pos);
+		pack_end_off = pack_pos_to_offset(reuse_pack->p, pack_end_pos);
+
+		written += (pack_end_pos - pack_start_pos);
 
 		/* We're recording one chunk, not one object. */
-		record_reused_object(pack_start, 0);
+		record_reused_object(pack_start_off,
+				     pack_start_off - (hashfile_total(out) - pack_start));
 		hashflush(out);
 		copy_pack_data(out, reuse_pack->p, w_curs,
-			pack_start, pack_end - pack_start);
+			pack_start_off, pack_end_off - pack_start_off);
 
 		display_progress(progress_state, written);
 	}
