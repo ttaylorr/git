@@ -396,6 +396,22 @@ CHUNK DATA:
 	    aligned. The chunk is externally padded with zeros to align
 	    remaining chunks.
 
+	Disjoint Packfiles (ID: {'D', 'I', 'S', 'P'})
+	    Stores a table of three 4-byte unsigned integers in network order.
+	    Each table entry corresponds to a single pack (in the order that
+	    they appear above in the `PNAM` chunk). The values for each table
+	    entry are as follows:
+	    - The first bit position (in psuedo-pack order, see below) to
+	      contain an object from that pack.
+	    - The number of bits whose objects are selected from that pack.
+	    - A "meta" value, whose least-significant bit indicates whether or
+	      not the pack is disjoint with respect to other packs. The
+	      remaining bits are unused.
+	    Two packs are "disjoint" with respect to one another when they have
+	    disjoint sets of objects. In other words, any object found in a pack
+	    contained in the set of disjoint packfiles is guaranteed to be
+	    uniquely located among those packs.
+
 	OID Fanout (ID: {'O', 'I', 'D', 'F'})
 	    The ith entry, F[i], stores the number of OIDs with first
 	    byte at most i. Thus F[255] stores the total

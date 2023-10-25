@@ -52,6 +52,15 @@ typedef int (*show_reachable_fn)(
 
 struct bitmap_index;
 
+struct bitmapped_pack {
+	struct packed_git *p;
+
+	uint32_t bitmap_pos;
+	uint32_t bitmap_nr;
+
+	unsigned disjoint : 1;
+};
+
 struct bitmap_index *prepare_bitmap_git(struct repository *r);
 struct bitmap_index *prepare_midx_bitmap_git(struct multi_pack_index *midx);
 void count_bitmap_commit_list(struct bitmap_index *, uint32_t *commits,
