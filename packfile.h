@@ -176,6 +176,7 @@ const struct packed_git *has_packed_and_bad(struct repository *, const struct ob
 
 #define ON_DISK_KEEP_PACKS 1
 #define IN_CORE_KEEP_PACKS 2
+#define MIDX_DISJOINT_PACKS 4
 
 /*
  * Iff a pack file in the given repository contains the object named by sha1,

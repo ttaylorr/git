@@ -23,6 +23,7 @@
 #include "commit-graph.h"
 #include "pack-revindex.h"
 #include "promisor-remote.h"
+#include "pack-bitmap.h"
 
 char *odb_pack_name(struct strbuf *buf,
 		    const unsigned char *hash,
@@ -2077,6 +2078,8 @@ static void maybe_invalidate_kept_pack_cache(struct repository *r,
 
 static struct packed_git **kept_pack_cache(struct repository *r, unsigned flags)
 {
+	struct multi_pack_index *m = get_multi_pack_index(r);
+
 	maybe_invalidate_kept_pack_cache(r, flags);
 
 	if (!r->objects->kept_pack_cache.packs) {
@@ -2097,6 +2100,18 @@ static struct packed_git **kept_pack_cache(struct repository *r, unsigned flags)
 			    (p->pack_keep_in_core && (flags & IN_CORE_KEEP_PACKS))) {
 				ALLOC_GROW(packs, nr + 1, alloc);
 				packs[nr++] = p;
+			} else if (flags & MIDX_DISJOINT_PACKS) {
+				struct bitmapped_pack bp;
+				uint32_t pos;
+
+				if (!midx_locate_pack(m, pack_basename(p), &pos))
+					continue;
+				if (nth_bitmapped_pack(r, m, &bp, pos) < 0)
+					die(_("could not construct kept-pack cache"));
+				if (bp.disjoint) {
+					ALLOC_GROW(packs, nr + 1, alloc);
+					packs[nr++] = p;
+				}
 			}
 		}
 		ALLOC_GROW(packs, nr + 1, alloc);
