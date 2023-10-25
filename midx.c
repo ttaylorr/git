@@ -1343,6 +1343,35 @@ cleanup:
 	return result;
 }
 
+static void midx_retain_existing_disjoint(struct repository *r,
+					  struct multi_pack_index *from,
+					  struct write_midx_context *ctx)
+{
+	struct bitmapped_pack bp;
+	uint32_t i, midx_pos;
+
+	for (i = 0; i < ctx->nr; i++) {
+		struct pack_info *info = &ctx->info[i];
+		/*
+		 * Having to call `midx_locate_pack()` in a loop is
+		 * sub-optimal, since it is O(n^2*log(n)) in the number
+		 * of packs.
+		 *
+		 * When reusing an existing MIDX, we know that the first
+		 * 'n' packs appear in the same order, so we could avoid
+		 * this when reusing an existing MIDX. But we may be
+		 * instead relying on the order given to us by
+		 * for_each_file_in_pack_dir(), in which case we can't
+		 * make any such guarantees.
+		 */
+		if (!midx_locate_pack(from, info->pack_name, &midx_pos))
+			continue;
+
+		nth_bitmapped_pack(r, from, &bp, midx_pos);
+		info->disjoint = bp.disjoint;
+	}
+}
+
 static int write_midx_internal(const char *object_dir,
 			       struct string_list *packs_to_include,
 			       struct string_list *packs_to_drop,
@@ -1424,6 +1453,15 @@ static int write_midx_internal(const char *object_dir,
 
 	for_each_file_in_pack_dir(object_dir, add_pack_to_midx, &ctx);
 	stop_progress(&ctx.progress);
+
+	if (flags & MIDX_WRITE_RETAIN_DISJOINT) {
+		struct multi_pack_index *m = ctx.m;
+		if (!m)
+			m = lookup_multi_pack_index(the_repository, object_dir);
+
+		if (m)
+			midx_retain_existing_disjoint(the_repository, m, &ctx);
+	}
 
 	if ((ctx.m && ctx.nr == ctx.m->num_packs) &&
 	    !(packs_to_include || packs_to_drop)) {
@@ -1509,7 +1547,6 @@ static int write_midx_internal(const char *object_dir,
 			result = 1;
 			goto cleanup;
 		}
-		preferred->disjoint = 1;
 	}
 
 	ctx.entries = get_sorted_entries(ctx.m, ctx.info, ctx.nr, &ctx.entries_nr,

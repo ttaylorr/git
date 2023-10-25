@@ -2071,6 +2071,23 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 
 			objects_nr += pack.p->num_objects;
 		}
+
+		if (!packs_nr) {
+			struct packed_git *p;
+			uint32_t preferred = midx_preferred_pack(bitmap_git);
+
+			prepare_midx_pack(r, bitmap_git->midx, preferred);
+			p = bitmap_git->midx->packs[preferred];
+
+			ALLOC_GROW(packs, packs_nr + 1, packs_alloc);
+
+			packs[packs_nr].p = p;
+			packs[packs_nr].bitmap_nr = p->num_objects;
+			packs[packs_nr].bitmap_pos = 0;
+			packs[packs_nr].disjoint = 1;
+
+			objects_nr = packs[packs_nr++].bitmap_nr;
+		}
 	} else {
 		ALLOC_GROW(packs, packs_nr + 1, packs_alloc);
 
@@ -2079,9 +2096,7 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 		packs[packs_nr].bitmap_pos = 0;
 		packs[packs_nr].disjoint = 1;
 
-		objects_nr = packs[packs_nr].bitmap_nr;
-
-		packs_nr++;
+		objects_nr = packs[packs_nr++].bitmap_nr;
 	}
 
 	word_alloc = objects_nr / BITS_IN_EWORD;
