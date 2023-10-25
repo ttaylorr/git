@@ -728,14 +728,20 @@ static void midx_snapshot_refs(struct tempfile *f)
 static void midx_included_packs(struct string_list *include,
 				struct existing_packs *existing,
 				struct string_list *names,
-				struct pack_geometry *geometry)
+				struct pack_geometry *geometry,
+				int disjoint)
 {
 	struct string_list_item *item;
 
 	for_each_string_list_item(item, &existing->kept_packs)
 		string_list_insert(include, xstrfmt("%s.idx", item->string));
-	for_each_string_list_item(item, names)
-		string_list_insert(include, xstrfmt("pack-%s.idx", item->string));
+	for_each_string_list_item(item, names) {
+		const char *marker = "";
+		struct generated_pack_data *data = item->util;
+		if (disjoint && !has_pack_ext(data, ".mtimes"))
+			marker = "+";
+		string_list_insert(include, xstrfmt("%spack-%s.idx", marker, item->string));
+	}
 	if (geometry->split_factor) {
 		struct strbuf buf = STRBUF_INIT;
 		uint32_t i;
@@ -791,7 +797,8 @@ static int write_midx_included_packs(struct string_list *include,
 				     struct pack_geometry *geometry,
 				     struct string_list *names,
 				     const char *refs_snapshot,
-				     int show_progress, int write_bitmaps)
+				     int show_progress, int write_bitmaps,
+				     int exclude_disjoint)
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	struct string_list_item *item;
@@ -854,6 +861,9 @@ static int write_midx_included_packs(struct string_list *include,
 
 	if (refs_snapshot)
 		strvec_pushf(&cmd.args, "--refs-snapshot=%s", refs_snapshot);
+
+	if (exclude_disjoint)
+		strvec_push(&cmd.args, "--retain-disjoint");
 
 	ret = start_command(&cmd);
 	if (ret)
@@ -1489,11 +1499,13 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 
 	if (write_midx) {
 		struct string_list include = STRING_LIST_INIT_NODUP;
-		midx_included_packs(&include, &existing, &names, &geometry);
+		midx_included_packs(&include, &existing, &names, &geometry,
+				    po_args.ignore_disjoint);
 
 		ret = write_midx_included_packs(&include, &geometry, &names,
 						refs_snapshot ? get_tempfile_path(refs_snapshot) : NULL,
-						show_progress, write_bitmaps > 0);
+						show_progress, write_bitmaps > 0,
+						po_args.ignore_disjoint);
 
 		if (!ret && write_bitmaps)
 			remove_redundant_bitmaps(&include, packdir);
