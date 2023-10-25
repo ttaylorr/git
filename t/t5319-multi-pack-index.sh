@@ -1193,4 +1193,82 @@ test_expect_success 'disjoint packs are stored via the DISP chunk' '
 	)
 '
 
+test_disjoint_1 () {
+	local pack="$1"
+	local want="$2"
+
+	test-tool read-midx --bitmap $objdir >out &&
+	grep -A 3 "$pack" out >found &&
+
+	if ! test -s found
+	then
+		echo >&2 "could not find '$pack' in MIDX"
+		return 1
+	fi
+
+	if ! grep -q "disjoint: $want" found
+	then
+		echo >&2 "incorrect disjoint state for pack '$pack'"
+		return 1
+	fi
+	return 0
+}
+
+test_must_be_disjoint () {
+	test_disjoint_1 "$1" "yes"
+}
+
+test_must_not_be_disjoint () {
+	test_disjoint_1 "$1" "no"
+}
+
+test_expect_success 'retain disjoint packs while writing' '
+	git init repo &&
+	test_when_finished "rm -fr repo" &&
+	(
+		cd repo &&
+
+		for i in 1 2
+		do
+			test_commit "$i" && git repack -d || return 1
+		done &&
+
+		find $objdir/pack -type f -name "pack-*.idx" |
+		sed -e "s/^.*\/\(.*\)/\1/g" | sort >packs.old &&
+
+		test_line_count = 2 packs.old &&
+		disjoint="$(head -n 1 packs.old)" &&
+		non_disjoint="$(tail -n 1 packs.old)" &&
+
+		cat >in <<-EOF &&
+		+$disjoint
+		$non_disjoint
+		EOF
+		git multi-pack-index write --stdin-packs --bitmap <in &&
+
+		test_must_be_disjoint "${disjoint%.idx}.pack" &&
+		test_must_not_be_disjoint "${non_disjoint%.idx}.pack" &&
+
+		test_commit 3 &&
+		git repack -d &&
+
+		find $objdir/pack -type f -name "pack-*.idx" |
+		sed -e "s/^.*\/\(.*\)/\1/g" | sort >packs.new &&
+
+		new_disjoint="$(comm -13 packs.old packs.new)" &&
+		cat >in <<-EOF &&
+		$disjoint
+		$non_disjoint
+		+$new_disjoint
+		EOF
+		git multi-pack-index write --stdin-packs --bitmap \
+			--retain-disjoint <in &&
+
+		test_must_be_disjoint "${disjoint%.idx}.pack" &&
+		test_must_be_disjoint "${new_disjoint%.idx}.pack" &&
+		test_must_not_be_disjoint "${non_disjoint%.idx}.pack"
+
+	)
+'
+
 test_done
