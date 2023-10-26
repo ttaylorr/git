@@ -1098,27 +1098,78 @@ static void write_reused_pack_one(struct packed_git *reuse_packfile,
 
 static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_packfile,
 					 struct hashfile *out,
-					 off_t pack_start UNUSED,
+					 off_t pack_start,
 					 struct pack_window **w_curs)
 {
-	size_t pos = 0;
+	size_t pos = reuse_packfile->bitmap_pos / BITS_IN_EWORD;
+	size_t offset = reuse_packfile->bitmap_pos % BITS_IN_EWORD;
+	size_t start, end;
 
-	while (pos < reuse_packfile_bitmap->word_alloc &&
-			reuse_packfile_bitmap->words[pos] == (eword_t)~0)
+	if (offset) {
+		eword_t word = reuse_packfile_bitmap->words[pos];
+		size_t last, pack_pos;
+
+		if (reuse_packfile->bitmap_nr < BITS_IN_EWORD - offset)
+			last = offset + reuse_packfile->bitmap_nr;
+		else
+			last = BITS_IN_EWORD;
+
+		for (; offset < last; offset++) {
+			if (word >> offset == 0)
+				break;
+
+			offset += ewah_bit_ctz64(word >> offset);
+			if (!bitmap_get(reuse_packfile_bitmap,
+					pos * BITS_IN_EWORD + offset))
+				continue;
+
+			pack_pos = pos * BITS_IN_EWORD + offset;
+			pack_pos -= reuse_packfile->bitmap_pos;
+
+			write_reused_pack_one(reuse_packfile->p, pack_pos, out,
+					      pack_start, w_curs);
+			display_progress(progress_state, ++written);
+		}
+
+		pos++;
+		offset = 0;
+	}
+
+	/*
+	 * Now we're going to copy as many whole eword_t's as possible.
+	 * "end" is the index of the last whole eword_t we copy, but
+	 * there may be additional bits to process. Those are handled
+	 * individually by write_reused_pack().
+	 */
+	start = pos;
+	end = (reuse_packfile->bitmap_pos + reuse_packfile->bitmap_nr) / BITS_IN_EWORD;
+	if (end >= reuse_packfile_bitmap->word_alloc)
+		BUG("reuse packfile undersized (expected %"PRIuMAX" word(s), "
+		    "%"PRIuMAX" allocated)",
+		    (uintmax_t)(end + 1),
+		    (uintmax_t)reuse_packfile_bitmap->word_alloc);
+	while (pos < end && reuse_packfile_bitmap->words[pos] == (eword_t)~0)
 		pos++;
 
-	if (pos) {
-		off_t to_write;
+	if (pos - start > 0) {
+		off_t pack_start_off, pack_end_off;
+		uint32_t pack_start_pos = start * BITS_IN_EWORD;
+		uint32_t pack_end_pos = pos * BITS_IN_EWORD;
 
-		written = (pos * BITS_IN_EWORD);
-		to_write = pack_pos_to_offset(reuse_packfile->p, written)
-			- sizeof(struct pack_header);
+		pack_start_pos -= reuse_packfile->bitmap_pos;
+		pack_end_pos -= reuse_packfile->bitmap_pos;
+
+		pack_start_off = pack_pos_to_offset(reuse_packfile->p, pack_start_pos);
+		pack_end_off = pack_pos_to_offset(reuse_packfile->p, pack_end_pos);
+
+		written += (pack_end_pos - pack_start_pos);
 
 		/* We're recording one chunk, not one object. */
-		record_reused_object(sizeof(struct pack_header), 0);
+		record_reused_object(pack_start_off,
+				     pack_start_off - (hashfile_total(out) - pack_start));
 		hashflush(out);
 		copy_pack_data(out, reuse_packfile->p, w_curs,
-			sizeof(struct pack_header), to_write);
+			pack_start_off, pack_end_off - pack_start_off);
 
 		display_progress(progress_state, written);
 	}
