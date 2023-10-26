@@ -1959,10 +1959,9 @@ done:
 	unuse_pack(&w_curs);
 }
 
-int reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
-				       struct packed_git **packfile_out,
-				       uint32_t *entries,
-				       struct bitmap **reuse_out)
+void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
+					struct packed_git **packfile_out,
+					struct bitmap **reuse_out)
 {
 	struct repository *r = the_repository;
 	struct bitmapped_pack *packs = NULL;
@@ -2011,10 +2010,9 @@ int reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 
 	reuse_partial_packfile_from_bitmap_1(bitmap_git, packs, reuse);
 
-	*entries = bitmap_popcount(reuse);
-	if (!*entries) {
+	if (!bitmap_popcount(reuse)) {
 		bitmap_free(reuse);
-		return -1;
+		return;
 	}
 
 	/*
@@ -2024,7 +2022,6 @@ int reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	bitmap_and_not(result, reuse);
 	*packfile_out = packs[0].p;
 	*reuse_out = reuse;
-	return 0;
 }
 
 int bitmap_walk_contains(struct bitmap_index *bitmap_git,
