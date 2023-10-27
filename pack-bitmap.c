@@ -2040,6 +2040,14 @@ static int bitmapped_pack_cmp(const void *va, const void *vb)
 	return 0;
 }
 
+static void make_disjoint_pack(struct bitmapped_pack *out, struct packed_git *p)
+{
+	out->p = p;
+	out->bitmap_pos = 0;
+	out->bitmap_nr = p->num_objects;
+	out->disjoint = 1;
+}
+
 void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 					struct bitmapped_pack **packs_out,
 					size_t *packs_nr_out,
@@ -2063,7 +2071,7 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 			struct bitmapped_pack pack;
 			if (nth_bitmapped_pack(r, bitmap_git->midx, &pack, i) < 0)
 				BUG("oops!");
-			if (pack.bitmap_pos)
+			if (!pack.disjoint)
 				continue;
 
 			ALLOC_GROW(packs, packs_nr + 1, packs_alloc);
@@ -2071,14 +2079,37 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 
 			objects_nr += pack.p->num_objects;
 		}
+
+		if (!packs_nr) {
+			/*
+			 * Old MIDXs (i.e. those written before the "DISP" chunk
+			 * existed) will not have any packs marked as disjoint.
+			 *
+			 * But we still want to perform pack reuse with the
+			 * special "preferred pack" as before. To do this, form
+			 * the singleton set containing just the preferred pack,
+			 * which is trivially disjoint with itself.
+			 *
+			 * Moreover, the MIDX is guaranteed to resolve duplicate
+			 * objects in favor of the copy in the preferred pack
+			 * (if one exists). Thus, we can safely perform pack
+			 * reuse on this pack.
+			 */
+			uint32_t preferred_pack_pos;
+			struct packed_git *preferred_pack;
+
+			preferred_pack_pos = midx_preferred_pack(bitmap_git);
+			preferred_pack = bitmap_git->midx->packs[preferred_pack_pos];
+
+			ALLOC_GROW(packs, packs_nr + 1, packs_alloc);
+
+			make_disjoint_pack(&packs[packs_nr], preferred_pack);
+			objects_nr = packs[packs_nr++].p->num_objects;
+		}
 	} else {
 		ALLOC_GROW(packs, packs_nr + 1, packs_alloc);
 
-		packs[packs_nr].p = bitmap_git->pack;
-		packs[packs_nr].bitmap_pos = 0;
-		packs[packs_nr].bitmap_nr = bitmap_git->pack->num_objects;
-		packs[packs_nr].disjoint = 1;
-
+		make_disjoint_pack(&packs[packs_nr], bitmap_git->pack);
 		objects_nr = packs[packs_nr++].p->num_objects;
 	}
 
@@ -2089,10 +2120,8 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 
 	QSORT(packs, packs_nr, bitmapped_pack_cmp);
 
-	if (packs_nr != 1)
-		BUG("pack reuse not yet implemented for multiple packs");
-
-	reuse_partial_packfile_from_bitmap_1(bitmap_git, packs, reuse);
+	for (i = 0; i < packs_nr; i++)
+		reuse_partial_packfile_from_bitmap_1(bitmap_git, &packs[i], reuse);
 
 	if (!bitmap_popcount(reuse)) {
 		bitmap_free(reuse);
