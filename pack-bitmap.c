@@ -2029,6 +2029,17 @@ done:
 	unuse_pack(&w_curs);
 }
 
+static int bitmapped_pack_cmp(const void *va, const void *vb)
+{
+	const struct bitmapped_pack *a = va;
+	const struct bitmapped_pack *b = vb;
+	if (a->bitmap_pos < b->bitmap_pos)
+		return -1;
+	if (a->bitmap_pos > b->bitmap_pos)
+		return 1;
+	return 0;
+}
+
 void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 					struct bitmapped_pack **packs_out,
 					size_t *packs_nr_out,
@@ -2075,6 +2086,8 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	if (objects_nr % BITS_IN_EWORD)
 		word_alloc++;
 	reuse = bitmap_word_alloc(word_alloc);
+
+	QSORT(packs, packs_nr, bitmapped_pack_cmp);
 
 	if (packs_nr != 1)
 		BUG("pack reuse not yet implemented for multiple packs");
