@@ -244,6 +244,11 @@ test_expect_success 'reject Nth ancestor if N is too high' '
 	test_must_fail git rev-parse HEAD~100000000000000000000000000000000
 '
 
+test_expect_success 'reject too-deep recursive ancestor queries' '
+	test_must_fail git rev-parse "HEAD$(perl -e "print \"~\" x 4097")" 2>err &&
+	grep "error: exceeded maximum ancestor depth" err
+'
+
 test_expect_success 'pathspecs with wildcards are not ambiguous' '
 	echo "*.c" >expect &&
 	git rev-parse "*.c" >actual &&

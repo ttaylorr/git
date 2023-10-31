@@ -1080,6 +1080,9 @@ static enum get_oid_result get_parent(struct repository *r,
 	return MISSING_OBJECT;
 }
 
+static int get_nth_ancestor_max_depth = 4096;
+static int get_nth_ancestor_curr_depth;
+
 static enum get_oid_result get_nth_ancestor(struct repository *r,
 					    const char *name, int len,
 					    struct object_id *result,
@@ -1089,20 +1092,31 @@ static enum get_oid_result get_nth_ancestor(struct repository *r,
 	struct commit *commit;
 	int ret;
 
+	if (++get_nth_ancestor_curr_depth > get_nth_ancestor_max_depth)
+		 return error(_("exceeded maximum ancestor depth"));
+
 	ret = get_oid_1(r, name, len, &oid, GET_OID_COMMITTISH);
 	if (ret)
-		return ret;
+		goto done;
 	commit = lookup_commit_reference(r, &oid);
-	if (!commit)
-		return MISSING_OBJECT;
+	if (!commit) {
+		ret = MISSING_OBJECT;
+		goto done;
+	}
 
 	while (generation--) {
-		if (repo_parse_commit(r, commit) || !commit->parents)
-			return MISSING_OBJECT;
+		if (repo_parse_commit(r, commit) || !commit->parents) {
+			ret = MISSING_OBJECT;
+			goto done;
+		}
 		commit = commit->parents->item;
 	}
 	oidcpy(result, &commit->object.oid);
-	return FOUND;
+
+	ret = FOUND;
+done:
+	get_nth_ancestor_curr_depth--;
+	return ret;
 }
 
 struct object *repo_peel_to_type(struct repository *r, const char *name, int namelen,
