@@ -237,4 +237,57 @@ test_expect_success 'pack-objects --stdin with packfiles from main and alternate
 	test_cmp expected-objects actual-objects
 '
 
+objdir=.git/objects
+packdir=$objdir/pack
+
+test_expect_success 'loose objects also in disjoint packs are ignored' '
+	test_when_finished "rm -fr repo" &&
+	git init repo &&
+	(
+		cd repo &&
+
+		# create a pack containing the objects in each commit below, but
+		# do not delete their loose copies
+		test_commit base &&
+		base_pack="$(echo base | git pack-objects --revs $packdir/pack)" &&
+
+		test_commit other &&
+		other_pack="$(echo base..other | git pack-objects --revs $packdir/pack)" &&
+
+		cat >in <<-EOF &&
+		pack-$base_pack.idx
+		+pack-$other_pack.idx
+		EOF
+		git multi-pack-index write --stdin-packs --bitmap <in &&
+
+		test_commit more &&
+		out="$(git pack-objects --all --ignore-disjoint $packdir/pack)" &&
+
+		# gather all objects in "all", and objects from the disjoint
+		# pack in "disjoint"
+		git cat-file --batch-all-objects --batch-check="%(objectname)" >all &&
+		git show-index <$packdir/pack-$other_pack.idx >disjoint.raw &&
+		cut -d" " -f2 <disjoint.raw | sort >disjoint &&
+
+		# make sure that the set of objects we just generated matches
+		# "all \ disjoint"
+		git show-index <$packdir/pack-$out.idx >got.raw &&
+		cut -d" " -f2 <got.raw | sort >got &&
+		comm -23 all disjoint >want &&
+		test_cmp want got
+	)
+'
+
+test_expect_failure 'objects in disjoint packs are ignored (--unpacked)' '
+	false
+'
+
+test_expect_failure 'objects in disjoint packs are ignored (--stdin-packs)' '
+	false
+'
+
+test_expect_failure '--cruft is incompatible with --ignore-disjoint' '
+	false
+'
+
 test_done
