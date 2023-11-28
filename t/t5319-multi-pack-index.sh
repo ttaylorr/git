@@ -3,6 +3,7 @@
 test_description='multi-pack-indexes'
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-chunk.sh
+. "$TEST_DIRECTORY"/lib-disjoint.sh
 
 GIT_TEST_MULTI_PACK_INDEX=0
 objdir=.git/objects
@@ -1211,6 +1212,87 @@ test_expect_success 'non-disjoint packs are detected' '
 
 		test_must_fail git multi-pack-index write --stdin-packs \
 			--bitmap <in 2>err &&
+		grep "duplicate object.* among disjoint packs" err
+	)
+'
+
+test_expect_success 'retain disjoint packs while writing' '
+	test_when_finished "rm -fr repo" &&
+	git init repo &&
+	(
+		cd repo &&
+
+		for i in 1 2
+		do
+			test_commit "$i" && git repack -d || return 1
+		done &&
+
+		find $objdir/pack -type f -name "pack-*.idx" |
+		sed -e "s/^.*\/\(.*\)/\1/g" | sort >packs.old &&
+
+		test_line_count = 2 packs.old &&
+		disjoint="$(head -n 1 packs.old)" &&
+		non_disjoint="$(tail -n 1 packs.old)" &&
+
+		cat >in <<-EOF &&
+		+$disjoint
+		$non_disjoint
+		EOF
+		git multi-pack-index write --stdin-packs --bitmap <in &&
+
+		test_must_be_disjoint "${disjoint%.idx}.pack" &&
+		test_must_not_be_disjoint "${non_disjoint%.idx}.pack" &&
+
+		test_commit 3 &&
+		git repack -d &&
+
+		find $objdir/pack -type f -name "pack-*.idx" |
+		sed -e "s/^.*\/\(.*\)/\1/g" | sort >packs.new &&
+
+		new_disjoint="$(comm -13 packs.old packs.new)" &&
+		cat >in <<-EOF &&
+		$disjoint
+		$non_disjoint
+		+$new_disjoint
+		EOF
+		git multi-pack-index write --stdin-packs --bitmap \
+			--retain-disjoint <in &&
+
+		test_must_be_disjoint "${disjoint%.idx}.pack" &&
+		test_must_be_disjoint "${new_disjoint%.idx}.pack" &&
+		test_must_not_be_disjoint "${non_disjoint%.idx}.pack"
+
+	)
+'
+
+test_expect_success 'non-disjoint packs are detected via --retain-disjoint' '
+	test_when_finished "rm -fr repo" &&
+	git init repo &&
+	(
+		cd repo &&
+		packdir=.git/objects/pack &&
+
+		test_commit base &&
+		base="$(echo base | git pack-objects --revs $packdir/pack)" &&
+
+		cat >in <<-EOF &&
+		+pack-$base.idx
+		EOF
+		git multi-pack-index write --stdin-packs --bitmap <in &&
+
+		test_must_be_disjoint "pack-$base.pack" &&
+
+		test_commit other &&
+		other="$(echo other | git pack-objects --revs $packdir/pack)" &&
+
+		cat >in <<-EOF &&
+		pack-$base.idx
+		+pack-$other.idx
+		EOF
+		test_must_fail git multi-pack-index write --stdin-packs --retain-disjoint --bitmap <in 2>err &&
+		grep "duplicate object.* among disjoint packs" err &&
+
+		test_must_fail git multi-pack-index write --retain-disjoint --bitmap 2>err &&
 		grep "duplicate object.* among disjoint packs" err
 	)
 '

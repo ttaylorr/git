@@ -138,6 +138,9 @@ static int cmd_multi_pack_index_write(int argc, const char **argv,
 			 N_("write multi-pack index containing only given indexes")),
 		OPT_FILENAME(0, "refs-snapshot", &opts.refs_snapshot,
 			     N_("refs snapshot for selecting bitmap commits")),
+		OPT_BIT(0, "retain-disjoint", &opts.flags,
+			N_("retain non-deleted disjoint packs"),
+			MIDX_WRITE_RETAIN_DISJOINT),
 		OPT_END(),
 	};
 

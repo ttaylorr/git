@@ -54,6 +54,14 @@ write::
 		"disjoint". See the "`DISP` chunk and disjoint packs"
 		section in linkgit:gitformat-pack[5] for more.
 
+	--retain-disjoint::
+		When writing a multi-pack index with a reachability
+		bitmap, keep any packs marked as disjoint in the
+		existing MIDX (if any) as such in the new MIDX. Existing
+		disjoint packs which are removed (e.g., not listed via
+		`--stdin-packs`) are ignored. This option works in
+		addition to the '+' marker for `--stdin-packs`.
+
 	--refs-snapshot=<path>::
 		With `--bitmap`, optionally specify a file which
 		contains a "refs snapshot" taken prior to repacking.
