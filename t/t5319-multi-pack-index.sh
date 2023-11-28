@@ -1157,4 +1157,62 @@ test_expect_success 'reader notices too-small revindex chunk' '
 	test_cmp expect.err err
 '
 
+test_expect_success 'disjoint packs are stored via the DISP chunk' '
+	test_when_finished "rm -fr repo" &&
+	git init repo &&
+	(
+		cd repo &&
+
+		for i in 1 2 3 4 5
+		do
+			test_commit "$i" &&
+			git repack -d || return 1
+		done &&
+
+		find $objdir/pack -type f -name "*.idx" | xargs -n 1 basename | sort >packs &&
+
+		git multi-pack-index write --stdin-packs <packs &&
+		test_must_fail test-tool read-midx --bitmap $objdir 2>err &&
+		cat >expect <<-\EOF &&
+		error: MIDX does not contain the DISP chunk
+		EOF
+		test_cmp expect err &&
+
+		sed -e "s/^/+/g" packs >in &&
+		git multi-pack-index write --stdin-packs --bitmap \
+			--preferred-pack="$(head -n1 <packs)" <in &&
+		test-tool read-midx --bitmap $objdir >actual &&
+		for i in $(test_seq $(wc -l <packs))
+		do
+			sed -ne "${i}s/\.idx$/\.pack/p" packs &&
+			echo "  bitmap_pos: $(( $(( $i - 1 )) * 3 ))" &&
+			echo "  bitmap_nr: 3" &&
+			echo "  disjoint: yes" || return 1
+		done >expect &&
+		test_cmp expect actual
+	)
+'
+
+test_expect_success 'non-disjoint packs are detected' '
+	test_when_finished "rm -fr repo" &&
+	git init repo &&
+	(
+		cd repo &&
+
+		test_commit base &&
+		git repack -d &&
+		test_commit other &&
+		git repack -a &&
+
+		ls -la .git/objects/pack/ &&
+
+		find $objdir/pack -type f -name "*.idx" |
+			sed -e "s/.*\/\(.*\)$/+\1/g" >in &&
+
+		test_must_fail git multi-pack-index write --stdin-packs \
+			--bitmap <in 2>err &&
+		grep "duplicate object.* among disjoint packs" err
+	)
+'
+
 test_done

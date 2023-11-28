@@ -33,6 +33,7 @@
 
 #define MIDX_CHUNK_ALIGNMENT 4
 #define MIDX_CHUNKID_PACKNAMES 0x504e414d /* "PNAM" */
+#define MIDX_CHUNKID_DISJOINTPACKS 0x44495350 /* "DISP" */
 #define MIDX_CHUNKID_OIDFANOUT 0x4f494446 /* "OIDF" */
 #define MIDX_CHUNKID_OIDLOOKUP 0x4f49444c /* "OIDL" */
 #define MIDX_CHUNKID_OBJECTOFFSETS 0x4f4f4646 /* "OOFF" */
@@ -182,6 +183,9 @@ struct multi_pack_index *load_multi_pack_index(const char *object_dir, int local
 
 	pair_chunk(cf, MIDX_CHUNKID_LARGEOFFSETS, &m->chunk_large_offsets,
 		   &m->chunk_large_offsets_len);
+	pair_chunk(cf, MIDX_CHUNKID_DISJOINTPACKS,
+		   (const unsigned char **)&m->chunk_disjoint_packs,
+		   &m->chunk_disjoint_packs_len);
 
 	if (git_env_bool("GIT_TEST_MIDX_READ_RIDX", 1))
 		pair_chunk(cf, MIDX_CHUNKID_REVINDEX, &m->chunk_revindex,
@@ -271,6 +275,23 @@ int prepare_midx_pack(struct repository *r, struct multi_pack_index *m, uint32_t
 	m->packs[pack_int_id] = p;
 	install_packed_git(r, p);
 	list_add_tail(&p->mru, &r->objects->packed_git_mru);
+
+	return 0;
+}
+
+int nth_bitmapped_pack(struct repository *r, struct multi_pack_index *m,
+		       struct bitmapped_pack *bp, uint32_t pack_int_id)
+{
+	if (!m->chunk_disjoint_packs)
+		return error(_("MIDX does not contain the DISP chunk"));
+
+	if (prepare_midx_pack(r, m, pack_int_id))
+		return error(_("could not load disjoint pack %"PRIu32), pack_int_id);
+
+	bp->p = m->packs[pack_int_id];
+	bp->bitmap_pos = get_be32(m->chunk_disjoint_packs + 3 * pack_int_id);
+	bp->bitmap_nr = get_be32(m->chunk_disjoint_packs + 3 * pack_int_id + 1);
+	bp->disjoint = !!get_be32(m->chunk_disjoint_packs + 3 * pack_int_id + 2);
 
 	return 0;
 }
@@ -457,11 +478,18 @@ static size_t write_midx_header(struct hashfile *f,
 	return MIDX_HEADER_SIZE;
 }
 
+#define BITMAP_POS_UNKNOWN (~((uint32_t)0))
+
 struct pack_info {
 	uint32_t orig_pack_int_id;
 	char *pack_name;
 	struct packed_git *p;
-	unsigned expired : 1;
+
+	uint32_t bitmap_pos;
+	uint32_t bitmap_nr;
+
+	unsigned expired : 1,
+		 disjoint : 1;
 };
 
 static void fill_pack_info(struct pack_info *info,
@@ -473,6 +501,7 @@ static void fill_pack_info(struct pack_info *info,
 	info->orig_pack_int_id = orig_pack_int_id;
 	info->pack_name = pack_name;
 	info->p = p;
+	info->bitmap_pos = BITMAP_POS_UNKNOWN;
 }
 
 static int pack_info_compare(const void *_a, const void *_b)
@@ -516,6 +545,7 @@ static void add_pack_to_midx(const char *full_path, size_t full_path_len,
 {
 	struct write_midx_context *ctx = data;
 	struct packed_git *p;
+	struct string_list_item *item = NULL;
 
 	if (ends_with(file_name, ".idx")) {
 		display_progress(ctx->progress, ++ctx->pack_paths_checked);
@@ -534,11 +564,13 @@ static void add_pack_to_midx(const char *full_path, size_t full_path_len,
 		 * should be performed independently (likely checking
 		 * to_include before the existing MIDX).
 		 */
-		if (ctx->m && midx_contains_pack(ctx->m, file_name))
+		if (ctx->m && midx_contains_pack(ctx->m, file_name)) {
 			return;
-		else if (ctx->to_include &&
-			 !string_list_has_string(ctx->to_include, file_name))
-			return;
+		} else if (ctx->to_include) {
+			item = string_list_lookup(ctx->to_include, file_name);
+			if (!item)
+				return;
+		}
 
 		ALLOC_GROW(ctx->info, ctx->nr + 1, ctx->alloc);
 
@@ -559,6 +591,8 @@ static void add_pack_to_midx(const char *full_path, size_t full_path_len,
 
 		fill_pack_info(&ctx->info[ctx->nr], p, xstrdup(file_name),
 			       ctx->nr);
+		if (item)
+			ctx->info[ctx->nr].disjoint = !!item->util;
 		ctx->nr++;
 	}
 }
@@ -568,7 +602,8 @@ struct pack_midx_entry {
 	uint32_t pack_int_id;
 	time_t pack_mtime;
 	uint64_t offset;
-	unsigned preferred : 1;
+	unsigned preferred : 1,
+		 disjoint : 1;
 };
 
 static int midx_oid_compare(const void *_a, const void *_b)
@@ -584,6 +619,12 @@ static int midx_oid_compare(const void *_a, const void *_b)
 	if (a->preferred > b->preferred)
 		return -1;
 	if (a->preferred < b->preferred)
+		return 1;
+
+	/* Sort objects in a disjoint pack last when multiple copies exist. */
+	if (a->disjoint < b->disjoint)
+		return -1;
+	if (a->disjoint > b->disjoint)
 		return 1;
 
 	if (a->pack_mtime > b->pack_mtime)
@@ -671,6 +712,7 @@ static void midx_fanout_add_midx_fanout(struct midx_fanout *fanout,
 					   &fanout->entries[fanout->nr],
 					   cur_object);
 		fanout->entries[fanout->nr].preferred = 0;
+		fanout->entries[fanout->nr].disjoint = 0;
 		fanout->nr++;
 	}
 }
@@ -696,6 +738,7 @@ static void midx_fanout_add_pack_fanout(struct midx_fanout *fanout,
 				cur_object,
 				&fanout->entries[fanout->nr],
 				preferred);
+		fanout->entries[fanout->nr].disjoint = info->disjoint;
 		fanout->nr++;
 	}
 }
@@ -764,14 +807,22 @@ static struct pack_midx_entry *get_sorted_entries(struct multi_pack_index *m,
 		 * Take only the first duplicate.
 		 */
 		for (cur_object = 0; cur_object < fanout.nr; cur_object++) {
-			if (cur_object && oideq(&fanout.entries[cur_object - 1].oid,
-						&fanout.entries[cur_object].oid))
-				continue;
+			struct pack_midx_entry *ours = &fanout.entries[cur_object];
+			if (cur_object) {
+				struct pack_midx_entry *prev = &fanout.entries[cur_object - 1];
+				if (oideq(&prev->oid, &ours->oid)) {
+					if (prev->disjoint && ours->disjoint)
+						die(_("duplicate object '%s' among disjoint packs '%s', '%s'"),
+						    oid_to_hex(&prev->oid),
+						    info[prev->pack_int_id].pack_name,
+						    info[ours->pack_int_id].pack_name);
+					continue;
+				}
+			}
 
 			ALLOC_GROW(deduplicated_entries, st_add(*nr_objects, 1),
 				   alloc_objects);
-			memcpy(&deduplicated_entries[*nr_objects],
-			       &fanout.entries[cur_object],
+			memcpy(&deduplicated_entries[*nr_objects], ours,
 			       sizeof(struct pack_midx_entry));
 			(*nr_objects)++;
 		}
@@ -811,6 +862,27 @@ static int write_midx_pack_names(struct hashfile *f, void *data)
 		hashwrite(f, padding, i);
 	}
 
+	return 0;
+}
+
+static int write_midx_disjoint_packs(struct hashfile *f, void *data)
+{
+	struct write_midx_context *ctx = data;
+	size_t i;
+
+	for (i = 0; i < ctx->nr; i++) {
+		struct pack_info *pack = &ctx->info[i];
+		if (pack->expired)
+			continue;
+
+		if (pack->bitmap_pos == BITMAP_POS_UNKNOWN && pack->bitmap_nr)
+			BUG("pack '%s' has no bitmap position, but has %d bitmapped object(s)",
+			    pack->pack_name, pack->bitmap_nr);
+
+		hashwrite_be32(f, pack->bitmap_pos);
+		hashwrite_be32(f, pack->bitmap_nr);
+		hashwrite_be32(f, !!pack->disjoint);
+	}
 	return 0;
 }
 
@@ -981,8 +1053,19 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 	QSORT(data, ctx->entries_nr, midx_pack_order_cmp);
 
 	ALLOC_ARRAY(pack_order, ctx->entries_nr);
-	for (i = 0; i < ctx->entries_nr; i++)
+	for (i = 0; i < ctx->entries_nr; i++) {
+		struct pack_midx_entry *e = &ctx->entries[data[i].nr];
+		struct pack_info *pack = &ctx->info[ctx->pack_perm[e->pack_int_id]];
+		if (pack->bitmap_pos == BITMAP_POS_UNKNOWN)
+			pack->bitmap_pos = i;
+		pack->bitmap_nr++;
 		pack_order[i] = data[i].nr;
+	}
+	for (i = 0; i < ctx->nr; i++) {
+		struct pack_info *pack = &ctx->info[ctx->pack_perm[i]];
+		if (pack->bitmap_pos == BITMAP_POS_UNKNOWN)
+			pack->bitmap_pos = 0;
+	}
 	free(data);
 
 	trace2_region_leave("midx", "midx_pack_order", the_repository);
@@ -1283,6 +1366,7 @@ static int write_midx_internal(const char *object_dir,
 	struct hashfile *f = NULL;
 	struct lock_file lk;
 	struct write_midx_context ctx = { 0 };
+	int pack_disjoint_concat_len = 0;
 	int pack_name_concat_len = 0;
 	int dropped_packs = 0;
 	int result = 0;
@@ -1495,8 +1579,10 @@ static int write_midx_internal(const char *object_dir,
 	}
 
 	for (i = 0; i < ctx.nr; i++) {
-		if (!ctx.info[i].expired)
-			pack_name_concat_len += strlen(ctx.info[i].pack_name) + 1;
+		if (ctx.info[i].expired)
+			continue;
+		pack_name_concat_len += strlen(ctx.info[i].pack_name) + 1;
+		pack_disjoint_concat_len += 3 * sizeof(uint32_t);
 	}
 
 	/* Check that the preferred pack wasn't expired (if given). */
@@ -1556,6 +1642,8 @@ static int write_midx_internal(const char *object_dir,
 		add_chunk(cf, MIDX_CHUNKID_REVINDEX,
 			  st_mult(ctx.entries_nr, sizeof(uint32_t)),
 			  write_midx_revindex);
+		add_chunk(cf, MIDX_CHUNKID_DISJOINTPACKS,
+			  pack_disjoint_concat_len, write_midx_disjoint_packs);
 	}
 
 	write_midx_header(f, get_num_chunks(cf), ctx.nr - dropped_packs);

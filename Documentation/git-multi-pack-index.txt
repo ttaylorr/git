@@ -49,6 +49,10 @@ write::
 	--stdin-packs::
 		Write a multi-pack index containing only the set of
 		line-delimited pack index basenames provided over stdin.
+		Lines beginning with a '+' character (followed by the
+		pack index basename as before) have their pack marked as
+		"disjoint". See the "`DISP` chunk and disjoint packs"
+		section in linkgit:gitformat-pack[5] for more.
 
 	--refs-snapshot=<path>::
 		With `--bitmap`, optionally specify a file which
