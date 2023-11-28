@@ -207,6 +207,7 @@ static int have_non_local_packs;
 static int incremental;
 static int ignore_packed_keep_on_disk;
 static int ignore_packed_keep_in_core;
+static int ignore_midx_disjoint_packs;
 static int allow_ofs_delta;
 static struct pack_idx_option pack_idx_opts;
 static const char *base_name;
@@ -1403,7 +1404,8 @@ static int want_found_object(const struct object_id *oid, int exclude,
 	/*
 	 * Then handle .keep first, as we have a fast(er) path there.
 	 */
-	if (ignore_packed_keep_on_disk || ignore_packed_keep_in_core) {
+	if (ignore_packed_keep_on_disk || ignore_packed_keep_in_core ||
+	    ignore_midx_disjoint_packs) {
 		/*
 		 * Set the flags for the kept-pack cache to be the ones we want
 		 * to ignore.
@@ -1415,7 +1417,7 @@ static int want_found_object(const struct object_id *oid, int exclude,
 		unsigned flags = 0;
 		if (ignore_packed_keep_on_disk)
 			flags |= ON_DISK_KEEP_PACKS;
-		if (ignore_packed_keep_in_core)
+		if (ignore_packed_keep_in_core || ignore_midx_disjoint_packs)
 			flags |= IN_CORE_KEEP_PACKS;
 
 		if (ignore_packed_keep_on_disk && p->pack_keep)
@@ -3389,6 +3391,7 @@ static void read_packs_list_from_stdin(void)
 			die(_("could not find pack '%s'"), item->string);
 		if (!is_pack_valid(p))
 			die(_("packfile %s cannot be accessed"), p->pack_name);
+		p->pack_keep_in_core = 0;
 	}
 
 	/*
@@ -4266,6 +4269,8 @@ int cmd_pack_objects(int argc, const char **argv, const char *prefix)
 			 N_("create packs suitable for shallow fetches")),
 		OPT_BOOL(0, "honor-pack-keep", &ignore_packed_keep_on_disk,
 			 N_("ignore packs that have companion .keep file")),
+		OPT_BOOL(0, "ignore-disjoint", &ignore_midx_disjoint_packs,
+			 N_("ignore packs that are marked disjoint in the MIDX")),
 		OPT_STRING_LIST(0, "keep-pack", &keep_pack_list, N_("name"),
 				N_("ignore this pack")),
 		OPT_INTEGER(0, "compression", &pack_compression_level,
@@ -4412,7 +4417,9 @@ int cmd_pack_objects(int argc, const char **argv, const char *prefix)
 		if (use_internal_rev_list)
 			die(_("cannot use internal rev list with --cruft"));
 		if (stdin_packs)
-			die(_("cannot use --stdin-packs with --cruft"));
+			die(_("cannot use %s with %s"), "--stdin-packs", "--cruft");
+		if (ignore_midx_disjoint_packs)
+			die(_("cannot use %s with %s"), "--ignore-disjoint", "--cruft");
 	}
 
 	/*
@@ -4451,6 +4458,24 @@ int cmd_pack_objects(int argc, const char **argv, const char *prefix)
 				break;
 		if (!p) /* no keep-able packs found */
 			ignore_packed_keep_on_disk = 0;
+	}
+	if (ignore_midx_disjoint_packs) {
+		struct multi_pack_index *m = get_multi_pack_index(the_repository);
+		struct bitmapped_pack pack;
+		unsigned any_disjoint = 0;
+		uint32_t i;
+
+		for (i = 0; m && m->chunk_disjoint_packs && i < m->num_packs; i++) {
+			if (nth_bitmapped_pack(the_repository, m, &pack, i) < 0)
+				die(_("could not load bitmapped pack %i"), i);
+			if (pack.disjoint) {
+				pack.p->pack_keep_in_core = 1;
+				any_disjoint = 1;
+			}
+		}
+
+		if (!any_disjoint) /* no disjoint packs to ignore */
+			ignore_midx_disjoint_packs = 0;
 	}
 	if (local) {
 		/*

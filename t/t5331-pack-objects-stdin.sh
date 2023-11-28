@@ -6,6 +6,7 @@ export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
 TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
+. "$TEST_DIRECTORY"/lib-disjoint.sh
 
 packed_objects () {
 	git show-index <"$1" >tmp-object-list &&
@@ -235,6 +236,161 @@ test_expect_success 'pack-objects --stdin with packfiles from main and alternate
 	git -C member pack-objects --stdin-packs generated-pack <packfiles &&
 	packed_objects member/generated-pack-*.idx >actual-objects &&
 	test_cmp expected-objects actual-objects
+'
+
+objdir=.git/objects
+packdir=$objdir/pack
+
+test_expect_success 'loose objects also in disjoint packs are ignored' '
+	test_when_finished "rm -fr repo" &&
+	git init repo &&
+	(
+		cd repo &&
+
+		# create a pack containing the objects in each commit below, but
+		# do not delete their loose copies
+		test_commit base &&
+		base_pack="$(echo base | git pack-objects --revs $packdir/pack)" &&
+
+		test_commit other &&
+		other_pack="$(echo base..other | git pack-objects --revs $packdir/pack)" &&
+
+		cat >in <<-EOF &&
+		pack-$base_pack.idx
+		+pack-$other_pack.idx
+		EOF
+		git multi-pack-index write --stdin-packs --bitmap <in &&
+
+		test_commit more &&
+		out="$(git pack-objects --all --ignore-disjoint $packdir/pack)" &&
+
+		# gather all objects in "all", and objects from the disjoint
+		# pack in "disjoint"
+		git cat-file --batch-all-objects --batch-check="%(objectname)" >all &&
+		packed_contents "$packdir/pack-$other_pack.idx" >disjoint &&
+
+		# make sure that the set of objects we just generated matches
+		# "all \ disjoint"
+		packed_contents "$packdir/pack-$out.idx" >got &&
+		comm -23 all disjoint >want &&
+		test_cmp want got
+	)
+'
+
+test_expect_success 'objects in disjoint packs are ignored (--unpacked)' '
+	test_when_finished "rm -fr repo" &&
+	git init repo &&
+	(
+		cd repo &&
+
+		for c in A B
+		do
+			test_commit "$c" || return 1
+		done &&
+
+		A="$(echo "A" | git pack-objects --revs $packdir/pack)" &&
+		B="$(echo "A..B" | git pack-objects --revs $packdir/pack)" &&
+
+		cat >in <<-EOF &&
+		pack-$A.idx
+		+pack-$B.idx
+		EOF
+		git multi-pack-index write --stdin-packs --bitmap <in &&
+
+		test_must_not_be_disjoint "pack-$A.pack" &&
+		test_must_be_disjoint "pack-$B.pack" &&
+
+		test_commit C &&
+
+		got="$(git pack-objects --all --unpacked --ignore-disjoint $packdir/pack)" &&
+		packed_contents "$packdir/pack-$got.idx" >actual &&
+
+		git rev-list --objects --no-object-names B..C >expect.raw &&
+		sort <expect.raw >expect &&
+
+		test_cmp expect actual
+	)
+'
+
+test_expect_success 'objects in disjoint packs are ignored (--stdin-packs)' '
+	# Create objects in three separate packs:
+	#
+	#   - pack A (midx, non disjoint)
+	#   - pack B (midx, disjoint)
+	#   - pack C (non-midx)
+	#
+	# Then create a new pack with `--stdin-packs` and `--ignore-disjoint`
+	# including packs A, B, and C. The resulting pack should contain
+	# only the objects from packs A, and C, excluding those from
+	# pack B as it is marked as disjoint.
+	test_when_finished "rm -fr repo" &&
+	git init repo &&
+	(
+		cd repo &&
+
+		for c in A B C
+		do
+			test_commit "$c" || return 1
+		done &&
+
+		A="$(echo "A" | git pack-objects --revs $packdir/pack)" &&
+		B="$(echo "A..B" | git pack-objects --revs $packdir/pack)" &&
+		C="$(echo "B..C" | git pack-objects --revs $packdir/pack)" &&
+
+		cat >in <<-EOF &&
+		pack-$A.idx
+		+pack-$B.idx
+		EOF
+		git multi-pack-index write --stdin-packs --bitmap <in &&
+
+		test_must_not_be_disjoint "pack-$A.pack" &&
+		test_must_be_disjoint "pack-$B.pack" &&
+
+		# Generate a pack with `--stdin-packs` using packs "A" and "C",
+		# but excluding objects from "B". The objects from pack "B" are
+		# expected to be omitted from the generated pack for two
+		# reasons:
+		#
+		#   - because it was specified as a negated tip via
+		#     `--stdin-packs`
+		#   - because it is a disjoint pack.
+		cat >in <<-EOF &&
+		pack-$A.pack
+		^pack-$B.pack
+		pack-$C.pack
+		EOF
+		got="$(git pack-objects --stdin-packs --ignore-disjoint $packdir/pack <in)" &&
+
+		packed_contents "$packdir/pack-$got.idx" >actual &&
+		packed_contents "$packdir/pack-$A.idx" \
+				"$packdir/pack-$C.idx" >expect &&
+		test_cmp expect actual &&
+
+		# Generate another pack with `--stdin-packs`, this time
+		# using packs "B" and "C". The objects from pack "B" are
+		# expected to be in the final pack, despite it being a
+		# disjoint pack, because "B" was mentioned explicitly
+		# via `stdin-packs`.
+		cat >in <<-EOF &&
+		pack-$B.pack
+		pack-$C.pack
+		EOF
+		got="$(git pack-objects --stdin-packs --ignore-disjoint $packdir/pack <in)" &&
+
+		packed_contents "$packdir/pack-$got.idx" >actual &&
+		packed_contents "$packdir/pack-$B.idx" \
+				"$packdir/pack-$C.idx" >expect &&
+		test_cmp expect actual
+	)
+'
+
+test_expect_success '--cruft is incompatible with --ignore-disjoint' '
+	test_must_fail git pack-objects --cruft --ignore-disjoint --stdout \
+		</dev/null >/dev/null 2>actual &&
+	cat >expect <<-\EOF &&
+	fatal: cannot use --ignore-disjoint with --cruft
+	EOF
+	test_cmp expect actual
 '
 
 test_done

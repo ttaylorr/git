@@ -36,3 +36,14 @@ test_must_be_disjoint () {
 test_must_not_be_disjoint () {
 	test_disjoint_1 "$1" "no"
 }
+
+# packed_contents </path/to/pack-$XYZ.idx [...]>
+#
+# Prints the set of objects packed in the given pack indexes.
+packed_contents () {
+	for idx in "$@"
+	do
+		git show-index <$idx || return 1
+	done >tmp &&
+	cut -d" " -f2 <tmp | sort -u
+}

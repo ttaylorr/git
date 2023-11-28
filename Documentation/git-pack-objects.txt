@@ -96,6 +96,14 @@ base-name::
 Incompatible with `--revs`, or options that imply `--revs` (such as
 `--all`), with the exception of `--unpacked`, which is compatible.
 
+--ignore-disjoint::
+	This flag causes an object that appears in any pack marked as
+	"disjoint" by the multi-pack index to be ignored, even if it
+	would have otherwise been packed. When used with
+	`--stdin-packs`, objects from disjoint packs may be included if
+	and only if a disjoint pack is explicitly given as an input pack
+	to `--stdin-packs`. Incompatible with `--cruft`.
+
 --cruft::
 	Packs unreachable objects into a separate "cruft" pack, denoted
 	by the existence of a `.mtimes` file. Typically used by `git
