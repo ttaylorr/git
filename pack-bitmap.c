@@ -1940,36 +1940,109 @@ static void reuse_partial_packfile_from_bitmap_1(struct bitmap_index *bitmap_git
 {
 	struct bitmap *result = bitmap_git->result;
 	struct pack_window *w_curs = NULL;
-	size_t i = 0;
+	size_t pos, offset;
+	unsigned complete_prefix = 1;
 
-	while (i < result->word_alloc && result->words[i] == (eword_t)~0)
-		i++;
+	pos = pack->bitmap_pos / BITS_IN_EWORD;
+	offset = pack->bitmap_pos % BITS_IN_EWORD;
 
 	/*
-	 * Don't mark objects not in the packfile or preferred pack. This bitmap
-	 * marks objects eligible for reuse, but the pack-reuse code only
-	 * understands how to reuse a single pack. Since the preferred pack is
-	 * guaranteed to have all bases for its deltas (in a multi-pack bitmap),
-	 * we use it instead of another pack. In single-pack bitmaps, the choice
-	 * is made for us.
+	 * If the position of our first object is not on a word
+	 * boundary, check all bits individually until we reach the
+	 * first word boundary.
+	 *
+	 * If no bits are missing between pack->bitmap_pos and the next
+	 * word boundary, then we can move by whole words instead of by
+	 * individual objects. If one or more of the objects are missing
+	 * in that range, we must evaluate each subsequent object
+	 * individually in order to exclude deltas whose base we are not
+	 * sending, etc.
 	 */
-	if (i > pack->p->num_objects / BITS_IN_EWORD)
-		i = pack->p->num_objects / BITS_IN_EWORD;
+	if (offset) {
+		/*
+		 * Scan to the next word boundary, or through the last
+		 * object in this bitmap, whichever occurs earlier.
+		 */
+		size_t last;
+		eword_t word = result->words[pos];
+		if (pack->bitmap_nr < BITS_IN_EWORD - offset)
+			last = offset + pack->bitmap_nr;
+		else
+			last = BITS_IN_EWORD;
 
-	memset(reuse->words, 0xFF, i * sizeof(eword_t));
+		for (; offset < last; offset++) {
+			size_t pack_pos;
+			if (word >> offset == 0) {
+				complete_prefix = 0;
+				continue;
+			}
 
-	for (; i < result->word_alloc; ++i) {
-		eword_t word = result->words[i];
-		size_t pos = (i * BITS_IN_EWORD);
-		size_t offset;
+			offset += ewah_bit_ctz64(word >> offset);
 
-		for (offset = 0; offset < BITS_IN_EWORD; ++offset) {
-			if ((word >> offset) == 0)
+			pack_pos = pos * BITS_IN_EWORD + offset;
+			pack_pos -= pack->bitmap_pos;
+
+			try_partial_reuse(pack, pack_pos, reuse, &w_curs);
+			if (!bitmap_get(reuse, pos + pack->bitmap_pos))
+				complete_prefix = 0;
+		}
+
+		pos++;
+	}
+
+	if (complete_prefix) {
+		/*
+		 * If we are using all of the objects at the beginning
+		 * of this pack, we can safely reuse objects in eword_t
+		 * sized chunks, since we are guaranteed to send all
+		 * potential delta bases.
+		 *
+		 * Scan the nearest word boundaries within range of this
+		 * pack's bit positions. If the pack does not start on a
+		 * word boundary, skip to the next boundary, since we
+		 * have already checked above.
+		 */
+		size_t start = pos;
+		size_t word_end = (pack->bitmap_pos + pack->bitmap_nr) / BITS_IN_EWORD;
+		while (start <= pos && pos < word_end &&
+		       pos < result->word_alloc &&
+		       result->words[pos] == (eword_t)~0)
+			pos++;
+		memset(reuse->words + start, 0xFF, (pos - start) * sizeof(eword_t));
+	}
+
+	/*
+	 * At this point, we know that we are at an eword boundary,
+	 * either because:
+	 *
+	 *   - we started at one and used zero or more whole words
+	 *     following pack->bitmap_pos
+	 *
+	 *   - we started in between two word boundaries, advanced
+	 *     forward to the next word boundary, and then used zero or
+	 *     more (assuming a complete prefix) whole words following.
+	 */
+	for (; pos < result->word_alloc; pos++) {
+		eword_t word = result->words[pos];
+
+		for (offset = 0; offset < BITS_IN_EWORD; offset++) {
+			size_t bit_pos, pack_pos;
+			if (word >> offset == 0)
 				break;
 
 			offset += ewah_bit_ctz64(word >> offset);
-			if (try_partial_reuse(pack, pos + offset,
-					      reuse, &w_curs) < 0) {
+
+			bit_pos = pos * BITS_IN_EWORD + offset;
+			if (bit_pos >= pack->bitmap_pos + pack->bitmap_nr)
+				goto done;
+
+			pack_pos = bit_pos - pack->bitmap_pos;
+			if (pack_pos >= pack->p->num_objects)
+				BUG("advanced beyond the end of pack %s (%"PRIuMAX" > %"PRIu32")",
+				    pack_basename(pack->p), (uintmax_t)pack_pos,
+				    pack->p->num_objects);
+
+			if (try_partial_reuse(pack, pack_pos, reuse, &w_curs) < 0) {
 				/*
 				 * try_partial_reuse indicated we couldn't reuse
 				 * any bits, so there is no point in trying more
