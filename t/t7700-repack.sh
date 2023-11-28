@@ -6,6 +6,7 @@ test_description='git repack works correctly'
 . "${TEST_DIRECTORY}/lib-bitmap.sh"
 . "${TEST_DIRECTORY}/lib-midx.sh"
 . "${TEST_DIRECTORY}/lib-terminal.sh"
+. "${TEST_DIRECTORY}/lib-disjoint.sh"
 
 commit_and_pack () {
 	test_commit "$@" 1>&2 &&
@@ -525,7 +526,8 @@ test_expect_success '--filter works with --max-pack-size' '
 '
 
 objdir=.git/objects
-midx=$objdir/pack/multi-pack-index
+packdir=$objdir/pack
+midx=$packdir/multi-pack-index
 
 test_expect_success 'setup for --write-midx tests' '
 	git init midx &&

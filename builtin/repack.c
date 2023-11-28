@@ -58,6 +58,7 @@ struct pack_objects_args {
 	int no_reuse_object;
 	int quiet;
 	int local;
+	int ignore_disjoint;
 	struct list_objects_filter_options filter_options;
 };
 
@@ -293,6 +294,8 @@ static void prepare_pack_objects(struct child_process *cmd,
 		strvec_push(&cmd->args,  "--local");
 	if (args->quiet)
 		strvec_push(&cmd->args,  "--quiet");
+	if (args->ignore_disjoint)
+		strvec_push(&cmd->args,  "--ignore-disjoint");
 	if (delta_base_offset)
 		strvec_push(&cmd->args,  "--delta-base-offset");
 	strvec_push(&cmd->args, out);
@@ -334,9 +337,11 @@ static struct {
 
 struct generated_pack_data {
 	struct tempfile *tempfiles[ARRAY_SIZE(exts)];
+	unsigned disjoint : 1;
 };
 
-static struct generated_pack_data *populate_pack_exts(const char *name)
+static struct generated_pack_data *populate_pack_exts(const char *name,
+						      unsigned disjoint)
 {
 	struct stat statbuf;
 	struct strbuf path = STRBUF_INIT;
@@ -352,6 +357,8 @@ static struct generated_pack_data *populate_pack_exts(const char *name)
 
 		data->tempfiles[i] = register_tempfile(path.buf);
 	}
+
+	data->disjoint = disjoint;
 
 	strbuf_release(&path);
 	return data;
@@ -378,6 +385,8 @@ static void repack_promisor_objects(const struct pack_objects_args *args,
 
 	prepare_pack_objects(&cmd, args, packtmp);
 	cmd.in = -1;
+
+	strvec_pushf(&cmd.args, "--no-ignore-disjoint");
 
 	/*
 	 * NEEDSWORK: Giving pack-objects only the OIDs without any ordering
@@ -421,7 +430,7 @@ static void repack_promisor_objects(const struct pack_objects_args *args,
 					  line.buf);
 		write_promisor_file(promisor_name, NULL, 0);
 
-		item->util = populate_pack_exts(item->string);
+		item->util = populate_pack_exts(item->string, 0);
 
 		free(promisor_name);
 	}
@@ -731,8 +740,13 @@ static void midx_included_packs(struct string_list *include,
 
 	for_each_string_list_item(item, &existing->kept_packs)
 		string_list_insert(include, xstrfmt("%s.idx", item->string));
-	for_each_string_list_item(item, names)
-		string_list_insert(include, xstrfmt("pack-%s.idx", item->string));
+	for_each_string_list_item(item, names) {
+		const char *marker = "";
+		struct generated_pack_data *data = item->util;
+		if (data->disjoint)
+			marker = "+";
+		string_list_insert(include, xstrfmt("%spack-%s.idx", marker, item->string));
+	}
 	if (geometry->split_factor) {
 		struct strbuf buf = STRBUF_INIT;
 		uint32_t i;
@@ -788,7 +802,8 @@ static int write_midx_included_packs(struct string_list *include,
 				     struct pack_geometry *geometry,
 				     struct string_list *names,
 				     const char *refs_snapshot,
-				     int show_progress, int write_bitmaps)
+				     int show_progress, int write_bitmaps,
+				     int exclude_disjoint)
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	struct string_list_item *item;
@@ -852,6 +867,9 @@ static int write_midx_included_packs(struct string_list *include,
 	if (refs_snapshot)
 		strvec_pushf(&cmd.args, "--refs-snapshot=%s", refs_snapshot);
 
+	if (exclude_disjoint)
+		strvec_push(&cmd.args, "--retain-disjoint");
+
 	ret = start_command(&cmd);
 	if (ret)
 		return ret;
@@ -895,7 +913,7 @@ static void remove_redundant_bitmaps(struct string_list *include,
 
 static int finish_pack_objects_cmd(struct child_process *cmd,
 				   struct string_list *names,
-				   int local)
+				   int local, int disjoint)
 {
 	FILE *out;
 	struct strbuf line = STRBUF_INIT;
@@ -913,7 +931,7 @@ static int finish_pack_objects_cmd(struct child_process *cmd,
 		 */
 		if (local) {
 			item = string_list_append(names, line.buf);
-			item->util = populate_pack_exts(line.buf);
+			item->util = populate_pack_exts(line.buf, disjoint);
 		}
 	}
 	fclose(out);
@@ -970,7 +988,7 @@ static int write_filtered_pack(const struct pack_objects_args *args,
 		fprintf(in, "%s%s.pack\n", caret, item->string);
 	fclose(in);
 
-	return finish_pack_objects_cmd(&cmd, names, local);
+	return finish_pack_objects_cmd(&cmd, names, local, 0);
 }
 
 static int existing_cruft_pack_cmp(const void *va, const void *vb)
@@ -1098,7 +1116,7 @@ static int write_cruft_pack(const struct pack_objects_args *args,
 		fprintf(in, "%s.pack\n", item->string);
 	fclose(in);
 
-	return finish_pack_objects_cmd(&cmd, names, local);
+	return finish_pack_objects_cmd(&cmd, names, local, 0);
 }
 
 static const char *find_pack_prefix(const char *packdir, const char *packtmp)
@@ -1190,6 +1208,8 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 			   N_("pack prefix to store a pack containing pruned objects")),
 		OPT_STRING(0, "filter-to", &filter_to, N_("dir"),
 			   N_("pack prefix to store a pack containing filtered out objects")),
+		OPT_BOOL(0, "extend-disjoint", &po_args.ignore_disjoint,
+			 N_("add new packs to the set of disjoint ones")),
 		OPT_END()
 	};
 
@@ -1255,6 +1275,16 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 		strbuf_release(&path);
 	}
 
+	if (po_args.ignore_disjoint) {
+		if (filter_to)
+			die(_("options '%s' and '%s' cannot be used together"),
+			    "--filter-to", "--extend-disjoint");
+		if (pack_everything && !delete_redundant)
+			die(_("cannot use '--extend-disjoint' with '%s' but not '-d'"),
+			    pack_everything & LOOSEN_UNREACHABLE ? "-A" :
+			    pack_everything & PACK_CRUFT ? "--cruft" : "-a");
+	}
+
 	packdir = mkpathdup("%s/pack", get_object_directory());
 	packtmp_name = xstrfmt(".tmp-%d-pack", (int)getpid());
 	packtmp = mkpathdup("%s/%s", packdir, packtmp_name);
@@ -1307,6 +1337,9 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 
 	if (pack_everything & ALL_INTO_ONE) {
 		repack_promisor_objects(&po_args, &names);
+
+		if (delete_redundant)
+			strvec_pushf(&cmd.args, "--no-ignore-disjoint");
 
 		if (has_existing_non_kept_packs(&existing) &&
 		    delete_redundant &&
@@ -1364,7 +1397,7 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 		fclose(in);
 	}
 
-	ret = finish_pack_objects_cmd(&cmd, &names, 1);
+	ret = finish_pack_objects_cmd(&cmd, &names, 1, po_args.ignore_disjoint);
 	if (ret)
 		goto cleanup;
 
@@ -1387,6 +1420,7 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 
 		cruft_po_args.local = po_args.local;
 		cruft_po_args.quiet = po_args.quiet;
+		cruft_po_args.ignore_disjoint = 0;
 
 		ret = write_cruft_pack(&cruft_po_args, packtmp, pack_prefix,
 				       cruft_expiration, &names,
@@ -1487,7 +1521,8 @@ int cmd_repack(int argc, const char **argv, const char *prefix)
 
 		ret = write_midx_included_packs(&include, &geometry, &names,
 						refs_snapshot ? get_tempfile_path(refs_snapshot) : NULL,
-						show_progress, write_bitmaps > 0);
+						show_progress, write_bitmaps > 0,
+						po_args.ignore_disjoint);
 
 		if (!ret && write_bitmaps)
 			remove_redundant_bitmaps(&include, packdir);

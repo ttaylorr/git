@@ -249,6 +249,18 @@ linkgit:git-multi-pack-index[1]).
 	Write a multi-pack index (see linkgit:git-multi-pack-index[1])
 	containing the non-redundant packs.
 
+--extend-disjoint::
+	Extends the set of disjoint packs. All new non-cruft pack(s)
+	generated are constructed to be disjoint with respect to the set
+	of currently disjoint packs, excluding any packs that will be
+	removed as a result of the repack operation. For more on
+	disjoint packs, see the details in linkgit:gitformat-pack[5],
+	under the section "`DISP` chunk and disjoint packs".
++
+Useful only with the combination of `--write-midx` and
+`--write-bitmap-index`. Incompatible with `--filter-to`. Incompatible
+with `-A`, `-a`, or `--cruft` unless `-d` is given.
+
 CONFIGURATION
 -------------
 
