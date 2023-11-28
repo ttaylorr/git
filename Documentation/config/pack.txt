@@ -30,7 +30,11 @@ to linkgit:git-repack[1].
 pack.allowPackReuse::
 	When true or "single", and when reachability bitmaps are enabled,
 	pack-objects will try to send parts of the bitmapped packfile
-	verbatim. This can reduce memory and CPU usage to serve fetches,
+	verbatim. When "multi", and when a multi-pack reachability bitmap is
+	available, pack-objects will try to send parts of all packs marked as
+	disjoint by the MIDX. If only a single pack bitmap is available, and
+	`pack.allowPackReuse` is set to "multi", reuse parts of just the
+	bitmapped packfile. This can reduce memory and CPU usage to serve fetches,
 	but might result in sending a slightly larger pack. Defaults to
 	true.
 
