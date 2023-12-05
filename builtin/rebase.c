@@ -1485,7 +1485,7 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 	}
 
 	if (options.strategy_opts.nr && !options.strategy)
-		options.strategy = "ort";
+		options.strategy = xstrdup("ort");
 
 	if (options.strategy) {
 		options.strategy = xstrdup(options.strategy);

@@ -67,16 +67,16 @@ static unsigned char refname_disposition[256] = {
 
 struct ref_namespace_info ref_namespace[] = {
 	[NAMESPACE_HEAD] = {
-		.ref = "HEAD",
+		.ref = (char *)"HEAD", /* not freed unless info->ref_updated */
 		.decoration = DECORATION_REF_HEAD,
 		.exact = 1,
 	},
 	[NAMESPACE_BRANCHES] = {
-		.ref = "refs/heads/",
+		.ref = (char *)"refs/heads/",
 		.decoration = DECORATION_REF_LOCAL,
 	},
 	[NAMESPACE_TAGS] = {
-		.ref = "refs/tags/",
+		.ref = (char *)"refs/tags/",
 		.decoration = DECORATION_REF_TAG,
 	},
 	[NAMESPACE_REMOTE_REFS] = {
@@ -85,7 +85,7 @@ struct ref_namespace_info ref_namespace[] = {
 		 * refs/heads/ on the remote into refs/remotes/<remote>/.
 		 * As such, "refs/remotes/" has special handling.
 		 */
-		.ref = "refs/remotes/",
+		.ref = (char *)"refs/remotes/",
 		.decoration = DECORATION_REF_REMOTE,
 	},
 	[NAMESPACE_STASH] = {
@@ -93,7 +93,7 @@ struct ref_namespace_info ref_namespace[] = {
 		 * The single ref "refs/stash" stores the latest stash.
 		 * Older stashes can be found in the reflog.
 		 */
-		.ref = "refs/stash",
+		.ref = (char *)"refs/stash",
 		.exact = 1,
 		.decoration = DECORATION_REF_STASH,
 	},
@@ -105,7 +105,7 @@ struct ref_namespace_info ref_namespace[] = {
 		 * GIT_REPLACE_REF_BASE environment variable. This
 		 * .namespace value will be overwritten in setup_git_env().
 		 */
-		.ref = "refs/replace/",
+		.ref = (char *)"refs/replace/",
 		.decoration = DECORATION_GRAFTED,
 	},
 	[NAMESPACE_NOTES] = {
@@ -116,7 +116,7 @@ struct ref_namespace_info ref_namespace[] = {
 		 * by the core.notesRef config variable or the
 		 * GIT_NOTES_REFS environment variable.
 		 */
-		.ref = "refs/notes/commit",
+		.ref = (char *)"refs/notes/commit",
 		.exact = 1,
 	},
 	[NAMESPACE_PREFETCH] = {
@@ -126,7 +126,7 @@ struct ref_namespace_info ref_namespace[] = {
 		 * by advertising these previously-downloaded tips without
 		 * updating refs/remotes/ without user intervention.
 		 */
-		.ref = "refs/prefetch/",
+		.ref = (char *)"refs/prefetch/",
 	},
 	[NAMESPACE_REWRITTEN] = {
 		/*
@@ -134,7 +134,7 @@ struct ref_namespace_info ref_namespace[] = {
 		 * sequencer. These are particularly useful during an
 		 * interactive rebase that uses the 'merge' command.
 		 */
-		.ref = "refs/rewritten/",
+		.ref = (char *)"refs/rewritten/",
 	},
 };
 

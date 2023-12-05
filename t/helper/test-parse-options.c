@@ -171,7 +171,7 @@ int cmd__parse_options(int argc, const char **argv)
 			     collect_expect),
 		OPT_GROUP("Alias"),
 		OPT_STRING('A', "alias-source", &string, "string", "get a string"),
-		OPT_ALIAS('Z', "alias-target", "alias-source"),
+		OPT_ALIAS('Z', "alias-target", (char *)"alias-source"),
 		OPT_END(),
 	};
 	int i;

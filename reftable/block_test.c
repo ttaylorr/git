@@ -1,8 +1,8 @@
 /*
-Copyright 2020 Google LLC
+   Copyright 2020 Google LLC
 
-Use of this source code is governed by a BSD-style
-license that can be found in the LICENSE file or at
+   Use of this source code is governed by a BSD-style
+   license that can be found in the LICENSE file or at
 https://developers.google.com/open-source/licenses/bsd
 */
 
@@ -42,7 +42,7 @@ static void test_block_read_write(void)
 	block_writer_init(&bw, BLOCK_TYPE_REF, block.data, block_size,
 			  header_off, hash_size(GIT_SHA1_FORMAT_ID));
 
-	rec.u.ref.refname = "";
+	rec.u.ref.refname = (char *)""; /* not freed? */
 	rec.u.ref.value_type = REFTABLE_REF_DELETION;
 	n = block_writer_add(&bw, &rec);
 	EXPECT(n == REFTABLE_API_ERROR);

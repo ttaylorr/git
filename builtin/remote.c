@@ -498,7 +498,7 @@ static int get_head_names(const struct ref *remote_refs, struct ref_states *stat
 	memset(&refspec, 0, sizeof(refspec));
 	refspec.force = 0;
 	refspec.pattern = 1;
-	refspec.src = refspec.dst = "refs/heads/*";
+	refspec.src = refspec.dst = xstrdup("refs/heads/*");
 	get_fetch_map(remote_refs, &refspec, &fetch_map_tail, 0);
 	matches = guess_remote_head(find_ref_by_name(remote_refs, "HEAD"),
 				    fetch_map, 1);

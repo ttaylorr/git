@@ -3739,7 +3739,8 @@ static void builtin_diff(const char *name_a,
 	return;
 }
 
-static char *get_compact_summary(const struct diff_filepair *p, int is_renamed)
+static const char *get_compact_summary(const struct diff_filepair *p,
+				       int is_renamed)
 {
 	if (!is_renamed) {
 		if (p->status == DIFF_STATUS_ADDED) {
@@ -4051,7 +4052,7 @@ static int reuse_worktree_file(struct index_state *istate,
 static int diff_populate_gitlink(struct diff_filespec *s, int size_only)
 {
 	struct strbuf buf = STRBUF_INIT;
-	char *dirty = "";
+	const char *dirty = "";
 
 	/* Are we looking at the work tree? */
 	if (s->dirty_submodule)
@@ -7206,7 +7207,7 @@ size_t fill_textconv(struct repository *r,
 
 	if (!driver) {
 		if (!DIFF_FILE_VALID(df)) {
-			*outbuf = "";
+			*outbuf = xstrdup("");
 			return 0;
 		}
 		if (diff_populate_filespec(r, df, NULL))

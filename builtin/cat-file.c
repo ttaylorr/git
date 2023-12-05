@@ -942,7 +942,7 @@ int cmd_cat_file(int argc, const char **argv, const char *prefix)
 		OPT_BOOL(0, "allow-unknown-type", &unknown_type,
 			  N_("allow -s and -t to work with broken/corrupt objects")),
 		OPT_BOOL(0, "use-mailmap", &use_mailmap, N_("use mail map file")),
-		OPT_ALIAS(0, "mailmap", "use-mailmap"),
+		OPT_ALIAS(0, "mailmap", (char *)"use-mailmap"),
 		/* Batch mode */
 		OPT_GROUP(N_("Batch objects requested on stdin (or --batch-all-objects)")),
 		OPT_CALLBACK_F(0, "batch", &batch, N_("format"),

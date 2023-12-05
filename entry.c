@@ -190,7 +190,12 @@ int finish_delayed_checkout(struct checkout *state, int show_progress)
 			if (!async_query_available_blobs(filter->string, &available_paths)) {
 				/* Filter reported an error */
 				errs = 1;
-				filter->string = "";
+				/*
+				 * Here and below, we drop the const qualifier
+				 * from the empty string literal, since we call
+				 * string_list_remove_empty_items() below.
+				 */
+				filter->string = (char *)"";
 				continue;
 			}
 			if (available_paths.nr <= 0) {
@@ -200,7 +205,7 @@ int finish_delayed_checkout(struct checkout *state, int show_progress)
 				 * filter from the list (see
 				 * "string_list_remove_empty_items" call below).
 				 */
-				filter->string = "";
+				filter->string = (char *)"";
 				continue;
 			}
 
@@ -226,7 +231,7 @@ int finish_delayed_checkout(struct checkout *state, int show_progress)
 					 * Do not ask the filter for available blobs,
 					 * again, as the filter is likely buggy.
 					 */
-					filter->string = "";
+					filter->string = (char *)"";
 					continue;
 				}
 				ce = index_file_exists(state->istate, path->string,

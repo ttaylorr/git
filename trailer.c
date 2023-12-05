@@ -43,7 +43,7 @@ struct arg_item {
 
 static LIST_HEAD(conf_head);
 
-static char *separators = ":";
+static const char *separators = ":";
 
 static int configured;
 

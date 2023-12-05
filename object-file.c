@@ -293,7 +293,7 @@ static struct cached_object empty_tree = {
 		.hash = EMPTY_TREE_SHA1_BIN_LITERAL,
 	},
 	.type = OBJ_TREE,
-	.buf = "",
+	.buf = (char*)"",
 };
 
 static struct cached_object *find_cached_object(const struct object_id *oid)
@@ -2410,7 +2410,7 @@ static int index_core(struct index_state *istate,
 	int ret;
 
 	if (!size) {
-		ret = index_mem(istate, oid, "", size, type, path, flags);
+		ret = index_mem(istate, oid, (char*)"", size, type, path, flags);
 	} else if (size <= SMALL_FILE_SIZE) {
 		char *buf = xmalloc(size);
 		ssize_t read_result = read_in_full(fd, buf, size);

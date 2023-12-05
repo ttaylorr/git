@@ -13,8 +13,8 @@ static struct refspec_item s_tag_refspec = {
 	.matching = 0,
 	.exact_sha1 = 0,
 	.negative = 0,
-	.src = "refs/tags/*",
-	.dst = "refs/tags/*",
+	.src = (char *)"refs/tags/*", /* static struct */
+	.dst = (char *)"refs/tags/*",
 };
 
 /* See TAG_REFSPEC for the string version */

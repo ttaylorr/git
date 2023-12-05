@@ -21,8 +21,8 @@ https://developers.google.com/open-source/licenses/bsd
 #include "reftable-tests.h"
 
 struct testcase {
-	char *add;
-	char *del;
+	const char *add;
+	const char *del;
 	int error_code;
 };
 
@@ -33,10 +33,9 @@ static void test_conflict(void)
 	struct reftable_writer *w =
 		reftable_new_writer(&strbuf_add_void, &buf, &opts);
 	struct reftable_ref_record rec = {
-		.refname = "a/b",
+		.refname = xstrdup("a/b"),
 		.value_type = REFTABLE_REF_SYMREF,
-		.value.symref = "destination", /* make sure it's not a symref.
-						*/
+		.value.symref = xstrdup("destination"), /* make sure it's not a symref. */
 		.update_index = 1,
 	};
 	int err;
@@ -79,11 +78,11 @@ static void test_conflict(void)
 		};
 
 		if (cases[i].add) {
-			mod.add = &cases[i].add;
+			mod.add = (char **)&cases[i].add;
 			mod.add_len = 1;
 		}
 		if (cases[i].del) {
-			mod.del = &cases[i].del;
+			mod.del = (char **)&cases[i].del;
 			mod.del_len = 1;
 		}
 

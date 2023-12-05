@@ -136,7 +136,7 @@ static void free_delay_entries(void)
 	strmap_clear(&delay, 0);
 }
 
-static void add_delay_entry(char *pathname, int count, int requested)
+static void add_delay_entry(const char *pathname, int count, int requested)
 {
 	struct delay_entry *entry = xcalloc(1, sizeof(*entry));
 	entry->count = count;
@@ -242,7 +242,7 @@ static void command_loop(void)
 		if (entry && entry->output) {
 			output = entry->output;
 		} else if (!strcmp(pathname, "error.r") || !strcmp(pathname, "abort.r")) {
-			output = "";
+			output = (char *)"";
 		} else if (!strcmp(command, "clean") && has_clean_cap) {
 			output = rot13(input.buf);
 		} else if (!strcmp(command, "smudge") && has_smudge_cap) {

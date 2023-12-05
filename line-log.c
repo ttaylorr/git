@@ -899,9 +899,9 @@ static void print_line(const char *prefix, char first,
 		fputs("\\ No newline at end of file\n", file);
 }
 
-static char *output_prefix(struct diff_options *opt)
+static const char *output_prefix(struct diff_options *opt)
 {
-	char *prefix = "";
+	const char *prefix = "";
 
 	if (opt->output_prefix) {
 		struct strbuf *sb = opt->output_prefix(opt, opt->output_prefix_data);
@@ -920,7 +920,7 @@ static void dump_diff_hacky_one(struct rev_info *rev, struct line_log_data *rang
 	struct diff_ranges *diff = &range->diff;
 
 	struct diff_options *opt = &rev->diffopt;
-	char *prefix = output_prefix(opt);
+	const char *prefix = output_prefix(opt);
 	const char *c_reset = diff_get_color(opt->use_color, DIFF_RESET);
 	const char *c_frag = diff_get_color(opt->use_color, DIFF_FRAGINFO);
 	const char *c_meta = diff_get_color(opt->use_color, DIFF_METAINFO);
@@ -1058,7 +1058,7 @@ static int process_diff_filepair(struct rev_info *rev,
 		file_parent.ptr = pair->one->data;
 		file_parent.size = pair->one->size;
 	} else {
-		file_parent.ptr = "";
+		file_parent.ptr = xstrdup("");
 		file_parent.size = 0;
 	}
 

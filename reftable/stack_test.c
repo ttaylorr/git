@@ -71,10 +71,10 @@ static void test_read_file(void)
 {
 	char *fn = get_tmp_template(__LINE__);
 	int fd = mkstemp(fn);
-	char out[1024] = "line1\n\nline2\nline3";
+	const char out[1024] = "line1\n\nline2\nline3";
 	int n, err;
 	char **names = NULL;
-	char *want[] = { "line1", "line2", "line3" };
+	const char *want[] = { "line1", "line2", "line3" };
 	int i = 0;
 
 	EXPECT(fd > 0);
@@ -107,13 +107,13 @@ static void test_parse_names(void)
 
 static void test_names_equal(void)
 {
-	char *a[] = { "a", "b", "c", NULL };
-	char *b[] = { "a", "b", "d", NULL };
-	char *c[] = { "a", "b", NULL };
+	const char *a[] = { "a", "b", "c", NULL };
+	const char *b[] = { "a", "b", "d", NULL };
+	const char *c[] = { "a", "b", NULL };
 
-	EXPECT(names_equal(a, a));
-	EXPECT(!names_equal(a, b));
-	EXPECT(!names_equal(a, c));
+	EXPECT(names_equal((char **)a, (char **)a));
+	EXPECT(!names_equal((char **)a, (char **)b));
+	EXPECT(!names_equal((char **)a, (char **)c));
 }
 
 static int write_test_ref(struct reftable_writer *wr, void *arg)
@@ -147,10 +147,10 @@ static void test_reftable_stack_add_one(void)
 	struct reftable_stack *st = NULL;
 	int err;
 	struct reftable_ref_record ref = {
-		.refname = "HEAD",
+		.refname = xstrdup("HEAD"),
 		.update_index = 1,
 		.value_type = REFTABLE_REF_SYMREF,
-		.value.symref = "master",
+		.value.symref = xstrdup("master"),
 	};
 	struct reftable_ref_record dest = { NULL };
 	struct stat stat_result = { 0 };
@@ -207,16 +207,16 @@ static void test_reftable_stack_uptodate(void)
 
 	int err;
 	struct reftable_ref_record ref1 = {
-		.refname = "HEAD",
+		.refname = xstrdup("HEAD"),
 		.update_index = 1,
 		.value_type = REFTABLE_REF_SYMREF,
-		.value.symref = "master",
+		.value.symref = xstrdup("master"),
 	};
 	struct reftable_ref_record ref2 = {
-		.refname = "branch2",
+		.refname = xstrdup("branch2"),
 		.update_index = 2,
 		.value_type = REFTABLE_REF_SYMREF,
-		.value.symref = "master",
+		.value.symref = xstrdup("master"),
 	};
 
 
@@ -255,10 +255,10 @@ static void test_reftable_stack_transaction_api(void)
 	struct reftable_addition *add = NULL;
 
 	struct reftable_ref_record ref = {
-		.refname = "HEAD",
+		.refname = xstrdup("HEAD"),
 		.update_index = 1,
 		.value_type = REFTABLE_REF_SYMREF,
-		.value.symref = "master",
+		.value.symref = xstrdup("master"),
 	};
 	struct reftable_ref_record dest = { NULL };
 
@@ -298,12 +298,12 @@ static void test_reftable_stack_validate_refname(void)
 
 	int i;
 	struct reftable_ref_record ref = {
-		.refname = "a/b",
+		.refname = xstrdup("a/b"),
 		.update_index = 1,
 		.value_type = REFTABLE_REF_SYMREF,
-		.value.symref = "master",
+		.value.symref = xstrdup("master"),
 	};
-	char *additions[] = { "a", "a/b/c" };
+	const char *additions[] = { "a", "a/b/c" };
 
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
@@ -313,10 +313,10 @@ static void test_reftable_stack_validate_refname(void)
 
 	for (i = 0; i < ARRAY_SIZE(additions); i++) {
 		struct reftable_ref_record ref = {
-			.refname = additions[i],
+			.refname = xstrdup(additions[i]),
 			.update_index = 1,
 			.value_type = REFTABLE_REF_SYMREF,
-			.value.symref = "master",
+			.value.symref = xstrdup("master"),
 		};
 
 		err = reftable_stack_add(st, &write_test_ref, &ref);
@@ -340,16 +340,16 @@ static void test_reftable_stack_update_index_check(void)
 	struct reftable_stack *st = NULL;
 	int err;
 	struct reftable_ref_record ref1 = {
-		.refname = "name1",
+		.refname = xstrdup("name1"),
 		.update_index = 1,
 		.value_type = REFTABLE_REF_SYMREF,
-		.value.symref = "master",
+		.value.symref = xstrdup("master"),
 	};
 	struct reftable_ref_record ref2 = {
-		.refname = "name2",
+		.refname = xstrdup("name2"),
 		.update_index = 1,
 		.value_type = REFTABLE_REF_SYMREF,
-		.value.symref = "master",
+		.value.symref = xstrdup("master"),
 	};
 
 	err = reftable_new_stack(&st, dir, cfg);
@@ -476,7 +476,7 @@ static void test_reftable_stack_log_normalize(void)
 
 	uint8_t h1[GIT_SHA1_RAWSZ] = { 0x01 }, h2[GIT_SHA1_RAWSZ] = { 0x02 };
 
-	struct reftable_log_record input = { .refname = "branch",
+	struct reftable_log_record input = { .refname = xstrdup("branch"),
 					     .update_index = 1,
 					     .value_type = REFTABLE_LOG_UPDATE,
 					     .value = { .update = {
@@ -494,11 +494,11 @@ static void test_reftable_stack_log_normalize(void)
 	err = reftable_new_stack(&st, dir, cfg);
 	EXPECT_ERR(err);
 
-	input.value.update.message = "one\ntwo";
+	input.value.update.message = xstrdup("one\ntwo");
 	err = reftable_stack_add(st, &write_test_log, &arg);
 	EXPECT(err == REFTABLE_API_ERROR);
 
-	input.value.update.message = "one";
+	input.value.update.message = xstrdup("one");
 	err = reftable_stack_add(st, &write_test_log, &arg);
 	EXPECT_ERR(err);
 
@@ -506,7 +506,7 @@ static void test_reftable_stack_log_normalize(void)
 	EXPECT_ERR(err);
 	EXPECT(0 == strcmp(dest.value.update.message, "one\n"));
 
-	input.value.update.message = "two\n";
+	input.value.update.message = xstrdup("two\n");
 	arg.update_index = 2;
 	err = reftable_stack_add(st, &write_test_log, &arg);
 	EXPECT_ERR(err);
@@ -612,9 +612,9 @@ static void test_reftable_stack_hash_id(void)
 	int err;
 
 	struct reftable_ref_record ref = {
-		.refname = "master",
+		.refname = xstrdup("master"),
 		.value_type = REFTABLE_REF_SYMREF,
-		.value.symref = "target",
+		.value.symref = xstrdup("target"),
 		.update_index = 1,
 	};
 	struct reftable_write_options cfg32 = { .hash_id = GIT_SHA256_FORMAT_ID };
@@ -831,7 +831,7 @@ static void test_reftable_stack_auto_compaction(void)
 			.refname = name,
 			.update_index = reftable_stack_next_update_index(st),
 			.value_type = REFTABLE_REF_SYMREF,
-			.value.symref = "master",
+			.value.symref = xstrdup("master"),
 		};
 		snprintf(name, sizeof(name), "branch%04d", i);
 
@@ -868,7 +868,7 @@ static void test_reftable_stack_compaction_concurrent(void)
 			.refname = name,
 			.update_index = reftable_stack_next_update_index(st1),
 			.value_type = REFTABLE_REF_SYMREF,
-			.value.symref = "master",
+			.value.symref = xstrdup("master"),
 		};
 		snprintf(name, sizeof(name), "branch%04d", i);
 
@@ -918,7 +918,7 @@ static void test_reftable_stack_compaction_concurrent_clean(void)
 			.refname = name,
 			.update_index = reftable_stack_next_update_index(st1),
 			.value_type = REFTABLE_REF_SYMREF,
-			.value.symref = "master",
+			.value.symref = xstrdup("master"),
 		};
 		snprintf(name, sizeof(name), "branch%04d", i);
 

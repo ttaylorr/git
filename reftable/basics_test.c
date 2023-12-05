@@ -51,8 +51,8 @@ static void test_binsearch(void)
 
 static void test_names_length(void)
 {
-	char *a[] = { "a", "b", NULL };
-	EXPECT(names_length(a) == 2);
+	const char *a[] = { "a", "b", NULL };
+	EXPECT(names_length((char **)a) == 2);
 }
 
 static void test_parse_names_normal(void)

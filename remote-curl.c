@@ -1582,7 +1582,7 @@ int cmd_main(int argc, const char **argv)
 			if (value)
 				*value++ = '\0';
 			else
-				value = "true";
+				value = (char *)"true";
 
 			result = set_option(arg, value);
 			if (!result)

@@ -1948,7 +1948,7 @@ static void write_accept_language(struct strbuf *buf)
 
 		/* add '*' */
 		REALLOC_ARRAY(language_tags, num_langs + 1);
-		language_tags[num_langs++] = "*"; /* it's OK; this won't be freed */
+		language_tags[num_langs++] = (char *)"*"; /* it's OK; this won't be freed */
 
 		/* compute decimal_places */
 		for (max_q = 1, decimal_places = 0;
