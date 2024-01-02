@@ -317,10 +317,4 @@ endif::git-pull[]
 	'git-pull' the --ff-only option will still check for forced updates
 	before attempting a fast-forward update. See linkgit:git-config[1].
 
--4::
---ipv4::
-	Use IPv4 addresses only, ignoring IPv6 addresses.
-
--6::
---ipv6::
-	Use IPv6 addresses only, ignoring IPv4 addresses.
+include::fetch-options-shared.txt[]
