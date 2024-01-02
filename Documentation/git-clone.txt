@@ -311,11 +311,6 @@ or `--mirror` is given)
 	The result is Git repository can be separated from working
 	tree.
 
--j <n>::
---jobs <n>::
-	The number of submodules fetched at the same time.
-	Defaults to the `submodule.fetchJobs` option.
-
 <repository>::
 	The (possibly remote) repository to clone from.  See the
 	<<URLS,GIT URLS>> section below for more information on specifying
@@ -338,6 +333,7 @@ or `--mirror` is given)
 :git-clone: 1
 include::urls.txt[]
 
+:git-clone: 1
 include::fetch-options-shared.txt[]
 
 EXAMPLES

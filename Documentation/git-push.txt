@@ -424,6 +424,7 @@ further recursion will occur. In this case, "only" is treated as "on-demand".
 	default is --verify, giving the hook a chance to prevent the
 	push.  With --no-verify, the hook is bypassed completely.
 
+:git-push: 1
 include::fetch-options-shared.txt[]
 
 include::urls-remotes.txt[]

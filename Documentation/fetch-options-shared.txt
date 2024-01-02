@@ -1,3 +1,20 @@
+ifndef::git-pull[]
+-j::
+--jobs=<n>::
+	Number of parallel children to be used for all forms of fetching.
+	Defaults to the `submodule.fetchJobs` option.
+ifndef::git-clone[]
++
+If the `--multiple` option was specified, the different remotes will be fetched
+in parallel. If multiple submodules are fetched, they will be fetched in
+parallel. To control them independently, use the config settings
+`fetch.parallel` and `submodule.fetchJobs` (see linkgit:git-config[1]).
++
+Typically, parallel recursive and multi-remote fetches will be faster. By
+default fetches are performed sequentially, not in parallel.
+endif
+endif
+
 -4::
 --ipv4::
 	Use IPv4 addresses only, ignoring IPv6 addresses.
