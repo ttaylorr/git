@@ -435,7 +435,7 @@ test_expect_success 'setup for mixed Bloom setting tests' '
 	done
 '
 
-test_expect_success 'ensure incompatible Bloom filters are ignored' '
+test_expect_success 'ensure Bloom filters with incompatible settings are ignored' '
 	# Compute Bloom filters with "unusual" settings.
 	git -C $repo rev-parse one >in &&
 	GIT_TEST_BLOOM_SETTINGS_NUM_HASHES=3 git -C $repo commit-graph write \
@@ -483,6 +483,33 @@ test_expect_success 'merge graph layers with incompatible Bloom settings' '
 	test_cmp expect actual &&
 	grep "statistics:{\"filter_not_present\":0," trace.perf &&
 	test_must_be_empty err
+'
+
+test_expect_success 'ensure Bloom filter with incompatible versions are ignored' '
+	rm "$repo/$graph" &&
+
+	git -C $repo log --oneline --no-decorate -- $CENT >expect &&
+
+	# Compute v1 Bloom filters for commits at the bottom.
+	git -C $repo rev-parse HEAD^ >in &&
+	git -C $repo commit-graph write --stdin-commits --changed-paths \
+		--split <in &&
+
+	# Compute v2 Bloomfilters for the rest of the commits at the top.
+	git -C $repo rev-parse HEAD >in &&
+	git -C $repo -c commitGraph.changedPathsVersion=2 commit-graph write \
+		--stdin-commits --changed-paths --split=no-merge <in &&
+
+	test_line_count = 2 $repo/$chain &&
+
+	git -C $repo log --oneline --no-decorate -- $CENT >actual 2>err &&
+	test_cmp expect actual &&
+
+	layer="$(head -n 1 $repo/$chain)" &&
+	cat >expect.err <<-EOF &&
+	warning: disabling Bloom filters for commit-graph layer $SQ$layer$SQ due to incompatible settings
+	EOF
+	test_cmp expect.err err
 '
 
 get_first_changed_path_filter () {
