@@ -277,8 +277,8 @@ static uint32_t reused, reused_delta;
  * Indexed commits
  */
 static struct commit **indexed_commits;
-static unsigned int indexed_commits_nr;
-static unsigned int indexed_commits_alloc;
+static size_t indexed_commits_nr;
+static size_t indexed_commits_alloc;
 
 static void index_commit_for_bitmap(struct commit *commit)
 {
@@ -1359,7 +1359,7 @@ static void write_pack_file(void)
 				stop_progress(&progress_state);
 
 				bitmap_writer_show_progress(progress);
-				bitmap_writer_select_commits(indexed_commits, indexed_commits_nr, -1);
+				bitmap_writer_select_commits(indexed_commits, indexed_commits_nr);
 				if (bitmap_writer_build(&to_pack) < 0)
 					die(_("failed to write bitmap index"));
 				bitmap_writer_finish(written_list, nr_written,

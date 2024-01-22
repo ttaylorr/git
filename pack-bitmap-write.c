@@ -590,10 +590,9 @@ static int date_compare(const void *_a, const void *_b)
 }
 
 void bitmap_writer_select_commits(struct commit **indexed_commits,
-				  unsigned int indexed_commits_nr,
-				  int max_bitmaps)
+				  size_t indexed_commits_nr)
 {
-	unsigned int i = 0, j, next;
+	size_t i = 0, j, next;
 
 	QSORT(indexed_commits, indexed_commits_nr, date_compare);
 
@@ -613,11 +612,6 @@ void bitmap_writer_select_commits(struct commit **indexed_commits,
 
 		if (i + next >= indexed_commits_nr)
 			break;
-
-		if (max_bitmaps > 0 && writer.selected_nr >= max_bitmaps) {
-			writer.selected_nr = max_bitmaps;
-			break;
-		}
 
 		if (next == 0) {
 			chosen = indexed_commits[i];
