@@ -24,7 +24,6 @@ struct bitmapped_commit {
 	struct ewah_bitmap *write_as;
 	int flags;
 	int xor_offset;
-	uint32_t commit_pos;
 };
 
 struct bitmap_writer {
