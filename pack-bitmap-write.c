@@ -36,7 +36,7 @@ struct bitmap_writer {
 	struct packing_data *to_pack;
 
 	struct bitmapped_commit *selected;
-	unsigned int selected_nr, selected_alloc;
+	size_t selected_nr, selected_alloc;
 
 	struct progress *progress;
 	int show_progress;
