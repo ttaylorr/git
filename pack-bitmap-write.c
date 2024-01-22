@@ -17,10 +17,23 @@
 #include "trace2.h"
 #include "tree.h"
 #include "tree-walk.h"
+#include "config.h"
 
 struct bitmapped_commit {
 	struct commit *commit;
 	struct ewah_bitmap *bitmap;
+	struct ewah_bitmap *write_as;
+	int flags;
+	int xor_offset;
+};
+
+struct pseudo_merge {
+	struct {
+		struct commit *commit;
+		struct ewah_bitmap *bitmap;
+	} *commits;
+	size_t commits_nr;
+
 	struct ewah_bitmap *write_as;
 	int flags;
 	int xor_offset;
@@ -38,12 +51,38 @@ struct bitmap_writer {
 	struct bitmapped_commit *selected;
 	size_t selected_nr, selected_alloc;
 
+	struct pseudo_merge *pseudo_merge;
+	size_t pseudo_merge_nr;
+
+	int max_pseudo_merges;
+	int min_pseudo_merge_size;
+
 	struct progress *progress;
 	int show_progress;
 	unsigned char pack_checksum[GIT_MAX_RAWSZ];
 };
 
 static struct bitmap_writer writer;
+
+#define DEFAULT_MAX_PSEUDO_MERGES 128
+#define DEFAULT_MIN_PSEUDO_MERGE_SIZE 32
+
+void bitmap_writer_init(struct repository *r)
+{
+	writer.max_pseudo_merges = DEFAULT_MAX_PSEUDO_MERGES;
+	writer.min_pseudo_merge_size = DEFAULT_MIN_PSEUDO_MERGE_SIZE;
+
+	repo_config_get_int(r, "pack.bitmapmaxpseudomerges",
+			    &writer.max_pseudo_merges);
+	repo_config_get_int(r, "pack.bitmapminpseudomergesize",
+			    &writer.min_pseudo_merge_size);
+
+	if (writer.min_pseudo_merge_size <= 0) {
+		warning(_("pack.bitmapMinPseudoMergeSize must be positive, "
+			  "using default"));
+		writer.min_pseudo_merge_size = DEFAULT_MIN_PSEUDO_MERGE_SIZE;
+	}
+}
 
 void bitmap_writer_show_progress(int show)
 {
@@ -239,6 +278,25 @@ static void bitmap_builder_init(struct bitmap_builder *bb,
 		bitmap_set(ent->commit_mask, i);
 
 		add_pending_object(&revs, &c->object, "");
+	}
+
+	for (i = 0; i < writer->pseudo_merge_nr; i++) {
+		struct pseudo_merge *pm = &writer->pseudo_merge[i];
+		size_t j;
+
+		for (j = 0; j < pm->commits_nr; j++) {
+			struct commit *c = pm->commits[j].commit;
+			struct bb_commit *ent = bb_data_at(&bb->data, c);
+
+			ent->selected = 1; /* pretend pseudo-merges are selected */
+			ent->maximal = 1;
+			ent->idx = -1; /* unused */
+
+			ent->commit_mask = bitmap_new();
+			bitmap_set(ent->commit_mask, j + writer->selected_nr);
+
+			add_pending_object(&revs, &c->object, "");
+		}
 	}
 
 	if (prepare_revision_walk(&revs))
@@ -589,6 +647,63 @@ static int date_compare(const void *_a, const void *_b)
 	return (long)b->date - (long)a->date;
 }
 
+static void bitmap_writer_select_pseudo_merges(struct commit **commits,
+					       size_t commirs_nr)
+{
+	size_t *tips = NULL;
+	size_t tips_nr = 0, tips_alloc = 0, i;
+	uint32_t pseudo_merge_nr;
+	uint32_t pseudo_merge_size;
+
+	if (!writer.max_pseudo_merges)
+		return;
+
+	if (writer.show_progress)
+		writer.progress = start_progress("Selecting pseudo-merge bitmap commits", 0);
+
+	for (i = 0; i < commirs_nr; i++) {
+		struct commit *c = commits[i];
+		if (!(c->object.flags & BITMAP_TIP))
+			continue;
+
+		ALLOC_GROW(tips, tips_nr + 1, tips_alloc);
+		tips[tips_nr++] = i;
+	}
+
+	if (writer.max_pseudo_merges < 0) {
+		pseudo_merge_nr = tips_nr / writer.min_pseudo_merge_size;
+	} else {
+		pseudo_merge_nr = (uint32_t)writer.max_pseudo_merges;
+		if (pseudo_merge_nr / tips_nr < writer.min_pseudo_merge_size)
+			pseudo_merge_nr = tips_nr / writer.min_pseudo_merge_size;
+	}
+
+	pseudo_merge_size = tips_nr / pseudo_merge_nr;
+
+	writer.pseudo_merge = xcalloc(pseudo_merge_nr, sizeof(struct pseudo_merge));
+	for (i = 0; i < pseudo_merge_nr; i++) {
+		struct pseudo_merge *pm = &writer.pseudo_merge[i];
+		size_t j;
+
+		pm->commits_nr = pseudo_merge_size;
+		if (i == pseudo_merge_nr - 1)
+			pm->commits_nr += pseudo_merge_nr % tips_nr;
+
+		ALLOC_ARRAY(pm->commits, pm->commits_nr);
+
+		for (j = 0; j < pm->commits_nr; j++) {
+			pm->commits[j].commit = commits[tips[i * pseudo_merge_size + j]];
+			pm->commits[j].bitmap = NULL;
+
+			push_bitmapped_commit(pm->commits[j].commit);
+		}
+	}
+
+	free(tips);
+
+	stop_progress(&writer.progress);
+}
+
 void bitmap_writer_select_commits(struct commit **indexed_commits,
 				  size_t indexed_commits_nr)
 {
@@ -637,6 +752,10 @@ void bitmap_writer_select_commits(struct commit **indexed_commits,
 		i += next + 1;
 		display_progress(writer.progress, i);
 	}
+
+	if (writer.max_pseudo_merges)
+		bitmap_writer_select_pseudo_merges(indexed_commits,
+						   indexed_commits_nr);
 
 	stop_progress(&writer.progress);
 }

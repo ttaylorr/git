@@ -1236,6 +1236,7 @@ static struct commit **find_commits_for_midx_bitmap(uint32_t *indexed_commits_nr
 {
 	struct rev_info revs;
 	struct bitmap_commit_cb cb = {0};
+	unsigned int i;
 
 	trace2_region_enter("midx", "find_commits_for_midx_bitmap",
 			    the_repository);
@@ -1249,6 +1250,9 @@ static struct commit **find_commits_for_midx_bitmap(uint32_t *indexed_commits_nr
 		setup_revisions(0, NULL, &revs, NULL);
 		for_each_ref(add_ref_to_pending, &revs);
 	}
+
+	for (i = 0; i < revs.pending.nr; i++)
+		revs.pending.objects[i].item->flags |= BITMAP_TIP;
 
 	/*
 	 * Skipping promisor objects here is intentional, since it only excludes
@@ -1311,6 +1315,7 @@ static int write_midx_bitmap(const char *midx_name,
 	for (i = 0; i < pdata->nr_objects; i++)
 		index[i] = &pdata->objects[i].idx;
 
+	bitmap_writer_init(the_repository);
 	bitmap_writer_show_progress(flags & MIDX_PROGRESS);
 	bitmap_writer_build_type_index(pdata, index, pdata->nr_objects);
 

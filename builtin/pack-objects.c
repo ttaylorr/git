@@ -1339,6 +1339,7 @@ static void write_pack_file(void)
 				    hash_to_hex(hash));
 
 			if (write_bitmap_index) {
+				bitmap_writer_init(the_repository);
 				bitmap_writer_set_checksum(hash);
 				bitmap_writer_build_type_index(
 					&to_pack, written_list, nr_written);
@@ -4063,20 +4064,21 @@ static void record_recent_commit(struct commit *commit, void *data UNUSED)
 	oid_array_append(&recent_objects, &commit->object.oid);
 }
 
-static int mark_bitmap_preferred_tip(const char *refname,
-				     const struct object_id *oid,
-				     int flags UNUSED,
-				     void *data UNUSED)
+static int mark_bitmap_commit_flags(const char *refname,
+				    const struct object_id *oid,
+				    int flags UNUSED,
+				    void *_object_flags)
 {
 	struct object_id peeled;
 	struct object *object;
+	unsigned object_flags = (uintmax_t)_object_flags;
 
 	if (!peel_iterated_oid(oid, &peeled))
 		oid = &peeled;
 
 	object = parse_object_or_die(oid, refname);
 	if (object->type == OBJ_COMMIT)
-		object->flags |= NEEDS_BITMAP;
+		object->flags |= object_flags;
 
 	return 0;
 }
@@ -4091,8 +4093,14 @@ static void mark_bitmap_preferred_tips(void)
 		return;
 
 	for_each_string_list_item(item, preferred_tips) {
-		for_each_ref_in(item->string, mark_bitmap_preferred_tip, NULL);
+		for_each_ref_in(item->string, mark_bitmap_commit_flags,
+				(void *)((uintmax_t)NEEDS_BITMAP));
 	}
+}
+
+static void mark_bitmap_commits_at_tips(void)
+{
+	for_each_ref(mark_bitmap_commit_flags, (void *)((uintmax_t)BITMAP_TIP));
 }
 
 static void get_object_list(struct rev_info *revs, int ac, const char **av)
@@ -4147,8 +4155,10 @@ static void get_object_list(struct rev_info *revs, int ac, const char **av)
 	if (use_delta_islands)
 		load_delta_islands(the_repository, progress);
 
-	if (write_bitmap_index)
+	if (write_bitmap_index) {
 		mark_bitmap_preferred_tips();
+		mark_bitmap_commits_at_tips();
+	}
 
 	if (prepare_revision_walk(revs))
 		die(_("revision walk setup failed"));
