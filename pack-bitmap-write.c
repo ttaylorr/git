@@ -701,8 +701,6 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 			pm->commits[j].commit = c;
 			pm->commits[j].bitmap = NULL;
 
-			/* */
-
 			bitmap_pos = find_object_pos(&c->object.oid, &found);
 			if (!found)
 				die(_("could not find indexed commit '%s'"),
