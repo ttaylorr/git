@@ -37,6 +37,7 @@ enum pack_bitmap_opts {
 	BITMAP_OPT_FULL_DAG = 0x1,
 	BITMAP_OPT_HASH_CACHE = 0x4,
 	BITMAP_OPT_LOOKUP_TABLE = 0x10,
+	BITMAP_OPT_PSEUDO_MERGES = 0x20,
 };
 
 enum pack_bitmap_flags {
@@ -98,11 +99,10 @@ int bitmap_has_oid_in_uninteresting(struct bitmap_index *, const struct object_i
 
 off_t get_disk_usage_from_bitmap(struct bitmap_index *, struct rev_info *);
 
-void bitmap_writer_init(struct repository *r);
+void bitmap_writer_init(struct repository *r, struct packing_data *to_pack);
 void bitmap_writer_show_progress(int show);
 void bitmap_writer_set_checksum(const unsigned char *sha1);
-void bitmap_writer_build_type_index(struct packing_data *to_pack,
-				    struct pack_idx_entry **index,
+void bitmap_writer_build_type_index(struct pack_idx_entry **index,
 				    uint32_t index_nr);
 uint32_t *create_bitmap_mapping(struct bitmap_index *bitmap_git,
 				struct packing_data *mapping);
@@ -113,7 +113,7 @@ struct ewah_bitmap *bitmap_for_commit(struct bitmap_index *bitmap_git,
 				      struct commit *commit);
 void bitmap_writer_select_commits(struct commit **indexed_commits,
 				  size_t indexed_commits_nr);
-int bitmap_writer_build(struct packing_data *to_pack);
+int bitmap_writer_build(void);
 void bitmap_writer_finish(struct pack_idx_entry **index,
 			  uint32_t index_nr,
 			  const char *filename,

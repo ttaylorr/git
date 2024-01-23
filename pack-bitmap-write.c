@@ -34,6 +34,7 @@ struct pseudo_merge {
 	} *commits;
 	size_t commits_nr;
 
+	struct ewah_bitmap *commits_bitmap;
 	struct ewah_bitmap *write_as;
 	int flags;
 	int xor_offset;
@@ -67,8 +68,11 @@ static struct bitmap_writer writer;
 #define DEFAULT_MAX_PSEUDO_MERGES 128
 #define DEFAULT_MIN_PSEUDO_MERGE_SIZE 32
 
-void bitmap_writer_init(struct repository *r)
+void bitmap_writer_init(struct repository *r, struct packing_data *to_pack)
 {
+	writer.to_pack = to_pack;
+	writer.bitmaps = kh_init_oid_map();
+
 	writer.max_pseudo_merges = DEFAULT_MAX_PSEUDO_MERGES;
 	writer.min_pseudo_merge_size = DEFAULT_MIN_PSEUDO_MERGE_SIZE;
 
@@ -92,8 +96,7 @@ void bitmap_writer_show_progress(int show)
 /**
  * Build the initial type index for the packfile or multi-pack-index
  */
-void bitmap_writer_build_type_index(struct packing_data *to_pack,
-				    struct pack_idx_entry **index,
+void bitmap_writer_build_type_index(struct pack_idx_entry **index,
 				    uint32_t index_nr)
 {
 	uint32_t i;
@@ -102,13 +105,13 @@ void bitmap_writer_build_type_index(struct packing_data *to_pack,
 	writer.trees = ewah_new();
 	writer.blobs = ewah_new();
 	writer.tags = ewah_new();
-	ALLOC_ARRAY(to_pack->in_pack_pos, to_pack->nr_objects);
+	ALLOC_ARRAY(writer.to_pack->in_pack_pos, writer.to_pack->nr_objects);
 
 	for (i = 0; i < index_nr; ++i) {
 		struct object_entry *entry = (struct object_entry *)index[i];
 		enum object_type real_type;
 
-		oe_set_in_pack_pos(to_pack, entry, i);
+		oe_set_in_pack_pos(writer.to_pack, entry, i);
 
 		switch (oe_type(entry)) {
 		case OBJ_COMMIT:
@@ -119,7 +122,7 @@ void bitmap_writer_build_type_index(struct packing_data *to_pack,
 			break;
 
 		default:
-			real_type = oid_object_info(to_pack->repo,
+			real_type = oid_object_info(writer.to_pack->repo,
 						    &entry->idx.oid, NULL);
 			break;
 		}
@@ -534,7 +537,7 @@ static void store_selected(struct bb_commit *ent, struct commit *commit)
 	kh_value(writer.bitmaps, hash_pos) = stored;
 }
 
-int bitmap_writer_build(struct packing_data *to_pack)
+int bitmap_writer_build(void)
 {
 	struct bitmap_builder bb;
 	size_t i;
@@ -545,17 +548,14 @@ int bitmap_writer_build(struct packing_data *to_pack)
 	uint32_t *mapping;
 	int closed = 1; /* until proven otherwise */
 
-	writer.bitmaps = kh_init_oid_map();
-	writer.to_pack = to_pack;
-
 	if (writer.show_progress)
 		writer.progress = start_progress("Building bitmaps", writer.selected_nr);
 	trace2_region_enter("pack-bitmap-write", "building_bitmaps_total",
 			    the_repository);
 
-	old_bitmap = prepare_bitmap_git(to_pack->repo);
+	old_bitmap = prepare_bitmap_git(writer.to_pack->repo);
 	if (old_bitmap)
-		mapping = create_bitmap_mapping(old_bitmap, to_pack);
+		mapping = create_bitmap_mapping(old_bitmap, writer.to_pack);
 	else
 		mapping = NULL;
 
@@ -690,11 +690,25 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 			pm->commits_nr += pseudo_merge_nr % tips_nr;
 
 		ALLOC_ARRAY(pm->commits, pm->commits_nr);
+		pm->commits_bitmap = ewah_new();
 
 		for (j = 0; j < pm->commits_nr; j++) {
-			pm->commits[j].commit = commits[tips[i * pseudo_merge_size + j]];
+			struct commit *c;
+			uint32_t bitmap_pos;
+			int found;
+
+			c = commits[tips[i * pseudo_merge_size + j]];
+			pm->commits[j].commit = c;
 			pm->commits[j].bitmap = NULL;
 
+			/* */
+
+			bitmap_pos = find_object_pos(&c->object.oid, &found);
+			if (!found)
+				die(_("could not find indexed commit '%s'"),
+				    oid_to_hex(&c->object.oid));
+
+			ewah_set(pm->commits_bitmap, bitmap_pos);
 			push_bitmapped_commit(pm->commits[j].commit);
 		}
 	}
@@ -803,6 +817,11 @@ static void write_selected_commits_v1(struct hashfile *f,
 	}
 }
 
+static void write_pseudo_merges(struct hashfile *f)
+{
+
+}
+
 static int table_cmp(const void *_va, const void *_vb, void *_data)
 {
 	uint32_t *commit_positions = _data;
@@ -899,7 +918,7 @@ void bitmap_writer_finish(struct pack_idx_entry **index,
 			  uint16_t options)
 {
 	static uint16_t default_version = 1;
-	static uint16_t flags = BITMAP_OPT_FULL_DAG;
+	static uint16_t flags = BITMAP_OPT_FULL_DAG | BITMAP_OPT_PSEUDO_MERGES;
 	struct strbuf tmp_file = STRBUF_INIT;
 	struct hashfile *f;
 	uint32_t *commit_positions = NULL;
@@ -940,6 +959,9 @@ void bitmap_writer_finish(struct pack_idx_entry **index,
 	}
 
 	write_selected_commits_v1(f, commit_positions, offsets);
+
+	if (options & BITMAP_OPT_PSEUDO_MERGES)
+		write_pseudo_merges(f);
 
 	if (options & BITMAP_OPT_LOOKUP_TABLE)
 		write_lookup_table(f, commit_positions, offsets);
