@@ -260,6 +260,7 @@ static void bitmap_builder_init(struct bitmap_builder *bb,
 	struct commit_list *reusable = NULL;
 	struct commit_list *r;
 	unsigned int i, num_maximal = 0;
+	uint32_t pseudo_merge_idx = writer->selected_nr;
 
 	memset(bb, 0, sizeof(*bb));
 	init_bb_data(&bb->data);
@@ -296,7 +297,7 @@ static void bitmap_builder_init(struct bitmap_builder *bb,
 			ent->idx = -1; /* unused */
 
 			ent->commit_mask = bitmap_new();
-			bitmap_set(ent->commit_mask, j + writer->selected_nr);
+			bitmap_set(ent->commit_mask, pseudo_merge_idx++);
 
 			add_pending_object(&revs, &c->object, "");
 		}
@@ -648,7 +649,7 @@ static int date_compare(const void *_a, const void *_b)
 }
 
 static void bitmap_writer_select_pseudo_merges(struct commit **commits,
-					       size_t commirs_nr)
+					       size_t commits_nr)
 {
 	size_t *tips = NULL;
 	size_t tips_nr = 0, tips_alloc = 0, i;
@@ -661,7 +662,7 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 	if (writer.show_progress)
 		writer.progress = start_progress("Selecting pseudo-merge bitmap commits", 0);
 
-	for (i = 0; i < commirs_nr; i++) {
+	for (i = 0; i < commits_nr; i++) {
 		struct commit *c = commits[i];
 		if (!(c->object.flags & BITMAP_TIP))
 			continue;
@@ -669,16 +670,24 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 		ALLOC_GROW(tips, tips_nr + 1, tips_alloc);
 		tips[tips_nr++] = i;
 	}
+	if (!tips_nr)
+		goto done; /* all tips have bitmaps, no pseudo-merges */
 
-	if (writer.max_pseudo_merges < 0) {
+	if (writer.min_pseudo_merge_size >= 0) {
 		pseudo_merge_nr = tips_nr / writer.min_pseudo_merge_size;
-	} else {
-		pseudo_merge_nr = (uint32_t)writer.max_pseudo_merges;
-		if (pseudo_merge_nr / tips_nr < writer.min_pseudo_merge_size)
-			pseudo_merge_nr = tips_nr / writer.min_pseudo_merge_size;
-	}
+		if (tips_nr % writer.min_pseudo_merge_size)
+			pseudo_merge_nr++;
 
+		if (0 < writer.max_pseudo_merges &&
+		    writer.max_pseudo_merges < pseudo_merge_nr)
+			pseudo_merge_nr = writer.max_pseudo_merges;
+	} else {
+		pseudo_merge_nr = writer.max_pseudo_merges;
+	}
 	pseudo_merge_size = tips_nr / pseudo_merge_nr;
+
+	if (!pseudo_merge_nr || !pseudo_merge_size)
+		goto done;
 
 	writer.pseudo_merge = xcalloc(pseudo_merge_nr, sizeof(struct pseudo_merge));
 	for (i = 0; i < pseudo_merge_nr; i++) {
@@ -687,7 +696,7 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 
 		pm->commits_nr = pseudo_merge_size;
 		if (i == pseudo_merge_nr - 1)
-			pm->commits_nr += pseudo_merge_nr % tips_nr;
+			pm->commits_nr += tips_nr % pseudo_merge_size;
 
 		ALLOC_ARRAY(pm->commits, pm->commits_nr);
 		pm->commits_bitmap = ewah_new();
@@ -707,12 +716,11 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 				    oid_to_hex(&c->object.oid));
 
 			ewah_set(pm->commits_bitmap, bitmap_pos);
-			push_bitmapped_commit(pm->commits[j].commit);
 		}
 	}
 
+done:
 	free(tips);
-
 	stop_progress(&writer.progress);
 }
 
@@ -765,9 +773,7 @@ void bitmap_writer_select_commits(struct commit **indexed_commits,
 		display_progress(writer.progress, i);
 	}
 
-	if (writer.max_pseudo_merges)
-		bitmap_writer_select_pseudo_merges(indexed_commits,
-						   indexed_commits_nr);
+	bitmap_writer_select_pseudo_merges(indexed_commits, indexed_commits_nr);
 
 	stop_progress(&writer.progress);
 }
