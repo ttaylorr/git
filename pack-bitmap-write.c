@@ -823,8 +823,88 @@ static void write_selected_commits_v1(struct hashfile *f,
 	}
 }
 
+struct pseudo_merge_commit {
+	const struct object_id *oid;
+
+	uint32_t *pseudo_merge;
+	size_t nr, alloc;
+};
+
+static int pseudo_merge_commit_cmp(const void *a, const void *b)
+{
+	return oidcmp(((struct pseudo_merge_commit *)a)->oid,
+		      ((struct pseudo_merge_commit *)b)->oid);
+}
+
 static void write_pseudo_merges(struct hashfile *f)
 {
+	struct pseudo_merge_commit *commits = NULL;
+	struct ewah_bitmap **commits_bitmap = NULL;
+	uint32_t base = bitmap_writer_selected_nr();
+	uint32_t extended_lookup_nr = 0;
+	size_t i, j;
+
+	CALLOC_ARRAY(commits_bitmap, writer.pseudo_merge_nr);
+	CALLOC_ARRAY(commits, writer.pseudo_merge_commits_nr);
+
+	for (i = 0; i < writer.pseudo_merge_nr; i++)
+		commits_bitmap[i] = ewah_new();
+
+	for (i = 0; i < writer.pseudo_merge_commits_nr; i++) {
+		struct bitmapped_commit *stored = &writer.selected[base + i];
+		struct pseudo_merge_commit *c = &commits[i];
+
+		if (!is_pseudo_merge(stored))
+			BUG("unexpected pseudo-merge among selected: %s",
+			    oid_to_hex(&stored->commit->object.oid));
+
+		ALLOC_GROW(c->pseudo_merge, c->nr + 1, c->alloc);
+
+		c->oid = &stored->commit->object.oid;
+		c->pseudo_merge[c->nr++] = stored->pseudo_merge;
+
+		ewah_set(commits_bitmap[stored->pseudo_merge],
+			 find_object_pos(c->oid, NULL));
+	}
+
+	hashwrite_be32(f, writer.pseudo_merge_nr);
+
+	for (i = 0; i < writer.pseudo_merge_nr; i++) {
+		struct bitmap *merge = writer.pseudo_merges[i];
+		struct ewah_bitmap *merge_ewah = bitmap_to_ewah(merge);
+
+		dump_bitmap(f, commits_bitmap[i]);
+		dump_bitmap(f, merge_ewah);
+
+		ewah_free(merge_ewah);
+	}
+
+	QSORT(commits, writer.pseudo_merge_commits_nr, pseudo_merge_commit_cmp);
+
+	/* write lookup table (non-extended) */
+	for (i = 0; i < writer.pseudo_merge_commits_nr; i++) {
+		struct pseudo_merge_commit *c = &commits[i];
+
+		hashwrite_be32(f, find_object_pos(c->oid, NULL));
+		if (c->nr == 1)
+			hashwrite_be32(f, *c->pseudo_merge);
+		else if (c->nr > 1)
+			hashwrite_be32(f, (1u<<31) | extended_lookup_nr++);
+		else
+			BUG("expected commit '%s' to have at least one "
+			    "pseudo-merge", oid_to_hex(c->oid));
+	}
+
+	/* write lookup table (extended) */
+	for (i = 0; i < writer.pseudo_merge_commits_nr; i++) {
+		struct pseudo_merge_commit *c = &commits[i];
+		if (c->nr == 1)
+			continue;
+
+		hashwrite_be32(f, c->nr);
+		for (j = 0; j < c->nr; j++)
+			hashwrite_be32(f, c->pseudo_merge[j]);
+	}
 }
 
 static int table_cmp(const void *_va, const void *_vb, void *_data)
