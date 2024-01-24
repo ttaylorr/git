@@ -21,7 +21,6 @@ struct bitmap_disk_header {
 	unsigned char checksum[GIT_MAX_RAWSZ];
 };
 
-#define BITMAP_SHOWN (1u<<20)
 #define BITMAP_TIP (1u<<21)
 #define NEEDS_BITMAP (1u<<22)
 

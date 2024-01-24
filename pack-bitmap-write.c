@@ -151,6 +151,11 @@ void bitmap_writer_build_type_index(struct pack_idx_entry **index,
 	}
 }
 
+static int has_bitmapped_commit(struct commit *c)
+{
+	return kh_get_oid_map(writer.bitmaps, c->object.oid) != kh_end(writer.bitmaps);
+}
+
 /**
  * Compute the actual bitmaps
  */
@@ -158,12 +163,19 @@ void bitmap_writer_build_type_index(struct pack_idx_entry **index,
 static inline void push_bitmapped_commit(struct commit *commit,
 					 int pseudo_merge)
 {
+	khiter_t hash_pos;
+	int hash_ret;
+
 	if (writer.selected_nr >= writer.selected_alloc) {
 		writer.selected_alloc = (writer.selected_alloc + 32) * 2;
 		REALLOC_ARRAY(writer.selected, writer.selected_alloc);
 	}
 
-	commit->object.flags |= BITMAP_SHOWN;
+	hash_pos = kh_put_oid_map(writer.bitmaps, commit->object.oid, &hash_ret);
+	if (!hash_ret)
+		die(_("duplicate entry when writing bitmap index: %s"),
+		    oid_to_hex(&commit->object.oid));
+	kh_value(writer.bitmaps, hash_pos) = NULL;
 
 	writer.selected[writer.selected_nr].commit = commit;
 	writer.selected[writer.selected_nr].bitmap = NULL;
@@ -523,7 +535,6 @@ static void store_selected(struct bb_commit *ent, struct commit *commit)
 {
 	struct bitmapped_commit *stored;
 	khiter_t hash_pos;
-	int hash_ret;
 
 	if (ent->pseudo_merge)
 		BUG("cannot call store_selected on a pseudo-merge");
@@ -531,10 +542,11 @@ static void store_selected(struct bb_commit *ent, struct commit *commit)
 	stored = &writer.selected[ent->idx];
 	stored->bitmap = bitmap_to_ewah(ent->bitmap);
 
-	hash_pos = kh_put_oid_map(writer.bitmaps, commit->object.oid, &hash_ret);
-	if (hash_ret == 0)
-		die("Duplicate entry when writing index: %s",
+	hash_pos = kh_get_oid_map(writer.bitmaps, commit->object.oid);
+	if (hash_pos == kh_end(writer.bitmaps))
+		die(_("attempted to store non-selected commit: '%s'"),
 		    oid_to_hex(&commit->object.oid));
+
 	kh_value(writer.bitmaps, hash_pos) = stored;
 }
 
@@ -667,8 +679,7 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 
 	for (i = 0; i < commits_nr; i++) {
 		struct commit *c = commits[i];
-		if ((c->object.flags & BITMAP_SHOWN) ||
-		    !(c->object.flags & BITMAP_TIP))
+		if (!(c->object.flags & BITMAP_TIP) || has_bitmapped_commit(c))
 			continue;
 
 		ALLOC_GROW(tips, tips_nr + 1, tips_alloc);
