@@ -28,6 +28,11 @@ struct bitmapped_commit {
 	int pseudo_merge;
 };
 
+static inline int is_pseudo_merge(const struct bitmapped_commit *c)
+{
+	return c->pseudo_merge > -1;
+}
+
 struct bitmap_writer {
 	struct ewah_bitmap *commits;
 	struct ewah_bitmap *trees;
@@ -53,6 +58,11 @@ struct bitmap_writer {
 };
 
 static struct bitmap_writer writer;
+
+static inline int bitmap_writer_selected_nr(void)
+{
+	return writer.selected_nr - writer.pseudo_merge_commits_nr;
+}
 
 #define DEFAULT_MAX_PSEUDO_MERGES 128
 #define DEFAULT_MIN_PSEUDO_MERGE_SIZE 32
@@ -153,6 +163,8 @@ static inline void push_bitmapped_commit(struct commit *commit,
 		REALLOC_ARRAY(writer.selected, writer.selected_alloc);
 	}
 
+	commit->object.flags |= BITMAP_SHOWN;
+
 	writer.selected[writer.selected_nr].commit = commit;
 	writer.selected[writer.selected_nr].bitmap = NULL;
 	writer.selected[writer.selected_nr].flags = 0;
@@ -186,16 +198,22 @@ static void compute_xor_offsets(void)
 
 	while (next < writer.selected_nr) {
 		struct bitmapped_commit *stored = &writer.selected[next];
-
 		int best_offset = 0;
 		struct ewah_bitmap *best_bitmap = stored->bitmap;
 		struct ewah_bitmap *test_xor;
+
+		if (is_pseudo_merge(stored)) {
+			next++;
+			continue;
+		}
 
 		for (i = 1; i <= MAX_XOR_OFFSET_SEARCH; ++i) {
 			int curr = next - i;
 
 			if (curr < 0)
 				break;
+			if (is_pseudo_merge(&writer.selected[curr]))
+				continue;
 
 			test_xor = ewah_pool_new();
 			ewah_xor(writer.selected[curr].bitmap, stored->bitmap, test_xor);
@@ -267,8 +285,13 @@ static void bitmap_builder_init(struct bitmap_builder *bb,
 
 		ent->selected = 1;
 		ent->maximal = 1;
-		ent->pseudo_merge = bc->pseudo_merge > -1;
-		ent->idx = i;
+		if (is_pseudo_merge(bc)) {
+			ent->pseudo_merge = 1;
+			ent->idx = bc->pseudo_merge;
+		} else {
+			ent->pseudo_merge = 0;
+			ent->idx = i;
+		}
 
 		ent->commit_mask = bitmap_new();
 		bitmap_set(ent->commit_mask, i);
@@ -498,10 +521,14 @@ static int fill_bitmap_commit(struct bb_commit *ent,
 
 static void store_selected(struct bb_commit *ent, struct commit *commit)
 {
-	struct bitmapped_commit *stored = &writer.selected[ent->idx];
+	struct bitmapped_commit *stored;
 	khiter_t hash_pos;
 	int hash_ret;
 
+	if (ent->pseudo_merge)
+		BUG("cannot call store_selected on a pseudo-merge");
+
+	stored = &writer.selected[ent->idx];
 	stored->bitmap = bitmap_to_ewah(ent->bitmap);
 
 	hash_pos = kh_put_oid_map(writer.bitmaps, commit->object.oid, &hash_ret);
@@ -640,7 +667,8 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 
 	for (i = 0; i < commits_nr; i++) {
 		struct commit *c = commits[i];
-		if (!(c->object.flags & BITMAP_TIP))
+		if ((c->object.flags & BITMAP_SHOWN) ||
+		    !(c->object.flags & BITMAP_TIP))
 			continue;
 
 		ALLOC_GROW(tips, tips_nr + 1, tips_alloc);
@@ -666,6 +694,8 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 		goto done;
 
 	CALLOC_ARRAY(writer.pseudo_merges, writer.pseudo_merge_nr);
+	for (i = 0; i < writer.pseudo_merge_nr; i++)
+		writer.pseudo_merges[i] = bitmap_new();
 
 	for (i = 0; i < tips_nr; i++) {
 		uint32_t pm = i / pseudo_merge_size;
@@ -765,8 +795,11 @@ static void write_selected_commits_v1(struct hashfile *f,
 {
 	int i;
 
-	for (i = 0; i < writer.selected_nr; ++i) {
+	for (i = 0; i < bitmap_writer_selected_nr(); ++i) {
 		struct bitmapped_commit *stored = &writer.selected[i];
+		if (is_pseudo_merge(stored))
+			BUG("unexpected pseudo-merge among selected: %s",
+			    oid_to_hex(&stored->commit->object.oid));
 
 		if (offsets)
 			offsets[i] = hashfile_total(f);
@@ -804,10 +837,10 @@ static void write_lookup_table(struct hashfile *f,
 	uint32_t i;
 	uint32_t *table, *table_inv;
 
-	ALLOC_ARRAY(table, writer.selected_nr);
-	ALLOC_ARRAY(table_inv, writer.selected_nr);
+	ALLOC_ARRAY(table, bitmap_writer_selected_nr());
+	ALLOC_ARRAY(table_inv, bitmap_writer_selected_nr());
 
-	for (i = 0; i < writer.selected_nr; i++)
+	for (i = 0; i < bitmap_writer_selected_nr(); i++)
 		table[i] = i;
 
 	/*
@@ -815,16 +848,16 @@ static void write_lookup_table(struct hashfile *f,
 	 * bitmap corresponds to j'th bitmapped commit (among the selected
 	 * commits) in lex order of OIDs.
 	 */
-	QSORT_S(table, writer.selected_nr, table_cmp, commit_positions);
+	QSORT_S(table, bitmap_writer_selected_nr(), table_cmp, commit_positions);
 
 	/* table_inv helps us discover that relationship (i'th bitmap
 	 * to j'th commit by j = table_inv[i])
 	 */
-	for (i = 0; i < writer.selected_nr; i++)
+	for (i = 0; i < bitmap_writer_selected_nr(); i++)
 		table_inv[table[i]] = i;
 
 	trace2_region_enter("pack-bitmap-write", "writing_lookup_table", the_repository);
-	for (i = 0; i < writer.selected_nr; i++) {
+	for (i = 0; i < bitmap_writer_selected_nr(); i++) {
 		struct bitmapped_commit *selected = &writer.selected[table[i]];
 		uint32_t xor_offset = selected->xor_offset;
 		uint32_t xor_row;
@@ -895,7 +928,7 @@ void bitmap_writer_finish(struct pack_idx_entry **index,
 	memcpy(header.magic, BITMAP_IDX_SIGNATURE, sizeof(BITMAP_IDX_SIGNATURE));
 	header.version = htons(default_version);
 	header.options = htons(flags | options);
-	header.entry_count = htonl(writer.selected_nr);
+	header.entry_count = htonl(bitmap_writer_selected_nr());
 	hashcpy(header.checksum, writer.pack_checksum);
 
 	hashwrite(f, &header, sizeof(header) - GIT_MAX_RAWSZ + the_hash_algo->rawsz);
@@ -907,9 +940,9 @@ void bitmap_writer_finish(struct pack_idx_entry **index,
 	if (options & BITMAP_OPT_LOOKUP_TABLE)
 		CALLOC_ARRAY(offsets, index_nr);
 
-	ALLOC_ARRAY(commit_positions, writer.selected_nr);
+	ALLOC_ARRAY(commit_positions, bitmap_writer_selected_nr());
 
-	for (i = 0; i < writer.selected_nr; i++) {
+	for (i = 0; i < bitmap_writer_selected_nr(); i++) {
 		struct bitmapped_commit *stored = &writer.selected[i];
 		int commit_pos = oid_pos(&stored->commit->object.oid, index, index_nr, oid_access);
 
