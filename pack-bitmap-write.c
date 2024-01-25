@@ -843,7 +843,7 @@ static void write_pseudo_merges(struct hashfile *f)
 	struct pseudo_merge_commit *commits = NULL;
 	struct ewah_bitmap **commits_bitmap = NULL;
 	off_t *pseudo_merge_ofs = NULL;
-	off_t next_extended;
+	off_t start, next_ext;
 
 	uint32_t base = bitmap_writer_selected_nr();
 	size_t i, j;
@@ -872,7 +872,7 @@ static void write_pseudo_merges(struct hashfile *f)
 			 find_object_pos(c->oid, NULL));
 	}
 
-	hashwrite_be32(f, writer.pseudo_merge_nr);
+	start = hashfile_total(f);
 
 	for (i = 0; i < writer.pseudo_merge_nr; i++) {
 		struct bitmap *merge = writer.pseudo_merges[i];
@@ -888,9 +888,9 @@ static void write_pseudo_merges(struct hashfile *f)
 
 	QSORT(commits, writer.pseudo_merge_commits_nr, pseudo_merge_commit_cmp);
 
-	next_extended = st_add(hashfile_total(f),
-			       st_mult(writer.pseudo_merge_commits_nr,
-				       sizeof(uint64_t)));
+	next_ext = st_add(hashfile_total(f),
+			  st_mult(writer.pseudo_merge_commits_nr,
+				  sizeof(uint64_t)));
 
 	/* write lookup table (non-extended) */
 	for (i = 0; i < writer.pseudo_merge_commits_nr; i++) {
@@ -900,12 +900,11 @@ static void write_pseudo_merges(struct hashfile *f)
 		if (c->nr == 1)
 			hashwrite_be64(f, pseudo_merge_ofs[c->pseudo_merge[0]]);
 		else if (c->nr > 1) {
-			if (next_extended & (1u<<31))
+			if (next_ext & (1u<<31))
 				die(_("too many pseudo-merges"));
-			hashwrite_be32(f, next_extended | (1u<<31));
-			next_extended = st_add(next_extended,
-					       st_mult(st_add(c->nr, 1),
-						       sizeof(uint32_t)));
+			hashwrite_be32(f, next_ext | (1u<<31));
+			next_ext = st_add(next_ext, st_mult(st_add(c->nr, 1),
+							    sizeof(uint32_t)));
 		} else
 			BUG("expected commit '%s' to have at least one "
 			    "pseudo-merge", oid_to_hex(c->oid));
@@ -921,6 +920,9 @@ static void write_pseudo_merges(struct hashfile *f)
 		for (j = 0; j < c->nr; j++)
 			hashwrite_be32(f, c->pseudo_merge[j]);
 	}
+
+	hashwrite_be32(f, writer.pseudo_merge_nr);
+	hashwrite_be64(f, hashfile_total(f) - start + sizeof(uint64_t));
 
 	free(pseudo_merge_ofs);
 	free(commits_bitmap);

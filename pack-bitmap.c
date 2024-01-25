@@ -93,6 +93,9 @@ struct bitmap_index {
 	 */
 	unsigned char *table_lookup;
 
+	/* If not NULL, this is the pseudo merge cache pointing into map. */
+	unsigned char *pseudo_merges;
+
 	/*
 	 * Extended index.
 	 *
@@ -204,6 +207,24 @@ static int load_bitmap_header(struct bitmap_index *index)
 				return error(_("corrupted bitmap index file (too short to fit lookup table)"));
 			if (git_env_bool("GIT_TEST_READ_COMMIT_TABLE", 1))
 				index->table_lookup = (void *)(index_end - table_size);
+			index_end -= table_size;
+		}
+
+		if (flags & BITMAP_OPT_PSEUDO_MERGES) {
+			size_t table_size;
+			if (sizeof(table_size) > index_end - index->map - header_size)
+				return error(_("corrupted bitmap index file (too short to fit pseudo-merge table header)"));
+
+			table_size = get_be64(index_end - 8);
+			if (table_size > index_end - index->map - header_size)
+				return error(_("corrupted bitmap index file (too short to fit pseudo-merge table)"));
+
+			warning("found pseudo-merge size %"PRIuMAX,
+				(uintmax_t)table_size);
+			warning("found pseudo-merges # %"PRIuMAX,
+				(uintmax_t)get_be32(index_end - 8 - 4));
+
+			index->pseudo_merges = (void *)(index_end - table_size);
 			index_end -= table_size;
 		}
 	}
