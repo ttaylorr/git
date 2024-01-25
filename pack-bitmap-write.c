@@ -840,11 +840,14 @@ static void write_pseudo_merges(struct hashfile *f)
 {
 	struct pseudo_merge_commit *commits = NULL;
 	struct ewah_bitmap **commits_bitmap = NULL;
+	off_t *pseudo_merge_ofs = NULL;
+	off_t next_extended;
+
 	uint32_t base = bitmap_writer_selected_nr();
-	uint32_t extended_lookup_nr = 0;
 	size_t i, j;
 
 	CALLOC_ARRAY(commits_bitmap, writer.pseudo_merge_nr);
+	CALLOC_ARRAY(pseudo_merge_ofs, writer.pseudo_merge_nr);
 	CALLOC_ARRAY(commits, writer.pseudo_merge_commits_nr);
 
 	for (i = 0; i < writer.pseudo_merge_nr; i++)
@@ -873,6 +876,8 @@ static void write_pseudo_merges(struct hashfile *f)
 		struct bitmap *merge = writer.pseudo_merges[i];
 		struct ewah_bitmap *merge_ewah = bitmap_to_ewah(merge);
 
+		pseudo_merge_ofs[i] = hashfile_total(f);
+
 		dump_bitmap(f, commits_bitmap[i]);
 		dump_bitmap(f, merge_ewah);
 
@@ -881,16 +886,25 @@ static void write_pseudo_merges(struct hashfile *f)
 
 	QSORT(commits, writer.pseudo_merge_commits_nr, pseudo_merge_commit_cmp);
 
+	next_extended = st_add(hashfile_total(f),
+			       st_mult(writer.pseudo_merge_commits_nr,
+				       sizeof(uint64_t)));
+
 	/* write lookup table (non-extended) */
 	for (i = 0; i < writer.pseudo_merge_commits_nr; i++) {
 		struct pseudo_merge_commit *c = &commits[i];
 
 		hashwrite_be32(f, find_object_pos(c->oid, NULL));
 		if (c->nr == 1)
-			hashwrite_be32(f, *c->pseudo_merge);
-		else if (c->nr > 1)
-			hashwrite_be32(f, (1u<<31) | extended_lookup_nr++);
-		else
+			hashwrite_be64(f, pseudo_merge_ofs[c->pseudo_merge[0]]);
+		else if (c->nr > 1) {
+			if (next_extended & (1u<<31))
+				die(_("too many pseudo-merges"));
+			hashwrite_be32(f, next_extended | (1u<<31));
+			next_extended = st_add(next_extended,
+					       st_mult(st_add(c->nr, 1),
+						       sizeof(uint32_t)));
+		} else
 			BUG("expected commit '%s' to have at least one "
 			    "pseudo-merge", oid_to_hex(c->oid));
 	}
@@ -905,6 +919,10 @@ static void write_pseudo_merges(struct hashfile *f)
 		for (j = 0; j < c->nr; j++)
 			hashwrite_be32(f, c->pseudo_merge[j]);
 	}
+
+	free(pseudo_merge_ofs);
+	free(commits_bitmap);
+	free(commits);
 }
 
 static int table_cmp(const void *_va, const void *_vb, void *_data)
@@ -1003,7 +1021,7 @@ void bitmap_writer_finish(struct pack_idx_entry **index,
 			  uint16_t options)
 {
 	static uint16_t default_version = 1;
-	static uint16_t flags = BITMAP_OPT_FULL_DAG | BITMAP_OPT_PSEUDO_MERGES;
+	static uint16_t flags = BITMAP_OPT_FULL_DAG;
 	struct strbuf tmp_file = STRBUF_INIT;
 	struct hashfile *f;
 	uint32_t *commit_positions = NULL;
@@ -1013,6 +1031,9 @@ void bitmap_writer_finish(struct pack_idx_entry **index,
 	struct bitmap_disk_header header;
 
 	int fd = odb_mkstemp(&tmp_file, "pack/tmp_bitmap_XXXXXX");
+
+	if (writer.pseudo_merge_nr)
+		options |= BITMAP_OPT_PSEUDO_MERGES;
 
 	f = hashfd(fd, tmp_file.buf);
 
