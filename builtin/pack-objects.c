@@ -1339,10 +1339,10 @@ static void write_pack_file(void)
 				    hash_to_hex(hash));
 
 			if (write_bitmap_index) {
-				bitmap_writer_init(the_repository, &to_pack);
+				bitmap_writer_init(the_repository);
 				bitmap_writer_set_checksum(hash);
-				bitmap_writer_build_type_index(written_list,
-							       nr_written);
+				bitmap_writer_build_type_index(
+					&to_pack, written_list, nr_written);
 			}
 
 			if (cruft)
@@ -1361,7 +1361,7 @@ static void write_pack_file(void)
 
 				bitmap_writer_show_progress(progress);
 				bitmap_writer_select_commits(indexed_commits, indexed_commits_nr);
-				if (bitmap_writer_build() < 0)
+				if (bitmap_writer_build(&to_pack) < 0)
 					die(_("failed to write bitmap index"));
 				bitmap_writer_finish(written_list, nr_written,
 						     tmpname.buf, write_bitmap_options);

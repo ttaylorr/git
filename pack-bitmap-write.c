@@ -67,9 +67,8 @@ static inline int bitmap_writer_selected_nr(void)
 #define DEFAULT_MAX_PSEUDO_MERGES 128
 #define DEFAULT_MIN_PSEUDO_MERGE_SIZE 32
 
-void bitmap_writer_init(struct repository *r, struct packing_data *to_pack)
+void bitmap_writer_init(struct repository *r)
 {
-	writer.to_pack = to_pack;
 	writer.bitmaps = kh_init_oid_map();
 
 	writer.max_pseudo_merges = DEFAULT_MAX_PSEUDO_MERGES;
@@ -95,7 +94,8 @@ void bitmap_writer_show_progress(int show)
 /**
  * Build the initial type index for the packfile or multi-pack-index
  */
-void bitmap_writer_build_type_index(struct pack_idx_entry **index,
+void bitmap_writer_build_type_index(struct packing_data *to_pack,
+				    struct pack_idx_entry **index,
 				    uint32_t index_nr)
 {
 	uint32_t i;
@@ -104,13 +104,13 @@ void bitmap_writer_build_type_index(struct pack_idx_entry **index,
 	writer.trees = ewah_new();
 	writer.blobs = ewah_new();
 	writer.tags = ewah_new();
-	ALLOC_ARRAY(writer.to_pack->in_pack_pos, writer.to_pack->nr_objects);
+	ALLOC_ARRAY(to_pack->in_pack_pos, to_pack->nr_objects);
 
 	for (i = 0; i < index_nr; ++i) {
 		struct object_entry *entry = (struct object_entry *)index[i];
 		enum object_type real_type;
 
-		oe_set_in_pack_pos(writer.to_pack, entry, i);
+		oe_set_in_pack_pos(to_pack, entry, i);
 
 		switch (oe_type(entry)) {
 		case OBJ_COMMIT:
@@ -121,7 +121,7 @@ void bitmap_writer_build_type_index(struct pack_idx_entry **index,
 			break;
 
 		default:
-			real_type = oid_object_info(writer.to_pack->repo,
+			real_type = oid_object_info(to_pack->repo,
 						    &entry->idx.oid, NULL);
 			break;
 		}
@@ -550,7 +550,7 @@ static void store_selected(struct bb_commit *ent, struct commit *commit)
 	kh_value(writer.bitmaps, hash_pos) = stored;
 }
 
-int bitmap_writer_build(void)
+int bitmap_writer_build(struct packing_data *to_pack)
 {
 	struct bitmap_builder bb;
 	size_t i;
@@ -561,14 +561,16 @@ int bitmap_writer_build(void)
 	uint32_t *mapping;
 	int closed = 1; /* until proven otherwise */
 
+	writer.to_pack = to_pack;
+
 	if (writer.show_progress)
 		writer.progress = start_progress("Building bitmaps", writer.selected_nr);
 	trace2_region_enter("pack-bitmap-write", "building_bitmaps_total",
 			    the_repository);
 
-	old_bitmap = prepare_bitmap_git(writer.to_pack->repo);
+	old_bitmap = prepare_bitmap_git(to_pack->repo);
 	if (old_bitmap)
-		mapping = create_bitmap_mapping(old_bitmap, writer.to_pack);
+		mapping = create_bitmap_mapping(old_bitmap, to_pack);
 	else
 		mapping = NULL;
 
