@@ -843,7 +843,7 @@ static void write_pseudo_merges(struct hashfile *f)
 	struct pseudo_merge_commit *commits = NULL;
 	struct ewah_bitmap **commits_bitmap = NULL;
 	off_t *pseudo_merge_ofs = NULL;
-	off_t start, next_ext;
+	off_t start, table_start, next_ext;
 
 	uint32_t base = bitmap_writer_selected_nr();
 	size_t i, j;
@@ -892,6 +892,8 @@ static void write_pseudo_merges(struct hashfile *f)
 			  st_mult(writer.pseudo_merge_commits_nr,
 				  sizeof(uint64_t)));
 
+	table_start = hashfile_total(f);
+
 	/* write lookup table (non-extended) */
 	for (i = 0; i < writer.pseudo_merge_commits_nr; i++) {
 		struct pseudo_merge_commit *c = &commits[i];
@@ -921,7 +923,13 @@ static void write_pseudo_merges(struct hashfile *f)
 			hashwrite_be32(f, c->pseudo_merge[j]);
 	}
 
+	/* write positions for all pseudo merges */
+	for (i = 0; i < writer.pseudo_merge_nr; i++)
+		hashwrite_be64(f, pseudo_merge_ofs[i]);
+
 	hashwrite_be32(f, writer.pseudo_merge_nr);
+	hashwrite_be32(f, writer.pseudo_merge_commits_nr);
+	hashwrite_be64(f, table_start - start);
 	hashwrite_be64(f, hashfile_total(f) - start + sizeof(uint64_t));
 
 	free(pseudo_merge_ofs);

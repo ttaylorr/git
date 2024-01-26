@@ -32,6 +32,15 @@ struct stored_bitmap {
 	int flags;
 };
 
+struct pseudo_merge {
+	struct ewah_bitmap *commits;
+	struct ewah_bitmap *bitmap;
+	off_t at;
+
+	unsigned satisfied : 1,
+		 loaded : 1;
+};
+
 /*
  * The active bitmap index for a repository. By design, repositories only have
  * a single bitmap index available (the index for the biggest packfile in
@@ -94,7 +103,11 @@ struct bitmap_index {
 	unsigned char *table_lookup;
 
 	/* If not NULL, this is the pseudo merge cache pointing into map. */
-	unsigned char *pseudo_merges;
+	unsigned char *pseudo_merge_ptr;
+	unsigned char *pseudo_merge_commits;
+	struct pseudo_merge *pseudo_merge;
+	uint32_t pseudo_merge_nr;
+	uint32_t pseudo_merge_commits_nr;
 
 	/*
 	 * Extended index.
@@ -211,7 +224,10 @@ static int load_bitmap_header(struct bitmap_index *index)
 		}
 
 		if (flags & BITMAP_OPT_PSEUDO_MERGES) {
+			unsigned char *pseudo_merge_ofs;
 			size_t table_size;
+			uint32_t i;
+
 			if (sizeof(table_size) > index_end - index->map - header_size)
 				return error(_("corrupted bitmap index file (too short to fit pseudo-merge table header)"));
 
@@ -219,12 +235,22 @@ static int load_bitmap_header(struct bitmap_index *index)
 			if (table_size > index_end - index->map - header_size)
 				return error(_("corrupted bitmap index file (too short to fit pseudo-merge table)"));
 
-			warning("found pseudo-merge size %"PRIuMAX,
-				(uintmax_t)table_size);
-			warning("found pseudo-merges # %"PRIuMAX,
-				(uintmax_t)get_be32(index_end - 8 - 4));
+			index->pseudo_merge_ptr = (void *)(index_end - table_size);
+			index->pseudo_merge_commits =
+				index->pseudo_merge_ptr + get_be64(index_end - 16);
+			index->pseudo_merge_commits_nr = get_be32(index_end - 20);
+			index->pseudo_merge_nr = get_be32(index_end - 24);
 
-			index->pseudo_merges = (void *)(index_end - table_size);
+			CALLOC_ARRAY(index->pseudo_merge,
+				     index->pseudo_merge_nr);
+
+			pseudo_merge_ofs = index_end - 24 -
+				(index->pseudo_merge_nr * sizeof(uint64_t));
+			for (i = 0; i < index->pseudo_merge_nr; i++) {
+				index->pseudo_merge[i].at = get_be64(pseudo_merge_ofs);
+				pseudo_merge_ofs += sizeof(uint64_t);
+			}
+
 			index_end -= table_size;
 		}
 	}
@@ -989,6 +1015,11 @@ static void show_commit(struct commit *commit UNUSED,
 {
 }
 
+static unsigned apply_pseudo_merges_for_commit(struct bitmap_index *bitmap_git,
+					       struct bitmap *result,
+					       struct commit *commit,
+					       uint32_t commit_pos);
+
 static int add_to_include_set(struct bitmap_index *bitmap_git,
 			      struct include_data *data,
 			      struct commit *commit,
@@ -1009,6 +1040,10 @@ static int add_to_include_set(struct bitmap_index *bitmap_git,
 	}
 
 	bitmap_set(data->base, bitmap_pos);
+	if (apply_pseudo_merges_for_commit(bitmap_git, data->base, commit,
+					   bitmap_pos))
+		return 0;
+
 	return 1;
 }
 
@@ -1144,6 +1179,8 @@ static struct bitmap *find_boundary_objects(struct bitmap_index *bitmap_git,
 	unsigned int tmp_blobs, tmp_trees, tmp_tags;
 	int any_missing = 0;
 
+	/* TODO: pseudo-merges */
+
 	cb.bitmap_git = bitmap_git;
 	cb.base = bitmap_new();
 	object_array_init(&cb.boundary);
@@ -1225,6 +1262,223 @@ cleanup:
 	return cb.base;
 }
 
+static void unsatisfy_all_pseudo_merges(struct bitmap_index *bitmap_git)
+{
+	uint32_t i;
+	for (i = 0; i < bitmap_git->pseudo_merge_nr; i++)
+		bitmap_git->pseudo_merge[i].satisfied = 0;
+}
+
+static struct pseudo_merge *use_pseudo_merge(struct bitmap_index *bitmap_git,
+					     uint32_t i)
+{
+	struct pseudo_merge *pm;
+
+	if (i >= bitmap_git->pseudo_merge_nr)
+		BUG("out-of-bounds pseudo merge (%"PRIu32" >= %"PRIu32")", i,
+		    bitmap_git->pseudo_merge_nr);
+
+	pm = &bitmap_git->pseudo_merge[i];
+	if (!pm->loaded) {
+		size_t map_pos_tmp = bitmap_git->map_pos;
+
+		bitmap_git->map_pos = pm->at;
+
+		pm->commits = read_bitmap_1(bitmap_git);
+		pm->bitmap = read_bitmap_1(bitmap_git);
+		pm->loaded = 1;
+
+		bitmap_git->map_pos = map_pos_tmp;
+	}
+	return pm;
+}
+
+static struct pseudo_merge *pseudo_merge_at(struct bitmap_index *bitmap_git,
+					    struct object_id *oid,
+					    off_t want)
+{
+	size_t lo = 0;
+	size_t hi = bitmap_git->pseudo_merge_nr;
+
+	while (lo < hi) {
+		size_t mi = lo + (hi - lo) / 2;
+		off_t got = bitmap_git->pseudo_merge[mi].at;
+
+		if (got == want)
+			return use_pseudo_merge(bitmap_git, mi);
+		else if (got < want)
+			hi = mi;
+		else
+			lo = mi + 1;
+	}
+
+	warning(_("could not find pseudo-merge for commit %s at offset %"PRIuMAX),
+		oid_to_hex(oid), (uintmax_t)want);
+
+	return NULL;
+}
+
+struct pseudo_merge_commit {
+	uint32_t commit_pos;
+	uint64_t pseudo_merge_ofs;
+};
+
+#define PSEUDO_MERGE_COMMIT_RAWSZ (sizeof(uint32_t)+sizeof(uint64_t))
+
+static void read_pseudo_merge_commit_at(struct pseudo_merge_commit *merge,
+					const unsigned char *at)
+{
+	merge->commit_pos = get_be32(at);
+	merge->pseudo_merge_ofs = get_be64(at + sizeof(uint32_t));
+}
+
+static int pseudo_merge_commit_cmp(const void *va, const void *vb)
+{
+	struct pseudo_merge_commit merge;
+	uint32_t key = *(uint32_t*)va;
+
+	read_pseudo_merge_commit_at(&merge, vb);
+
+	if (key < merge.commit_pos)
+		return -1;
+	if (key > merge.commit_pos)
+		return 1;
+	return 0;
+}
+
+struct pseudo_merge_commit_ext {
+	uint32_t nr;
+	const unsigned char *ptr;
+};
+
+static int nth_pseudo_merge_ext(struct bitmap_index *bitmap_git,
+				struct pseudo_merge_commit_ext *ext,
+				struct pseudo_merge_commit *merge,
+				uint32_t n)
+{
+	off_t ofs;
+
+	if (n >= ext->nr)
+		return error(_("extended pseudo-merge lookup out-of-bounds "
+			       "(%"PRIu32" >= %"PRIu32")"), n, ext->nr);
+
+	ofs = get_be64(ext->ptr + st_mult(n, sizeof(uint64_t)));
+	read_pseudo_merge_commit_at(merge, bitmap_git->map + ofs);
+
+	return 0;
+}
+
+static int pseudo_merge_ext_at(struct bitmap_index *bitmap_git,
+			       struct pseudo_merge_commit_ext *ext,
+			       off_t at)
+{
+	if (at >= bitmap_git->map_size)
+		return error(_("extended pseudo-merge read out-of-bounds "
+			       "(%"PRIuMAX" >= %"PRIuMAX")"),
+			     (uintmax_t)at,
+			     (uintmax_t)bitmap_git->map_size);
+
+	ext->nr = get_be32(bitmap_git->map + at);
+	ext->ptr = bitmap_git->map + at + sizeof(uint32_t);
+
+	return 0;
+}
+
+static unsigned apply_pseudo_merge_1(struct bitmap_index *bitmap_git,
+				     struct bitmap *result,
+				     struct pseudo_merge *merge)
+{
+	if (merge->satisfied || !ewah_bitmap_is_subset(merge->commits, result))
+		return 0;
+
+	bitmap_or_ewah(result, merge->bitmap);
+	merge->satisfied = 1;
+
+	return 1;
+}
+
+static unsigned cascade_pseudo_merges(struct bitmap_index *bitmap_git,
+				      struct bitmap *result)
+{
+	unsigned any_satisfied;
+	unsigned ret = 0;
+
+	do {
+		struct pseudo_merge *merge;
+		uint32_t i;
+
+		any_satisfied = 0;
+
+		for (i = 0; i < bitmap_git->pseudo_merge_nr; i++) {
+			merge = use_pseudo_merge(bitmap_git, i);
+
+			any_satisfied |= apply_pseudo_merge_1(bitmap_git,
+							      result, merge);
+		}
+
+		ret |= any_satisfied;
+	} while (any_satisfied);
+
+	return ret;
+}
+
+static unsigned apply_pseudo_merges_for_commit(struct bitmap_index *bitmap_git,
+					       struct bitmap *result,
+					       struct commit *commit,
+					       uint32_t commit_pos)
+{
+	struct pseudo_merge_commit *merge_commit;
+	struct pseudo_merge *merge;
+	unsigned any_satisfied = 0;
+
+	merge_commit = bsearch(&commit_pos,
+			       bitmap_git->pseudo_merge_commits,
+			       bitmap_git->pseudo_merge_commits_nr,
+			       PSEUDO_MERGE_COMMIT_RAWSZ,
+			       pseudo_merge_commit_cmp);
+
+	if (!merge_commit)
+		return 0;
+
+	if (merge_commit->pseudo_merge_ofs & (1u<<31)) {
+		struct pseudo_merge_commit_ext ext;
+		off_t ofs = merge_commit->pseudo_merge_ofs & ~(1u<<31);
+		uint32_t i;
+
+		if (pseudo_merge_ext_at(bitmap_git, &ext, ofs) < 0) {
+			warning(_("could not read extended pseudo-merge table "
+				  "for commit %s"),
+				oid_to_hex(&commit->object.oid));
+			return 0;
+		}
+
+		for (i = 0; i < ext.nr; i++) {
+			if (nth_pseudo_merge_ext(bitmap_git, &ext, merge_commit, i) < 0)
+				return 0;
+
+			merge = pseudo_merge_at(bitmap_git, &commit->object.oid,
+						merge_commit->pseudo_merge_ofs);
+			if (!merge)
+				return 0;
+
+			any_satisfied |= apply_pseudo_merge_1(bitmap_git,
+							      result, merge);
+		}
+	} else {
+		merge = pseudo_merge_at(bitmap_git, &commit->object.oid,
+					merge_commit->pseudo_merge_ofs);
+		if (!merge)
+			return 0;
+
+		any_satisfied |= apply_pseudo_merge_1(bitmap_git, result, merge);
+	}
+
+	if (any_satisfied)
+		cascade_pseudo_merges(bitmap_git, result);
+
+	return any_satisfied;
+}
+
 static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 				   struct rev_info *revs,
 				   struct object_list *roots,
@@ -1234,6 +1488,8 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 	int needs_walk = 0;
 
 	struct object_list *not_mapped = NULL;
+
+	unsatisfy_all_pseudo_merges(bitmap_git);
 
 	/*
 	 * Go through all the roots for the walk. The ones that have bitmaps
@@ -1264,6 +1520,8 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 		return base;
 
 	roots = not_mapped;
+
+	cascade_pseudo_merges(bitmap_git, base);
 
 	/*
 	 * Let's iterate through all the roots that don't have bitmaps to
