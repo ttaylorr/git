@@ -138,6 +138,8 @@ static int should_include_nr;
 static int should_include_obj_nr;
 static int existing_bitmaps_hits_nr;
 static int existing_bitmaps_misses_nr;
+static int roots_with_bitmaps_nr;
+static int roots_without_bitmaps_nr;
 
 static struct ewah_bitmap *lookup_stored_bitmap(struct stored_bitmap *st)
 {
@@ -1514,6 +1516,27 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 
 	unsatisfy_all_pseudo_merges(bitmap_git);
 
+	if (bitmap_git->pseudo_merge_nr) {
+		struct bitmap *roots_bitmap = bitmap_new();
+		struct object_list *objects = NULL;
+
+		for (objects = roots; objects; objects = objects->next) {
+			struct object *object = objects->item;
+			int pos;
+
+			pos = bitmap_position(bitmap_git, &object->oid);
+			if (pos < 0)
+				continue;
+
+			bitmap_set(roots_bitmap, pos);
+		}
+
+		if (cascade_pseudo_merges(bitmap_git, roots_bitmap))
+			base = roots_bitmap;
+		else
+			bitmap_free(roots_bitmap);
+	}
+
 	/*
 	 * Go through all the roots for the walk. The ones that have bitmaps
 	 * on the bitmap index will be `or`ed together to form an initial
@@ -1524,7 +1547,16 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 	 */
 	while (roots) {
 		struct object *object = roots->item;
+
 		roots = roots->next;
+
+		if (base) {
+			int pos = bitmap_position(bitmap_git, &object->oid);
+			if (pos > 0 && bitmap_get(base, pos)) {
+				object->flags |= SEEN;
+				continue;
+			}
+		}
 
 		if (object->type == OBJ_COMMIT &&
 		    add_commit_to_bitmap(bitmap_git, &base, (struct commit *)object)) {
@@ -1543,7 +1575,6 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 		return base;
 
 	roots = not_mapped;
-
 	cascade_pseudo_merges(bitmap_git, base);
 
 	/*
@@ -1566,8 +1597,12 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 			object->flags &= ~UNINTERESTING;
 			add_pending_object(revs, object, "");
 			needs_walk = 1;
+
+			roots_without_bitmaps_nr++;
 		} else {
 			object->flags |= SEEN;
+
+			roots_with_bitmaps_nr++;
 		}
 	}
 
@@ -2140,6 +2175,10 @@ struct bitmap_index *prepare_bitmap_walk(struct rev_info *revs,
 			   existing_bitmaps_hits_nr);
 	trace2_data_intmax("bitmap", the_repository, "bitmap/misses",
 			   existing_bitmaps_misses_nr);
+	trace2_data_intmax("bitmap", the_repository, "bitmap/roots_with_bitmap",
+			   roots_with_bitmaps_nr);
+	trace2_data_intmax("bitmap", the_repository, "bitmap/roots_without_bitmap",
+			   roots_without_bitmaps_nr);
 
 	return bitmap_git;
 
