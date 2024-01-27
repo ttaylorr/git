@@ -133,6 +133,12 @@ struct bitmap_index {
 	unsigned int version;
 };
 
+static int pseudo_merges_satisfied_nr;
+static int should_include_nr;
+static int should_include_obj_nr;
+static int existing_bitmaps_hits_nr;
+static int existing_bitmaps_misses_nr;
+
 static struct ewah_bitmap *lookup_stored_bitmap(struct stored_bitmap *st)
 {
 	struct ewah_bitmap *parent;
@@ -235,20 +241,22 @@ static int load_bitmap_header(struct bitmap_index *index)
 			if (table_size > index_end - index->map - header_size)
 				return error(_("corrupted bitmap index file (too short to fit pseudo-merge table)"));
 
-			index->pseudo_merge_ptr = (void *)(index_end - table_size);
-			index->pseudo_merge_commits =
-				index->pseudo_merge_ptr + get_be64(index_end - 16);
-			index->pseudo_merge_commits_nr = get_be32(index_end - 20);
-			index->pseudo_merge_nr = get_be32(index_end - 24);
+			if (git_env_bool("GIT_TEST_USE_PSEUDO_MERGES", 1)) {
+				index->pseudo_merge_ptr = (void *)(index_end - table_size);
+				index->pseudo_merge_commits =
+					index->pseudo_merge_ptr + get_be64(index_end - 16);
+				index->pseudo_merge_commits_nr = get_be32(index_end - 20);
+				index->pseudo_merge_nr = get_be32(index_end - 24);
 
-			CALLOC_ARRAY(index->pseudo_merge,
-				     index->pseudo_merge_nr);
+				CALLOC_ARRAY(index->pseudo_merge,
+					     index->pseudo_merge_nr);
 
-			pseudo_merge_ofs = index_end - 24 -
-				(index->pseudo_merge_nr * sizeof(uint64_t));
-			for (i = 0; i < index->pseudo_merge_nr; i++) {
-				index->pseudo_merge[i].at = get_be64(pseudo_merge_ofs);
-				pseudo_merge_ofs += sizeof(uint64_t);
+				pseudo_merge_ofs = index_end - 24 -
+					(index->pseudo_merge_nr * sizeof(uint64_t));
+				for (i = 0; i < index->pseudo_merge_nr; i++) {
+					index->pseudo_merge[i].at = get_be64(pseudo_merge_ofs);
+					pseudo_merge_ofs += sizeof(uint64_t);
+				}
 			}
 
 			index_end -= table_size;
@@ -1035,9 +1043,13 @@ static int add_to_include_set(struct bitmap_index *bitmap_git,
 
 	partial = bitmap_for_commit(bitmap_git, commit);
 	if (partial) {
+		existing_bitmaps_hits_nr++;
+
 		bitmap_or_ewah(data->base, partial);
 		return 0;
 	}
+
+	existing_bitmaps_misses_nr++;
 
 	bitmap_set(data->base, bitmap_pos);
 	if (apply_pseudo_merges_for_commit(bitmap_git, data->base, commit,
@@ -1069,6 +1081,8 @@ static int should_include(struct commit *commit, void *_data)
 		return 0;
 	}
 
+	should_include_nr++;
+
 	return 1;
 }
 
@@ -1078,13 +1092,16 @@ static int should_include_obj(struct object *obj, void *_data)
 	int bitmap_pos;
 
 	bitmap_pos = bitmap_position(data->bitmap_git, &obj->oid);
-	if (bitmap_pos < 0)
+	if (bitmap_pos < 0) {
+		should_include_obj_nr++;
 		return 1;
+	}
 	if ((data->seen && bitmap_get(data->seen, bitmap_pos)) ||
 	     bitmap_get(data->base, bitmap_pos)) {
 		obj->flags |= SEEN;
 		return 0;
 	}
+	should_include_obj_nr++;
 	return 1;
 }
 
@@ -1094,8 +1111,12 @@ static int add_commit_to_bitmap(struct bitmap_index *bitmap_git,
 {
 	struct ewah_bitmap *or_with = bitmap_for_commit(bitmap_git, commit);
 
-	if (!or_with)
+	if (!or_with) {
+		existing_bitmaps_misses_nr++;
 		return 0;
+	}
+
+	existing_bitmaps_hits_nr++;
 
 	if (!*base)
 		*base = ewah_to_bitmap(or_with);
@@ -1390,6 +1411,8 @@ static unsigned apply_pseudo_merge_1(struct bitmap_index *bitmap_git,
 {
 	if (merge->satisfied || !ewah_bitmap_is_subset(merge->commits, result))
 		return 0;
+
+	pseudo_merges_satisfied_nr++;
 
 	bitmap_or_ewah(result, merge->bitmap);
 	merge->satisfied = 1;
@@ -2106,6 +2129,17 @@ struct bitmap_index *prepare_bitmap_walk(struct rev_info *revs,
 
 	object_list_free(&wants);
 	object_list_free(&haves);
+
+	trace2_data_intmax("bitmap", the_repository, "pseudo_merges_satisfied",
+			   pseudo_merges_satisfied_nr);
+	trace2_data_intmax("bitmap", the_repository, "fill_in/commits",
+			   should_include_nr);
+	trace2_data_intmax("bitmap", the_repository, "fill_in/objects",
+			   should_include_obj_nr);
+	trace2_data_intmax("bitmap", the_repository, "bitmap/hits",
+			   existing_bitmaps_hits_nr);
+	trace2_data_intmax("bitmap", the_repository, "bitmap/misses",
+			   existing_bitmaps_misses_nr);
 
 	return bitmap_git;
 
