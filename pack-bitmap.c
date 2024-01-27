@@ -35,10 +35,13 @@ struct stored_bitmap {
 struct pseudo_merge {
 	struct ewah_bitmap *commits;
 	struct ewah_bitmap *bitmap;
+
 	off_t at;
+	off_t bitmap_at;
 
 	unsigned satisfied : 1,
-		 loaded : 1;
+		 loaded_commits : 1,
+		 loaded_bitmap;
 };
 
 /*
@@ -180,6 +183,25 @@ static struct ewah_bitmap *read_bitmap_1(struct bitmap_index *index)
 
 	index->map_pos += bitmap_size;
 	return b;
+}
+
+static struct ewah_bitmap *pseudo_merge_bitmap(struct bitmap_index *bitmap_git,
+					       struct pseudo_merge *merge)
+{
+	if (!merge->loaded_commits)
+		BUG("cannot use unloaded pseudo-merge bitmap");
+
+	if (!merge->loaded_bitmap) {
+		size_t map_pos_tmp = bitmap_git->map_pos;
+
+		bitmap_git->map_pos = merge->bitmap_at;
+		merge->bitmap = read_bitmap_1(bitmap_git);
+		bitmap_git->map_pos = map_pos_tmp;
+
+		merge->loaded_bitmap = 1;
+	}
+
+	return merge->bitmap;
 }
 
 static uint32_t bitmap_num_objects(struct bitmap_index *index)
@@ -1302,16 +1324,16 @@ static struct pseudo_merge *use_pseudo_merge(struct bitmap_index *bitmap_git,
 		    bitmap_git->pseudo_merge_nr);
 
 	pm = &bitmap_git->pseudo_merge[i];
-	if (!pm->loaded) {
+	if (!pm->loaded_commits) {
 		size_t map_pos_tmp = bitmap_git->map_pos;
 
 		bitmap_git->map_pos = pm->at;
-
 		pm->commits = read_bitmap_1(bitmap_git);
-		pm->bitmap = read_bitmap_1(bitmap_git);
-		pm->loaded = 1;
-
+		pm->bitmap_at = bitmap_git->map_pos;
 		bitmap_git->map_pos = map_pos_tmp;
+
+		pm->loaded_commits = 1;
+
 	}
 	return pm;
 }
@@ -1416,7 +1438,7 @@ static unsigned apply_pseudo_merge_1(struct bitmap_index *bitmap_git,
 
 	pseudo_merges_satisfied_nr++;
 
-	bitmap_or_ewah(result, merge->bitmap);
+	bitmap_or_ewah(result, pseudo_merge_bitmap(bitmap_git, merge));
 	merge->satisfied = 1;
 
 	return 1;
