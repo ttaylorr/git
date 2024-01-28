@@ -841,7 +841,7 @@ static int pseudo_merge_commit_cmp(const void *a, const void *b)
 static void write_pseudo_merges(struct hashfile *f)
 {
 	struct pseudo_merge_commit *commits = NULL;
-	struct ewah_bitmap **commits_bitmap = NULL;
+	struct bitmap **commits_bitmap = NULL;
 	off_t *pseudo_merge_ofs = NULL;
 	off_t start, table_start, next_ext;
 
@@ -853,7 +853,7 @@ static void write_pseudo_merges(struct hashfile *f)
 	CALLOC_ARRAY(commits, writer.pseudo_merge_commits_nr);
 
 	for (i = 0; i < writer.pseudo_merge_nr; i++)
-		commits_bitmap[i] = ewah_new();
+		commits_bitmap[i] = bitmap_new();
 
 	for (i = 0; i < writer.pseudo_merge_commits_nr; i++) {
 		struct bitmapped_commit *stored = &writer.selected[base + i];
@@ -868,21 +868,23 @@ static void write_pseudo_merges(struct hashfile *f)
 		c->oid = &stored->commit->object.oid;
 		c->pseudo_merge[c->nr++] = stored->pseudo_merge;
 
-		ewah_set(commits_bitmap[stored->pseudo_merge],
-			 find_object_pos(c->oid, NULL));
+		bitmap_set(commits_bitmap[stored->pseudo_merge],
+			   find_object_pos(c->oid, NULL));
 	}
 
 	start = hashfile_total(f);
 
 	for (i = 0; i < writer.pseudo_merge_nr; i++) {
 		struct bitmap *merge = writer.pseudo_merges[i];
+		struct ewah_bitmap *commits_ewah = bitmap_to_ewah(commits_bitmap[i]);
 		struct ewah_bitmap *merge_ewah = bitmap_to_ewah(merge);
 
 		pseudo_merge_ofs[i] = hashfile_total(f);
 
-		dump_bitmap(f, commits_bitmap[i]);
+		dump_bitmap(f, commits_ewah);
 		dump_bitmap(f, merge_ewah);
 
+		ewah_free(commits_ewah);
 		ewah_free(merge_ewah);
 	}
 
@@ -931,6 +933,9 @@ static void write_pseudo_merges(struct hashfile *f)
 	hashwrite_be32(f, writer.pseudo_merge_commits_nr);
 	hashwrite_be64(f, table_start - start);
 	hashwrite_be64(f, hashfile_total(f) - start + sizeof(uint64_t));
+
+	for (i = 0; i < writer.pseudo_merge_nr; i++)
+		bitmap_free(commits_bitmap[i]);
 
 	free(pseudo_merge_ofs);
 	free(commits_bitmap);
