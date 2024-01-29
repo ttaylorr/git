@@ -1431,21 +1431,28 @@ static int pseudo_merge_ext_at(struct bitmap_index *bitmap_git,
 
 static unsigned apply_pseudo_merge_1(struct bitmap_index *bitmap_git,
 				     struct bitmap *result,
+				     struct bitmap *roots,
 				     struct pseudo_merge *merge)
 {
-	if (merge->satisfied || !ewah_bitmap_is_subset(merge->commits, result))
+	if (merge->satisfied)
+		return 0;
+
+	if (!ewah_bitmap_is_subset(merge->commits, roots ? roots : result))
 		return 0;
 
 	pseudo_merges_satisfied_nr++;
 
 	bitmap_or_ewah(result, pseudo_merge_bitmap(bitmap_git, merge));
+	if (roots)
+		bitmap_or_ewah(roots, pseudo_merge_bitmap(bitmap_git, merge));
 	merge->satisfied = 1;
 
 	return 1;
 }
 
 static unsigned cascade_pseudo_merges(struct bitmap_index *bitmap_git,
-				      struct bitmap *result)
+				      struct bitmap *result,
+				      struct bitmap *roots)
 {
 	unsigned any_satisfied;
 	unsigned ret = 0;
@@ -1460,7 +1467,8 @@ static unsigned cascade_pseudo_merges(struct bitmap_index *bitmap_git,
 			merge = use_pseudo_merge(bitmap_git, i);
 
 			any_satisfied |= apply_pseudo_merge_1(bitmap_git,
-							      result, merge);
+							      result, roots,
+							      merge);
 		}
 
 		ret |= any_satisfied;
@@ -1509,7 +1517,8 @@ static unsigned apply_pseudo_merges_for_commit(struct bitmap_index *bitmap_git,
 				return 0;
 
 			any_satisfied |= apply_pseudo_merge_1(bitmap_git,
-							      result, merge);
+							      result, NULL,
+							      merge);
 		}
 	} else {
 		merge = pseudo_merge_at(bitmap_git, &commit->object.oid,
@@ -1517,11 +1526,12 @@ static unsigned apply_pseudo_merges_for_commit(struct bitmap_index *bitmap_git,
 		if (!merge)
 			return 0;
 
-		any_satisfied |= apply_pseudo_merge_1(bitmap_git, result, merge);
+		any_satisfied |= apply_pseudo_merge_1(bitmap_git, result, NULL,
+						      merge);
 	}
 
 	if (any_satisfied)
-		cascade_pseudo_merges(bitmap_git, result);
+		cascade_pseudo_merges(bitmap_git, result, NULL);
 
 	return any_satisfied;
 }
@@ -1553,9 +1563,8 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 			bitmap_set(roots_bitmap, pos);
 		}
 
-		if (cascade_pseudo_merges(bitmap_git, roots_bitmap))
-			base = roots_bitmap;
-		else
+		base = bitmap_new();
+		if (!cascade_pseudo_merges(bitmap_git, base, roots_bitmap))
 			bitmap_free(roots_bitmap);
 	}
 
