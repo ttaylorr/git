@@ -1543,6 +1543,7 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 {
 	struct bitmap *base = NULL;
 	int needs_walk = 0;
+	unsigned existing_bitmaps = 0;
 
 	struct object_list *not_mapped = NULL;
 
@@ -1592,6 +1593,7 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 		if (object->type == OBJ_COMMIT &&
 		    add_commit_to_bitmap(bitmap_git, &base, (struct commit *)object)) {
 			object->flags |= SEEN;
+			existing_bitmaps = 1;
 			continue;
 		}
 
@@ -1606,7 +1608,9 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 		return base;
 
 	roots = not_mapped;
-	cascade_pseudo_merges(bitmap_git, base);
+
+	if (existing_bitmaps)
+		cascade_pseudo_merges(bitmap_git, base, NULL);
 
 	/*
 	 * Let's iterate through all the roots that don't have bitmaps to
