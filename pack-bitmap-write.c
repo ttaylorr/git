@@ -59,11 +59,12 @@ struct bitmap_writer {
 	struct bitmapped_commit *selected;
 	size_t selected_nr, selected_alloc;
 
-	int max_pseudo_merges;
-	int min_pseudo_merge_size;
-
 	struct commit **pseudo_merge;
 	uint32_t pseudo_merge_nr;
+
+	float pseudo_merge_decay;
+	int pseudo_merge_groups;
+	int pseudo_merge_sample_rate;
 
 	struct pseudo_merge_commit *pseudo_merge_commits;
 	uint32_t pseudo_merge_commits_nr;
@@ -80,26 +81,46 @@ static inline int bitmap_writer_selected_nr(void)
 	return writer.selected_nr - writer.pseudo_merge_nr;
 }
 
-#define DEFAULT_MAX_PSEUDO_MERGES 128
-#define DEFAULT_MIN_PSEUDO_MERGE_SIZE 32
+#define DEFAULT_PSEUDO_MERGE_DECAY 200
+#define DEFAULT_PSEUDO_MERGE_GROUPS 64
+#define DEFAULT_PSEUDO_MERGE_SAMPLE_RATE 100
 
 void bitmap_writer_init(struct repository *r)
 {
+	int pseudo_merge_decay = DEFAULT_PSEUDO_MERGE_DECAY;
+	int pseudo_merge_groups = DEFAULT_PSEUDO_MERGE_GROUPS;
+	int pseudo_merge_sample_rate = DEFAULT_PSEUDO_MERGE_SAMPLE_RATE;
+
 	writer.bitmaps = kh_init_oid_map();
 
-	writer.max_pseudo_merges = DEFAULT_MAX_PSEUDO_MERGES;
-	writer.min_pseudo_merge_size = DEFAULT_MIN_PSEUDO_MERGE_SIZE;
+	repo_config_get_int(r, "pack.bitmappseudomergedecay",
+			    &pseudo_merge_decay);
+	repo_config_get_int(r, "pack.bitmappseudomergegroups",
+			    &pseudo_merge_groups);
+	repo_config_get_int(r, "pack.bitmappseudomergesamplerate",
+			    &pseudo_merge_sample_rate);
 
-	repo_config_get_int(r, "pack.bitmapmaxpseudomerges",
-			    &writer.max_pseudo_merges);
-	repo_config_get_int(r, "pack.bitmapminpseudomergesize",
-			    &writer.min_pseudo_merge_size);
-
-	if (writer.min_pseudo_merge_size <= 0) {
-		warning(_("pack.bitmapMinPseudoMergeSize must be positive, "
+	if (pseudo_merge_decay < 0) {
+		warning(_("pack.bitmapMinPseudoMergeDecay must be non-negative, "
 			  "using default"));
-		writer.min_pseudo_merge_size = DEFAULT_MIN_PSEUDO_MERGE_SIZE;
+		pseudo_merge_decay = DEFAULT_PSEUDO_MERGE_DECAY;
 	}
+
+	if (pseudo_merge_groups < 0) {
+		warning(_("pack.bitmapMinPseudoMergeGroups must be non-negative, "
+			  "using default"));
+		pseudo_merge_groups = DEFAULT_PSEUDO_MERGE_GROUPS;
+	}
+
+	if (!(0 <= pseudo_merge_sample_rate && pseudo_merge_sample_rate <= 100)) {
+		warning(_("pack.bitmapMinPseudoMergeSampleRate must be between 0 and 100, "
+			  "using default"));
+		pseudo_merge_sample_rate = DEFAULT_PSEUDO_MERGE_SAMPLE_RATE;
+	}
+
+	writer.pseudo_merge_decay = (float)pseudo_merge_decay / 100.0f;
+	writer.pseudo_merge_groups = pseudo_merge_groups;
+	writer.pseudo_merge_sample_rate = pseudo_merge_sample_rate;
 }
 
 void bitmap_writer_show_progress(int show)
@@ -676,81 +697,133 @@ static int date_compare(const void *_a, const void *_b)
 	return (long)b->date - (long)a->date;
 }
 
+static float gitexp(float base, int exp)
+{
+	float result = 1;
+	while (1) {
+		if (exp % 2)
+			result *= base;
+		exp >>= 1;
+		if (!exp)
+			break;
+		base *= base;
+	}
+	return result;
+}
+
+static int bitmap_writer_pseudo_merge_size(uint32_t n)
+{
+	float C = 0.0f;
+	uint32_t i;
+
+	/*
+	 * The size of pseudo-merge groups decays according to a power series,
+	 * which looks like:
+	 *
+	 *   f(n) = C / n^k
+	 *
+	 * , where 'n' is the n-th pseudo-merge group, 'f(n)' is its size, 'k'
+	 * is the decay rate, and 'C' is a scaling value.
+	 *
+	 * The value of C depends on the number of groups, decay rate, and total
+	 * number of commits. It is computed such that if there are M and N
+	 * total groups and commits, respectively, that:
+	 *
+	 *   N = f(0) + f(1) + ... f(M-1)
+	 *
+	 * Rearranging to isolate C, we get:
+	 *
+	 *   N = \sum_{i=1}^M C / n^k
+	 *
+	 *   N / C = \sum_{i=1}^M n^-k
+	 *
+	 *   C = N / \sum_{i=1}^M n^-k
+	 *
+	 * For example, if we have a decay rate of 'k' being equal to 1.5, 'N'
+	 * total commits equal to 10,000, and 'M' being equal to 6 groups, then
+	 * the (rounded) group sizes are:
+	 *
+	 *   { 5469, 1934, 1053, 684, 489, 372 }
+	 *
+	 * increasing the number of total groups, say to 10, scales the group
+	 * sizes appropriately:
+	 *
+	 *   { 5012, 1772, 964, 626, 448, 341, 271, 221, 186, 158 }
+	 */
+	for (i = 0; i < writer.pseudo_merge_groups; i++)
+		C += 1.0f / gitexp(i + 1, writer.pseudo_merge_decay);
+	C = writer.pseudo_merge_commits_nr / C;
+
+	return (int)((C / gitexp(n + 1, writer.pseudo_merge_decay)) + 0.5);
+}
+
+#define MIN_PSEUDO_MERGE_SIZE (8)
+
 static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 					       size_t commits_nr)
 {
 	size_t *tips = NULL;
-	size_t tips_nr = 0, tips_alloc = 0, i;
-	uint32_t pseudo_merge_size;
+	size_t tips_alloc = 0;
+	uint32_t i, j;
 
-	if (!writer.max_pseudo_merges)
+	if (!writer.pseudo_merge_groups)
 		return;
 
 	if (writer.show_progress)
-		writer.progress = start_progress("Selecting pseudo-merge bitmap commits", 0);
+		writer.progress = start_progress("Selecting pseudo-merge "
+						 "bitmap commits", 0);
 
 	for (i = 0; i < commits_nr; i++) {
 		struct commit *c = commits[i];
 		if (!(c->object.flags & BITMAP_TIP) || has_bitmapped_commit(c))
 			continue;
 
-		ALLOC_GROW(tips, tips_nr + 1, tips_alloc);
-		tips[tips_nr++] = i;
+		if (!(i % (100 / writer.pseudo_merge_sample_rate))) {
+			ALLOC_GROW(tips, writer.pseudo_merge_commits_nr + 1,
+				   tips_alloc);
+			tips[writer.pseudo_merge_commits_nr++] = i;
+		}
 	}
-	if (!tips_nr)
+	if (!writer.pseudo_merge_commits_nr)
 		goto done; /* all tips have bitmaps, no pseudo-merges */
 
-	if (writer.min_pseudo_merge_size >= 0) {
-		writer.pseudo_merge_nr = tips_nr / writer.min_pseudo_merge_size;
-		if (tips_nr % writer.min_pseudo_merge_size)
-			writer.pseudo_merge_nr++;
-
-		if (0 < writer.max_pseudo_merges &&
-		    writer.max_pseudo_merges < writer.pseudo_merge_nr)
-			writer.pseudo_merge_nr = writer.max_pseudo_merges;
-	} else {
-		writer.pseudo_merge_nr = writer.max_pseudo_merges;
-	}
-	pseudo_merge_size = tips_nr / writer.pseudo_merge_nr;
-
-	if (!writer.pseudo_merge_nr || !pseudo_merge_size)
-		goto done;
-
-	writer.pseudo_merge_commits_nr = tips_nr;
-
-	CALLOC_ARRAY(writer.pseudo_merge, writer.pseudo_merge_nr);
+	CALLOC_ARRAY(writer.pseudo_merge, writer.pseudo_merge_groups);
 	CALLOC_ARRAY(writer.pseudo_merge_commits, writer.pseudo_merge_commits_nr);
 
-	for (i = 0; i < writer.pseudo_merge_nr; i++) {
-		struct commit *merge;
-		struct commit_list **next;
-		uint32_t start, end, j;
+	for (i = 0, j = 0; i < writer.pseudo_merge_groups; i++) {
+		struct commit_list **p;
+		uint32_t end;
+		int size = bitmap_writer_pseudo_merge_size(i);
 
-		merge = writer.pseudo_merge[i] = alloc_commit_node(the_repository);
-		next = &merge->parents;
+		writer.pseudo_merge[i] = alloc_commit_node(the_repository);
+		p = &writer.pseudo_merge[i]->parents;
 
-		start = i * pseudo_merge_size;
-		if (i == writer.pseudo_merge_nr - 1)
-			end = tips_nr;
-		else
-			end = start + pseudo_merge_size;
+		end = size < MIN_PSEUDO_MERGE_SIZE
+			? writer.pseudo_merge_commits_nr : j + size;
 
-		for (j = start; j < end; j++) {
-			struct pseudo_merge_commit *pmc = &writer.pseudo_merge_commits[j];
+		for (; j < end; j++) {
 			struct commit *c = commits[tips[j]];
+			struct pseudo_merge_commit *pmc;
+
+			pmc = &writer.pseudo_merge_commits[j];
 
 			ALLOC_GROW(pmc->pseudo_merge, pmc->nr + 1, pmc->alloc);
 
 			pmc->oid = &c->object.oid;
 			pmc->pseudo_merge[pmc->nr++] = i;
 
-			next = commit_list_append(c, next);
+			p = commit_list_append(c, p);
 		}
 
-		merge->object.parsed = 1;
-		merge->object.flags |= BITMAP_PSEUDO_MERGE;
+		writer.pseudo_merge[i]->object.parsed = 1;
+		writer.pseudo_merge[i]->object.flags |= BITMAP_PSEUDO_MERGE;
 
-		push_bitmapped_commit(merge, i);
+		push_bitmapped_commit(writer.pseudo_merge[i], i);
+
+		writer.pseudo_merge_nr++;
+
+		if (end >= writer.pseudo_merge_commits_nr)
+			break;
 	}
 
 	QSORT(writer.pseudo_merge_commits,
@@ -882,10 +955,9 @@ static void write_pseudo_merges(struct hashfile *f)
 
 		commits_bitmap[i] = bitmap_new();
 
-		for (p = merge->commit->parents; p; p = p->next) {
+		for (p = merge->commit->parents; p; p = p->next)
 			bitmap_set(commits_bitmap[i],
 				   find_object_pos(&p->item->object.oid, NULL));
-		}
 	}
 
 	start = hashfile_total(f);
