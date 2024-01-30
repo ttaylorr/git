@@ -65,6 +65,7 @@ struct bitmap_writer {
 	float pseudo_merge_decay;
 	int pseudo_merge_groups;
 	int pseudo_merge_sample_rate;
+	timestamp_t pseudo_merge_threshold;
 
 	struct pseudo_merge_commit *pseudo_merge_commits;
 	uint32_t pseudo_merge_commits_nr;
@@ -84,12 +85,14 @@ static inline int bitmap_writer_selected_nr(void)
 #define DEFAULT_PSEUDO_MERGE_DECAY 200
 #define DEFAULT_PSEUDO_MERGE_GROUPS 64
 #define DEFAULT_PSEUDO_MERGE_SAMPLE_RATE 100
+#define DEFAULT_PSEUDO_MERGE_THRESHOLD "1.week.ago"
 
 void bitmap_writer_init(struct repository *r)
 {
 	int pseudo_merge_decay = DEFAULT_PSEUDO_MERGE_DECAY;
 	int pseudo_merge_groups = DEFAULT_PSEUDO_MERGE_GROUPS;
 	int pseudo_merge_sample_rate = DEFAULT_PSEUDO_MERGE_SAMPLE_RATE;
+	const char *pseudo_merge_threshold = DEFAULT_PSEUDO_MERGE_THRESHOLD;
 
 	writer.bitmaps = kh_init_oid_map();
 
@@ -99,6 +102,8 @@ void bitmap_writer_init(struct repository *r)
 			    &pseudo_merge_groups);
 	repo_config_get_int(r, "pack.bitmappseudomergesamplerate",
 			    &pseudo_merge_sample_rate);
+	repo_config_get_expiry(r, "pack.bitmappseudomergethreshold",
+			       &pseudo_merge_threshold);
 
 	if (pseudo_merge_decay < 0) {
 		warning(_("pack.bitmapMinPseudoMergeDecay must be non-negative, "
@@ -121,6 +126,7 @@ void bitmap_writer_init(struct repository *r)
 	writer.pseudo_merge_decay = (float)pseudo_merge_decay / 100.0f;
 	writer.pseudo_merge_groups = pseudo_merge_groups;
 	writer.pseudo_merge_sample_rate = pseudo_merge_sample_rate;
+	writer.pseudo_merge_threshold = approxidate(pseudo_merge_threshold);
 }
 
 void bitmap_writer_show_progress(int show)
@@ -776,6 +782,8 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 	for (i = 0; i < commits_nr; i++) {
 		struct commit *c = commits[i];
 		if (!(c->object.flags & BITMAP_TIP) || has_bitmapped_commit(c))
+			continue;
+		if (c->date > writer.pseudo_merge_threshold)
 			continue;
 
 		if (!(i % (100 / writer.pseudo_merge_sample_rate))) {
