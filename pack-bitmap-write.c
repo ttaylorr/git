@@ -711,16 +711,16 @@ static float gitexp(float base, int exp)
 	return result;
 }
 
-static int bitmap_writer_pseudo_merge_size(uint32_t n)
+static int bitmap_writer_pseudo_merge_size(uint32_t i)
 {
 	float C = 0.0f;
-	uint32_t i;
+	uint32_t n;
 
 	/*
 	 * The size of pseudo-merge groups decays according to a power series,
 	 * which looks like:
 	 *
-	 *   f(n) = C / n^k
+	 *   f(n) = C * n^-k
 	 *
 	 * , where 'n' is the n-th pseudo-merge group, 'f(n)' is its size, 'k'
 	 * is the decay rate, and 'C' is a scaling value.
@@ -733,11 +733,11 @@ static int bitmap_writer_pseudo_merge_size(uint32_t n)
 	 *
 	 * Rearranging to isolate C, we get:
 	 *
-	 *   N = \sum_{i=1}^M C / n^k
+	 *   N = \sum_{n=1}^M C / n^k
 	 *
-	 *   N / C = \sum_{i=1}^M n^-k
+	 *   N / C = \sum_{n=1}^M n^-k
 	 *
-	 *   C = N / \sum_{i=1}^M n^-k
+	 *   C = N / \sum_{n=1}^M n^-k
 	 *
 	 * For example, if we have a decay rate of 'k' being equal to 1.5, 'N'
 	 * total commits equal to 10,000, and 'M' being equal to 6 groups, then
@@ -750,11 +750,11 @@ static int bitmap_writer_pseudo_merge_size(uint32_t n)
 	 *
 	 *   { 5012, 1772, 964, 626, 448, 341, 271, 221, 186, 158 }
 	 */
-	for (i = 0; i < writer.pseudo_merge_groups; i++)
-		C += 1.0f / gitexp(i + 1, writer.pseudo_merge_decay);
+	for (n = 0; n < writer.pseudo_merge_groups; n++)
+		C += 1.0f / gitexp(n + 1, writer.pseudo_merge_decay);
 	C = writer.pseudo_merge_commits_nr / C;
 
-	return (int)((C / gitexp(n + 1, writer.pseudo_merge_decay)) + 0.5);
+	return (int)((C / gitexp(i + 1, writer.pseudo_merge_decay)) + 0.5);
 }
 
 #define MIN_PSEUDO_MERGE_SIZE (8)
