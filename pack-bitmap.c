@@ -137,6 +137,7 @@ struct bitmap_index {
 };
 
 static int pseudo_merges_satisfied_nr;
+static int pseudo_merges_cascades_nr;
 static int should_include_nr;
 static int should_include_obj_nr;
 static int existing_bitmaps_hits_nr;
@@ -1471,6 +1472,9 @@ static unsigned cascade_pseudo_merges(struct bitmap_index *bitmap_git,
 							      merge);
 		}
 
+		if (any_satisfied)
+			pseudo_merges_cascades_nr++;
+
 		ret |= any_satisfied;
 	} while (any_satisfied);
 
@@ -2202,6 +2206,8 @@ struct bitmap_index *prepare_bitmap_walk(struct rev_info *revs,
 
 	trace2_data_intmax("bitmap", the_repository, "pseudo_merges_satisfied",
 			   pseudo_merges_satisfied_nr);
+	trace2_data_intmax("bitmap", the_repository, "pseudo_merges_cascades",
+			   pseudo_merges_cascades_nr);
 	trace2_data_intmax("bitmap", the_repository, "fill_in/commits",
 			   should_include_nr);
 	trace2_data_intmax("bitmap", the_repository, "fill_in/objects",
