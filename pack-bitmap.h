@@ -113,6 +113,8 @@ int rebuild_bitmap(const uint32_t *reposition,
 		   struct bitmap *dest);
 struct ewah_bitmap *bitmap_for_commit(struct bitmap_index *bitmap_git,
 				      struct commit *commit);
+struct ewah_bitmap *pseudo_merge_bitmap_for_commit(struct bitmap_index *bitmap_git,
+						   struct commit *commit);
 void bitmap_writer_select_commits(struct commit **indexed_commits,
 				  size_t indexed_commits_nr);
 int bitmap_writer_build(struct packing_data *to_pack);

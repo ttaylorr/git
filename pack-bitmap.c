@@ -41,7 +41,7 @@ struct pseudo_merge {
 
 	unsigned satisfied : 1,
 		 loaded_commits : 1,
-		 loaded_bitmap;
+		 loaded_bitmap : 1;
 };
 
 /*
@@ -1481,6 +1481,15 @@ static unsigned cascade_pseudo_merges(struct bitmap_index *bitmap_git,
 	return ret;
 }
 
+static struct pseudo_merge_commit *find_pseudo_merge(struct bitmap_index *bitmap_git,
+						     uint32_t commit_pos)
+{
+	return bsearch(&commit_pos, bitmap_git->pseudo_merge_commits,
+		       bitmap_git->pseudo_merge_commits_nr,
+		       PSEUDO_MERGE_COMMIT_RAWSZ,
+		       pseudo_merge_commit_cmp);
+}
+
 static unsigned apply_pseudo_merges_for_commit(struct bitmap_index *bitmap_git,
 					       struct bitmap *result,
 					       struct commit *commit,
@@ -1490,12 +1499,7 @@ static unsigned apply_pseudo_merges_for_commit(struct bitmap_index *bitmap_git,
 	struct pseudo_merge *merge;
 	unsigned any_satisfied = 0;
 
-	merge_commit = bsearch(&commit_pos,
-			       bitmap_git->pseudo_merge_commits,
-			       bitmap_git->pseudo_merge_commits_nr,
-			       PSEUDO_MERGE_COMMIT_RAWSZ,
-			       pseudo_merge_commit_cmp);
-
+	merge_commit = find_pseudo_merge(bitmap_git, commit_pos);
 	if (!merge_commit)
 		return 0;
 
@@ -1538,6 +1542,79 @@ static unsigned apply_pseudo_merges_for_commit(struct bitmap_index *bitmap_git,
 		cascade_pseudo_merges(bitmap_git, result, NULL);
 
 	return any_satisfied;
+}
+
+struct ewah_bitmap *pseudo_merge_bitmap_for_commit(struct bitmap_index *bitmap_git,
+						   struct commit *commit)
+{
+	struct bitmap *commit_bitmap;
+	struct commit_list *p;
+	struct pseudo_merge *match = NULL;
+	size_t i;
+
+	if (!bitmap_git->pseudo_merge_nr)
+		return NULL;
+
+	commit_bitmap = bitmap_new();
+
+	for (p = commit->parents; p; p = p->next) {
+		int pos = bitmap_position(bitmap_git, &p->item->object.oid);
+		if (pos < 0 || pos >= bitmap_num_objects(bitmap_git))
+			goto done;
+
+		bitmap_set(commit_bitmap, pos);
+	}
+
+	/*
+	 * NOTE: this loop is quadratic in the worst-case (where no
+	 * matching pseudo-merge bitmaps are found), but in practice
+	 * this is OK for a few reasons:
+	 *
+	 *   - Rejecting pseudo-merge bitmaps that do not match the
+	 *     given commit is done quickly (i.e. `bitmap_equals_ewah()`
+	 *     returns early when we know the two bitmaps aren't equal.
+	 *
+	 *   - Already matched pseudo-merge bitmaps (which we track with
+	 *     the `->satisfied` bit here) are skipped as potential
+	 *     candidates.
+	 *
+	 *   - The number of pseudo-merges should be small (in the
+	 *     hundreds for most repositories).
+	 *
+	 * If in the future this semi-quadratic behavior does become a
+	 * problem, another approach would be to keep track of which
+	 * pseudo-merges are still "viable" after enumerating the
+	 * pseudo-merge commit's parents:
+	 *
+	 *   - A pseudo-merge bitmap becomes non-viable when the bit(s)
+	 *     corresponding to one or more parent(s) of the given
+	 *     commit are not set in a candidate pseudo-merge's commits
+	 *     bitmap.
+	 *
+	 *   - After processing all bits, enumerate the remaining set of
+	 *     viable pseudo-merge bitmaps, and check that their
+	 *     popcount() matches the number of parents in the given
+	 *     commit.
+	 */
+	for (i = 0; i < bitmap_git->pseudo_merge_nr; i++) {
+		struct pseudo_merge *candidate = use_pseudo_merge(bitmap_git, i);
+		if (!candidate || candidate->satisfied)
+			continue;
+		if (!bitmap_equals_ewah(commit_bitmap, candidate->commits))
+			continue;
+
+		match = candidate;
+		break;
+	}
+
+done:
+	bitmap_free(commit_bitmap);
+
+	if (match) {
+		match->satisfied = 1;
+		return pseudo_merge_bitmap(bitmap_git, match);
+	}
+	return NULL;
 }
 
 static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
