@@ -775,7 +775,7 @@ static int bitmap_writer_pseudo_merge_size(uint32_t i)
 	return (int)((C / gitexp(i + 1, writer.pseudo_merge_decay)) + 0.5);
 }
 
-#define MIN_PSEUDO_MERGE_SIZE (8)
+#define MIN_PSEUDO_MERGE_SIZE 8
 
 static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 					       size_t commits_nr)
