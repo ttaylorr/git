@@ -791,14 +791,14 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 		writer.progress = start_progress("Selecting pseudo-merge "
 						 "bitmap commits", 0);
 
-	for (i = 0; i < commits_nr; i++) {
+	for (i = 0, j = 0; i < commits_nr; i++) {
 		struct commit *c = commits[i];
 		if (!(c->object.flags & BITMAP_TIP) || has_bitmapped_commit(c))
 			continue;
 		if (c->date > writer.pseudo_merge_threshold)
 			continue;
 
-		if (!(i % (100 / writer.pseudo_merge_sample_rate))) {
+		if (!(j++ % (100 / writer.pseudo_merge_sample_rate))) {
 			ALLOC_GROW(tips, writer.pseudo_merge_commits_nr + 1,
 				   tips_alloc);
 			tips[writer.pseudo_merge_commits_nr++] = i;
