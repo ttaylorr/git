@@ -82,7 +82,7 @@ static inline int bitmap_writer_selected_nr(void)
 	return writer.selected_nr - writer.pseudo_merge_nr;
 }
 
-#define DEFAULT_PSEUDO_MERGE_DECAY 200
+#define DEFAULT_PSEUDO_MERGE_DECAY 100
 #define DEFAULT_PSEUDO_MERGE_GROUPS 64
 #define DEFAULT_PSEUDO_MERGE_SAMPLE_RATE 100
 #define DEFAULT_PSEUDO_MERGE_THRESHOLD "1.week.ago"
