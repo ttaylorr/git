@@ -835,6 +835,9 @@ static void bitmap_writer_select_pseudo_merges(struct commit **commits,
 			p = commit_list_append(c, p);
 		}
 
+		warning("pseudo-merge: %d [%d]", end, size <
+			MIN_PSEUDO_MERGE_SIZE ? MIN_PSEUDO_MERGE_SIZE : size);
+
 		writer.pseudo_merge[i]->object.parsed = 1;
 		writer.pseudo_merge[i]->object.flags |= BITMAP_PSEUDO_MERGE;
 
