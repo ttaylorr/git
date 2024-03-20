@@ -17,6 +17,7 @@
 #include "trace2.h"
 #include "tree.h"
 #include "tree-walk.h"
+#include "pseudo-merge.h"
 
 struct bitmapped_commit {
 	struct commit *commit;
@@ -39,6 +40,8 @@ struct bitmap_writer {
 	struct bitmapped_commit *selected;
 	unsigned int selected_nr, selected_alloc;
 
+	struct string_list pseudo_merge_groups;
+	kh_oid_map_t *pseudo_merge_commits; /* oid -> pseudo merge(s) */
 	uint32_t pseudo_merges_nr;
 
 	struct progress *progress;
@@ -56,6 +59,11 @@ static inline int bitmap_writer_selected_nr(void)
 void bitmap_writer_init(struct repository *r)
 {
 	writer.bitmaps = kh_init_oid_map();
+	writer.pseudo_merge_commits = kh_init_oid_map();
+
+	string_list_init_dup(&writer.pseudo_merge_groups);
+
+	load_pseudo_merges_from_config(&writer.pseudo_merge_groups);
 }
 
 void bitmap_writer_show_progress(int show)
@@ -686,6 +694,12 @@ void bitmap_writer_select_commits(struct commit **indexed_commits,
 	}
 
 	stop_progress(&writer.progress);
+
+	select_pseudo_merges(&writer.pseudo_merge_groups,
+			     indexed_commits, indexed_commits_nr,
+			     writer.pseudo_merge_commits,
+			     &writer.pseudo_merges_nr,
+			     writer.show_progress);
 }
 
 
