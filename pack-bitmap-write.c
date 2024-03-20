@@ -132,8 +132,8 @@ int bitmap_writer_has_bitmapped_object_id(const struct object_id *oid)
  * Compute the actual bitmaps
  */
 
-static void bitmap_writer_push_bitmapped_commit(struct commit *commit,
-						unsigned pseudo_merge)
+void bitmap_writer_push_bitmapped_commit(struct commit *commit,
+					 unsigned pseudo_merge)
 {
 	if (writer.selected_nr >= writer.selected_alloc) {
 		writer.selected_alloc = (writer.selected_alloc + 32) * 2;

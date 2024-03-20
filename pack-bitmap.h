@@ -99,6 +99,8 @@ int bitmap_has_oid_in_uninteresting(struct bitmap_index *, const struct object_i
 off_t get_disk_usage_from_bitmap(struct bitmap_index *, struct rev_info *);
 
 int bitmap_writer_has_bitmapped_object_id(const struct object_id *oid);
+void bitmap_writer_push_bitmapped_commit(struct commit *commit,
+					 unsigned pseudo_merge);
 
 void bitmap_writer_init(struct repository *r);
 void bitmap_writer_show_progress(int show);
