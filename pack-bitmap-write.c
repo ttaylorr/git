@@ -19,6 +19,10 @@
 #include "tree-walk.h"
 #include "pseudo-merge.h"
 #include "oid-array.h"
+#include "config.h"
+#include "alloc.h"
+#include "refs.h"
+#include "strmap.h"
 
 struct bitmapped_commit {
 	struct commit *commit;
@@ -443,6 +447,7 @@ static int fill_bitmap_tree(struct bitmap *bitmap,
 }
 
 static int reused_bitmaps_nr;
+static int reused_pseudo_merge_bitmaps_nr;
 
 static int fill_bitmap_commit(struct bb_commit *ent,
 			      struct commit *commit,
@@ -467,7 +472,7 @@ static int fill_bitmap_commit(struct bb_commit *ent,
 			struct bitmap *remapped = bitmap_new();
 
 			if (commit->object.flags & BITMAP_PSEUDO_MERGE)
-				old = NULL;
+				old = pseudo_merge_bitmap_for_commit(old_bitmap, c);
 			else
 				old = bitmap_for_commit(old_bitmap, c);
 			/*
@@ -478,7 +483,10 @@ static int fill_bitmap_commit(struct bb_commit *ent,
 			if (old && !rebuild_bitmap(mapping, old, remapped)) {
 				bitmap_or(ent->bitmap, remapped);
 				bitmap_free(remapped);
-				reused_bitmaps_nr++;
+				if (commit->object.flags & BITMAP_PSEUDO_MERGE)
+					reused_pseudo_merge_bitmaps_nr++;
+				else
+					reused_bitmaps_nr++;
 				continue;
 			}
 			bitmap_free(remapped);
@@ -604,6 +612,9 @@ int bitmap_writer_build(struct packing_data *to_pack)
 			    the_repository);
 	trace2_data_intmax("pack-bitmap-write", the_repository,
 			   "building_bitmaps_reused", reused_bitmaps_nr);
+	trace2_data_intmax("pack-bitmap-write", the_repository,
+			   "building_bitmaps_pseudo_merge_reused",
+			   reused_pseudo_merge_bitmaps_nr);
 
 	stop_progress(&writer.progress);
 
