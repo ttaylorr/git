@@ -576,6 +576,8 @@ int repo_config_get_maybe_bool(struct repository *repo,
 			       const char *key, int *dest);
 int repo_config_get_pathname(struct repository *repo,
 			     const char *key, const char **dest);
+int repo_config_get_expiry(struct repository *repo,
+			   const char *key, const char **dest);
 
 /*
  * Functions for reading protected config. By definition, protected

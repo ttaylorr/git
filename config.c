@@ -2627,6 +2627,24 @@ int repo_config_get_pathname(struct repository *repo,
 	return ret;
 }
 
+int repo_config_get_expiry(struct repository *repo,
+			   const char *key, const char **dest)
+{
+	int ret;
+
+	git_config_check_init(repo);
+
+	ret = repo_config_get_string(repo, key, (char **)dest);
+	if (ret)
+		return ret;
+	if (strcmp(*dest, "now")) {
+		timestamp_t now = approxidate("now");
+		if (approxidate(*dest) >= now)
+			git_die_config(key, _("Invalid %s: '%s'"), key, *dest);
+	}
+	return ret;
+}
+
 /* Read values into protected_config. */
 static void read_protected_config(void)
 {
