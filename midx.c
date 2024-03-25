@@ -1764,16 +1764,6 @@ int write_midx_file(const char *object_dir,
 				   refs_snapshot, flags);
 }
 
-int write_midx_file_only(const char *object_dir,
-			 struct string_list *packs_to_include,
-			 const char *preferred_pack_name,
-			 const char *refs_snapshot,
-			 unsigned flags)
-{
-	return write_midx_internal(object_dir, packs_to_include, NULL,
-				   preferred_pack_name, refs_snapshot, flags);
-}
-
 struct clear_midx_data {
 	char *keep;
 	const char *ext;

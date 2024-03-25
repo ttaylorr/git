@@ -18,6 +18,16 @@ extern int write_midx_internal(const char *object_dir,
 extern struct multi_pack_index *lookup_multi_pack_index(struct repository *r,
 							const char *object_dir);
 
+int write_midx_file_only(const char *object_dir,
+			 struct string_list *packs_to_include,
+			 const char *preferred_pack_name,
+			 const char *refs_snapshot,
+			 unsigned flags)
+{
+	return write_midx_internal(object_dir, packs_to_include, NULL,
+				   preferred_pack_name, refs_snapshot, flags);
+}
+
 int expire_midx_packs(struct repository *r, const char *object_dir, unsigned flags)
 {
 	uint32_t i, *count, result = 0;
