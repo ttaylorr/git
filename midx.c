@@ -23,6 +23,16 @@
 #include "list-objects.h"
 #include "pack-revindex.h"
 
+struct multi_pack_index *lookup_multi_pack_index(struct repository *r,
+							const char *object_dir);
+
+int write_midx_internal(const char *object_dir,
+			       struct string_list *packs_to_include,
+			       struct string_list *packs_to_drop,
+			       const char *preferred_pack_name,
+			       const char *refs_snapshot,
+			       unsigned flags);
+
 #define MIDX_SIGNATURE 0x4d494458 /* "MIDX" */
 #define MIDX_VERSION 1
 #define MIDX_BYTE_FILE_VERSION 4
@@ -1347,7 +1357,7 @@ cleanup:
 	return ret;
 }
 
-static struct multi_pack_index *lookup_multi_pack_index(struct repository *r,
+struct multi_pack_index *lookup_multi_pack_index(struct repository *r,
 							const char *object_dir)
 {
 	struct multi_pack_index *result = NULL;
@@ -1372,12 +1382,12 @@ cleanup:
 	return result;
 }
 
-static int write_midx_internal(const char *object_dir,
-			       struct string_list *packs_to_include,
-			       struct string_list *packs_to_drop,
-			       const char *preferred_pack_name,
-			       const char *refs_snapshot,
-			       unsigned flags)
+int write_midx_internal(const char *object_dir,
+			struct string_list *packs_to_include,
+			struct string_list *packs_to_drop,
+			const char *preferred_pack_name,
+			const char *refs_snapshot,
+			unsigned flags)
 {
 	struct strbuf midx_name = STRBUF_INIT;
 	unsigned char midx_hash[GIT_MAX_RAWSZ];
