@@ -1446,7 +1446,6 @@ int midx_repack(struct repository *r, const char *object_dir, size_t batch_size,
 	unsigned char *include_pack;
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	FILE *cmd_in;
-	struct strbuf base_name = STRBUF_INIT;
 	struct multi_pack_index *m = lookup_multi_pack_index(r, object_dir);
 
 	/*
@@ -1473,10 +1472,6 @@ int midx_repack(struct repository *r, const char *object_dir, size_t batch_size,
 
 	strvec_push(&cmd.args, "pack-objects");
 
-	strbuf_addstr(&base_name, object_dir);
-	strbuf_addstr(&base_name, "/pack/pack");
-	strvec_push(&cmd.args, base_name.buf);
-
 	if (delta_base_offset)
 		strvec_push(&cmd.args, "--delta-base-offset");
 	if (use_delta_islands)
@@ -1487,7 +1482,7 @@ int midx_repack(struct repository *r, const char *object_dir, size_t batch_size,
 	else
 		strvec_push(&cmd.args, "-q");
 
-	strbuf_release(&base_name);
+	strvec_pushf(&cmd.args, "%s/pack/pack", object_dir);
 
 	cmd.git_cmd = 1;
 	cmd.in = cmd.out = -1;
