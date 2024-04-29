@@ -441,3 +441,13 @@ void select_pseudo_merges(struct string_list *list,
 
 	stop_progress(&progress);
 }
+
+void free_pseudo_merge_map(struct pseudo_merge_map *pm)
+{
+	uint32_t i;
+	for (i = 0; i < pm->nr; i++) {
+		ewah_pool_free(pm->v[i].commits);
+		ewah_pool_free(pm->v[i].bitmap);
+	}
+	free(pm->v);
+}
