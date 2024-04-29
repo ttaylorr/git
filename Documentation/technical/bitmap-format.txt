@@ -434,3 +434,29 @@ the end of a `.bitmap` file. The format is as follows:
 
 * An 8-byte unsigned value (in network byte-order) equal to the number
   of bytes in the pseudo-merge section (including this field).
+
+=== Pseudo-merge selection
+
+Pseudo-merge commits are selected among non-bitmapped commits at the
+tip of one or more reference(s). In addition, there are a handful of
+constraints to further refine this selection:
+
+`pack.bitmapPseudoMergeDecay`:: Defines the "decay rate", which
+corresponds to how quickly (or not) consecutive pseudo-merges decrease
+in size relative to one another.
+
+`pack.bitmapPseudoMergeGroups`:: Defines the maximum number of
+pseudo-merge groups.
+
+`pack.bitmapPseudoMergeSampleRate`:: Defines the percentage of commits
+(matching the above criteria) which are selected.
+
+`pack.bitmapPseudoMergeThreshold`:: Defines the minimum age of a commit
+in order to be considered for inclusion within one or more pseudo-merge
+bitmaps.
+
+The size of consecutive pseudo-merge groups decays according to a
+power-law decay function, where the size of the `n`-th group is `f(n) =
+C*n^-k`. The value of `C` is chosen accordingly to match the number of
+desired groups, and `k` is 1/100th of the value of
+`pack.bitmapPseudoMergeDecay`.
