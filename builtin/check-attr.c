@@ -190,6 +190,8 @@ int cmd_check_attr(int argc, const char **argv, const char *prefix)
 		if (repo_get_oid_tree(the_repository, source, &initialized_oid))
 			die("%s: not a valid tree-ish source", source);
 		set_git_attr_source(source);
+	} else if (startup_info->have_repository && is_bare_repository()) {
+		git_attr_tree = "HEAD";
 	}
 
 	if (stdin_paths)
