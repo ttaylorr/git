@@ -125,6 +125,35 @@ int git_parse_ssize_t(const char *value, ssize_t *ret)
 	return 1;
 }
 
+int git_parse_float(const char *value, float *ret)
+{
+	char *end;
+	float val;
+	uintmax_t factor;
+
+	if (!value || !*value) {
+		errno = EINVAL;
+		return 0;
+	}
+
+	errno = 0;
+	val = strtof(value, &end);
+	if (errno == ERANGE)
+		return 0;
+	if (end == value) {
+		errno = EINVAL;
+		return 0;
+	}
+	factor = get_unit_factor(end);
+	if (!factor) {
+		errno = EINVAL;
+		return 0;
+	}
+	val *= factor;
+	*ret = val;
+	return 1;
+}
+
 int git_parse_maybe_bool_text(const char *value)
 {
 	if (!value)
