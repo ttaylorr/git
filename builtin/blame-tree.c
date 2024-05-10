@@ -58,7 +58,7 @@ int cmd_blame_tree(int argc, const char **argv, const char *prefix,
 				  &skip_read_cache) && skip_read_cache)
 		flags |= BLAME_TREE_SKIP_CACHE;
 
-	blame_tree_init(&bt, flags, argc, argv, prefix);
+	blame_tree_init(repo, &bt, flags, argc, argv, prefix);
 	if (blame_tree_run(&bt) < 0)
 		die("error running blame-tree traversal");
 	if (blame_tree_release(&bt))

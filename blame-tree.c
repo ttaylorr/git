@@ -443,10 +443,9 @@ static int blame_tree_entry_hashcmp(const void *unused UNUSED,
 	return strcmp(e1->path, path ? path : e2->path);
 }
 
-void blame_tree_init(struct blame_tree *bt, int flags,
+void blame_tree_init(struct repository *r, struct blame_tree *bt, int flags,
 		     int argc, const char **argv, const char *prefix)
 {
-	struct repository *r = the_repository;
 	struct hashmap_iter iter;
 	struct blame_tree_entry *e;
 	const char *pathspec = "";
