@@ -32,6 +32,27 @@ void bitmap_writer_init(struct bitmap_writer *writer)
 	memset(writer, 0, sizeof(struct bitmap_writer));
 }
 
+void bitmap_writer_free(struct bitmap_writer *writer)
+{
+	uint32_t i;
+
+	if (!writer)
+		return;
+
+	ewah_free(writer->commits);
+	ewah_free(writer->trees);
+	ewah_free(writer->blobs);
+	ewah_free(writer->tags);
+
+	kh_destroy_oid_map(writer->bitmaps);
+
+	for (i = 0; i < writer->selected_nr; i++) {
+		ewah_free(writer->selected[i].bitmap);
+		ewah_free(writer->selected[i].write_as);
+	}
+	free(writer->selected);
+}
+
 void bitmap_writer_show_progress(struct bitmap_writer *writer, int show)
 {
 	writer->show_progress = show;

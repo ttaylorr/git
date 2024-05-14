@@ -831,7 +831,6 @@ static int write_midx_bitmap(const char *midx_name,
 	 * array.
 	 *
 	 * This changes the order of objects in 'index' between
-	 * bitmap_writer_build_type_index and bitmap_writer_finish.
 	 *
 	 * The same re-ordering takes place in the single-pack bitmap code via
 	 * write_idx_file(), which is called by finish_tmp_packfile(), which
@@ -853,6 +852,7 @@ static int write_midx_bitmap(const char *midx_name,
 cleanup:
 	free(index);
 	free(bitmap_name);
+	bitmap_writer_free(&writer);
 
 	trace2_region_leave("midx", "write_midx_bitmap", the_repository);
 
