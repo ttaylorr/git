@@ -104,12 +104,13 @@ static int pseudo_merge_config(const char *var, const char *value,
 	struct strbuf buf = STRBUF_INIT;
 	const char *sub, *key;
 	size_t sub_len;
+	int ret = 0;
 
 	if (parse_config_key(var, "bitmappseudomerge", &sub, &sub_len, &key))
-		return 0;
+		goto done;
 
 	if (!sub_len)
-		return 0;
+		goto done;
 
 	strbuf_add(&buf, sub, sub_len);
 
@@ -151,8 +152,8 @@ static int pseudo_merge_config(const char *var, const char *value,
 		}
 	} else if (!strcmp(key, "threshold")) {
 		if (git_config_expiry_date(&group->threshold, var, value)) {
-			strbuf_release(&buf);
-			return -1;
+			ret = -1;
+			goto done;
 		}
 	} else if (!strcmp(key, "maxmerges")) {
 		group->max_merges = git_config_int(var, value, ctx->kvi);
@@ -162,8 +163,8 @@ static int pseudo_merge_config(const char *var, const char *value,
 		}
 	} else if (!strcmp(key, "stablethreshold")) {
 		if (git_config_expiry_date(&group->stable_threshold, var, value)) {
-			strbuf_release(&buf);
-			return -1;
+			ret = -1;
+			goto done;
 		}
 	} else if (!strcmp(key, "stablesize")) {
 		group->stable_size = git_config_int(var, value, ctx->kvi);
@@ -173,9 +174,10 @@ static int pseudo_merge_config(const char *var, const char *value,
 		}
 	}
 
+done:
 	strbuf_release(&buf);
 
-	return 0;
+	return ret;
 }
 
 void load_pseudo_merges_from_config(struct string_list *list)
@@ -200,7 +202,7 @@ static int find_pseudo_merge_group_for_ref(const char *refname,
 					   int flags UNUSED,
 					   void *_data)
 {
-	struct string_list *list = _data;
+	struct bitmap_writer *writer = _data;
 	struct object_id peeled;
 	struct commit *c;
 	uint32_t i;
@@ -213,16 +215,16 @@ static int find_pseudo_merge_group_for_ref(const char *refname,
 	if (!c)
 		return 0;
 
-	has_bitmap = bitmap_writer_has_bitmapped_object_id(oid);
+	has_bitmap = bitmap_writer_has_bitmapped_object_id(writer, oid);
 
-	for (i = 0; i < list->nr; i++) {
+	for (i = 0; i < writer->pseudo_merge_groups.nr; i++) {
 		struct pseudo_merge_group *group;
 		struct pseudo_merge_matches *matches;
 		struct strbuf group_name = STRBUF_INIT;
 		regmatch_t captures[16];
 		size_t j;
 
-		group = list->items[i].util;
+		group = writer->pseudo_merge_groups.items[i].util;
 		if (regexec(group->pattern, refname, ARRAY_SIZE(captures),
 			    captures, 0))
 			continue;
@@ -303,10 +305,9 @@ static struct pseudo_merge_commit_idx *pseudo_merge_idx(kh_oid_map_t *pseudo_mer
 
 #define MIN_PSEUDO_MERGE_SIZE 8
 
-static void select_pseudo_merges_1(struct pseudo_merge_group *group,
-				   struct pseudo_merge_matches *matches,
-				   kh_oid_map_t *pseudo_merge_commits,
-				   uint32_t *pseudo_merges_nr)
+static void select_pseudo_merges_1(struct bitmap_writer *writer,
+				   struct pseudo_merge_group *group,
+				   struct pseudo_merge_matches *matches)
 {
 	uint32_t i, j;
 	uint32_t stable_merges_nr;
@@ -344,17 +345,17 @@ static void select_pseudo_merges_1(struct pseudo_merge_group *group,
 			 * commits -> pseudo-merge(s) which include the key'd
 			 * commit up-to-date.
 			 */
-			pmc = pseudo_merge_idx(pseudo_merge_commits,
+			pmc = pseudo_merge_idx(writer->pseudo_merge_commits,
 					       &c->object.oid);
 
 			ALLOC_GROW(pmc->pseudo_merge, pmc->nr + 1, pmc->alloc);
 
-			pmc->pseudo_merge[pmc->nr++] = *pseudo_merges_nr;
+			pmc->pseudo_merge[pmc->nr++] = writer->pseudo_merges_nr;
 			p = commit_list_append(c, p);
 		} while (j % group->stable_size);
 
-		bitmap_writer_push_bitmapped_commit(merge, 1);
-		(*pseudo_merges_nr)++;
+		bitmap_writer_push_commit(writer, merge, 1);
+		writer->pseudo_merges_nr++;
 	}
 
 	/* make up to group->max_merges pseudo merges for unstable commits */
@@ -385,17 +386,17 @@ static void select_pseudo_merges_1(struct pseudo_merge_group *group,
 			if (j % (uint32_t)(1.0f / group->sample_rate))
 				continue;
 
-			pmc = pseudo_merge_idx(pseudo_merge_commits,
+			pmc = pseudo_merge_idx(writer->pseudo_merge_commits,
 					       &c->object.oid);
 
 			ALLOC_GROW(pmc->pseudo_merge, pmc->nr + 1, pmc->alloc);
 
-			pmc->pseudo_merge[pmc->nr++] = *pseudo_merges_nr;
+			pmc->pseudo_merge[pmc->nr++] = writer->pseudo_merges_nr;
 			p = commit_list_append(c, p);
 		}
 
-		bitmap_writer_push_bitmapped_commit(merge, 1);
-		(*pseudo_merges_nr)++;
+		bitmap_writer_push_commit(writer, merge, 1);
+		writer->pseudo_merges_nr++;
 		if (end >= matches->unstable_nr)
 			break;
 	}
@@ -419,37 +420,33 @@ static void sort_pseudo_merge_matches(struct pseudo_merge_matches *matches)
 	QSORT(matches->unstable, matches->unstable_nr, commit_date_cmp);
 }
 
-void select_pseudo_merges(struct string_list *list,
-			  struct commit **commits, size_t commits_nr,
-			  kh_oid_map_t *pseudo_merge_commits,
-			  uint32_t *pseudo_merges_nr,
-			  unsigned show_progress)
+void select_pseudo_merges(struct bitmap_writer *writer,
+			  struct commit **commits, size_t commits_nr)
 {
 	struct progress *progress = NULL;
 	uint32_t i;
 
-	if (!list->nr)
+	if (!writer->pseudo_merge_groups.nr)
 		return;
 
-	if (show_progress)
-		progress = start_progress("Selecting pseudo-merge commits", list->nr);
+	if (writer->show_progress)
+		progress = start_progress("Selecting pseudo-merge commits",
+					  writer->pseudo_merge_groups.nr);
 
-	for_each_ref(find_pseudo_merge_group_for_ref, list);
+	for_each_ref(find_pseudo_merge_group_for_ref, writer);
 
-	for (i = 0; i < list->nr; i++) {
+	for (i = 0; i < writer->pseudo_merge_groups.nr; i++) {
 		struct pseudo_merge_group *group;
 		struct hashmap_iter iter;
 		struct strmap_entry *e;
 
-		group = list->items[i].util;
+		group = writer->pseudo_merge_groups.items[i].util;
 		strmap_for_each_entry(&group->matches, &iter, e) {
 			struct pseudo_merge_matches *matches = e->value;
 
 			sort_pseudo_merge_matches(matches);
 
-			select_pseudo_merges_1(group, matches,
-					       pseudo_merge_commits,
-					       pseudo_merges_nr);
+			select_pseudo_merges_1(writer, group, matches);
 		}
 
 		display_progress(progress, i + 1);

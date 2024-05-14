@@ -9,6 +9,7 @@
 struct commit;
 struct string_list;
 struct bitmap_index;
+struct bitmap_writer;
 
 /*
  * A pseudo-merge group tracks the set of non-bitmapped reference tips
@@ -93,10 +94,7 @@ struct pseudo_merge_commit_idx {
  *
  * Optionally shows a progress meter.
  */
-void select_pseudo_merges(struct string_list *list,
-			  struct commit **commits, size_t commits_nr,
-			  kh_oid_map_t *pseudo_merge_commits,
-			  uint32_t *pseudo_merges_nr,
-			  unsigned show_progress);
+void select_pseudo_merges(struct bitmap_writer *writer,
+			  struct commit **commits, size_t commits_nr);
 
 #endif
