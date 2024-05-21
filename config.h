@@ -262,6 +262,12 @@ ssize_t git_config_ssize_t(const char *, const char *,
 			   const struct key_value_info *);
 
 /**
+ * Identical to `git_config_int`, but for floating point values.
+ */
+float git_config_float(const char *, const char *,
+		       const struct key_value_info *);
+
+/**
  * Same as `git_config_bool`, except that integers are returned as-is, and
  * an `is_bool` flag is unset.
  */
