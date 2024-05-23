@@ -1,2 +1,3 @@
 Meta
 config.mak.local
+t/t9999-test.sh
