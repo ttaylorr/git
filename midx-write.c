@@ -299,21 +299,17 @@ static void midx_fanout_add_pack_fanout(struct midx_fanout *fanout,
  * Copy only the de-duplicated entries (selected by most-recent modified time
  * of a packfile containing the object).
  */
-static struct pack_midx_entry *get_sorted_entries(struct multi_pack_index *m,
-						  struct pack_info *info,
-						  uint32_t nr_packs,
-						  size_t *nr_objects,
-						  int preferred_pack)
+static struct pack_midx_entry *get_sorted_entries(struct write_midx_context *ctx)
 {
 	uint32_t cur_fanout, cur_pack, cur_object;
 	size_t alloc_objects, total_objects = 0;
 	struct midx_fanout fanout = { 0 };
 	struct pack_midx_entry *deduplicated_entries = NULL;
-	uint32_t start_pack = m ? m->num_packs : 0;
+	uint32_t start_pack = ctx->m ? ctx->m->num_packs : 0;
 
-	for (cur_pack = start_pack; cur_pack < nr_packs; cur_pack++)
+	for (cur_pack = start_pack; cur_pack < ctx->nr; cur_pack++)
 		total_objects = st_add(total_objects,
-				       info[cur_pack].p->num_objects);
+				       ctx->info[cur_pack].p->num_objects);
 
 	/*
 	 * As we de-duplicate by fanout value, we expect the fanout
@@ -324,25 +320,25 @@ static struct pack_midx_entry *get_sorted_entries(struct multi_pack_index *m,
 
 	ALLOC_ARRAY(fanout.entries, fanout.alloc);
 	ALLOC_ARRAY(deduplicated_entries, alloc_objects);
-	*nr_objects = 0;
+	ctx->entries_nr = 0;
 
 	for (cur_fanout = 0; cur_fanout < 256; cur_fanout++) {
 		fanout.nr = 0;
 
-		if (m)
-			midx_fanout_add_midx_fanout(&fanout, m, cur_fanout,
-						    preferred_pack);
+		if (ctx->m)
+			midx_fanout_add_midx_fanout(&fanout, ctx->m, cur_fanout,
+						    ctx->preferred_pack_idx);
 
-		for (cur_pack = start_pack; cur_pack < nr_packs; cur_pack++) {
-			int preferred = cur_pack == preferred_pack;
+		for (cur_pack = start_pack; cur_pack < ctx->nr; cur_pack++) {
+			int preferred = cur_pack == ctx->preferred_pack_idx;
 			midx_fanout_add_pack_fanout(&fanout,
-						    info, cur_pack,
+						    ctx->info, cur_pack,
 						    preferred, cur_fanout);
 		}
 
-		if (-1 < preferred_pack && preferred_pack < start_pack)
-			midx_fanout_add_pack_fanout(&fanout, info,
-						    preferred_pack, 1,
+		if (-1 < ctx->preferred_pack_idx && ctx->preferred_pack_idx < start_pack)
+			midx_fanout_add_pack_fanout(&fanout, ctx->info,
+						    ctx->preferred_pack_idx, 1,
 						    cur_fanout);
 
 		midx_fanout_sort(&fanout);
@@ -356,12 +352,12 @@ static struct pack_midx_entry *get_sorted_entries(struct multi_pack_index *m,
 						&fanout.entries[cur_object].oid))
 				continue;
 
-			ALLOC_GROW(deduplicated_entries, st_add(*nr_objects, 1),
+			ALLOC_GROW(deduplicated_entries, st_add(ctx->entries_nr, 1),
 				   alloc_objects);
-			memcpy(&deduplicated_entries[*nr_objects],
+			memcpy(&deduplicated_entries[ctx->entries_nr],
 			       &fanout.entries[cur_object],
 			       sizeof(struct pack_midx_entry));
-			(*nr_objects)++;
+			ctx->entries_nr++;
 		}
 	}
 
@@ -1055,8 +1051,7 @@ static int write_midx_internal(const char *object_dir,
 		}
 	}
 
-	ctx.entries = get_sorted_entries(ctx.m, ctx.info, ctx.nr, &ctx.entries_nr,
-					 ctx.preferred_pack_idx);
+	ctx.entries = get_sorted_entries(&ctx);
 
 	ctx.large_offsets_needed = 0;
 	for (i = 0; i < ctx.entries_nr; i++) {
