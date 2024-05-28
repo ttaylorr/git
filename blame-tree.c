@@ -172,7 +172,7 @@ static void write_btc(struct blame_tree_cache_writer *writer,
 
 	write_btc_header(f, cf);
 	write_chunkfile(cf, writer);
-	finalize_hashfile(f, NULL, FSYNC_COMPONENT_PACK_METADATA,
+	finalize_hashfile(f, NULL, FSYNC_COMPONENT_BLAME_TREE,
 			  CSUM_HASH_IN_STREAM | CSUM_FSYNC);
 }
 
