@@ -411,6 +411,7 @@ static int add_from_revs(struct blame_tree *bt)
 	struct diff_options diffopt;
 
 	memcpy(&diffopt, &bt->rev.diffopt, sizeof(diffopt));
+	copy_pathspec(&diffopt.pathspec, &bt->rev.diffopt.pathspec);
 	diffopt.output_format = DIFF_FORMAT_CALLBACK;
 	diffopt.format_callback = add_from_diff;
 	diffopt.format_callback_data = bt;
@@ -462,7 +463,6 @@ void blame_tree_init(struct repository *r, struct blame_tree *bt, int flags,
 	bt->rev.no_commit_id = 1;
 	bt->rev.diff = 1;
 	bt->rev.diffopt.flags.recursive = 1;
-	bt->rev.diffopt.no_free = 1;
 
 	setenv(GIT_LITERAL_PATHSPECS_ENVIRONMENT, "1", 1);
 
