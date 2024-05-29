@@ -133,6 +133,36 @@ static int read_midx_bitmapped_packs(const char *object_dir)
 	return 0;
 }
 
+static int read_midx_pack_order(const char *object_dir)
+{
+	struct multi_pack_index *midx = NULL, *m;
+	struct object_id oid;
+	uint32_t i, pos;
+
+	setup_git_directory();
+
+	midx = load_multi_pack_index(object_dir, 1);
+	if (!midx)
+		return 1;
+
+
+	for (m = midx; m; m = m->base_midx) {
+		if (load_midx_revindex(m))
+			warning("could not load revindex");
+	}
+
+	for (i = 0; i < midx->num_objects + midx->num_packs_in_base; i++) {
+		pos = pack_pos_to_midx(midx, i);
+		nth_midxed_object_oid(&oid, midx, pos);
+
+		printf("%s [%d]\n", oid_to_hex(&oid), pos);
+	}
+
+	close_midx(midx);
+
+	return 0;
+}
+
 int cmd__read_midx(int argc, const char **argv)
 {
 	if (!(argc == 2 || argc == 3 || argc == 4))
@@ -146,5 +176,7 @@ int cmd__read_midx(int argc, const char **argv)
 		return read_midx_preferred_pack(argv[2]);
 	else if (!strcmp(argv[1], "--bitmap"))
 		return read_midx_bitmapped_packs(argv[2]);
+	else if (!strcmp(argv[1], "--pack-order"))
+		return read_midx_pack_order(argv[2]);
 	return read_midx_file(argv[1], argv[2], 0);
 }

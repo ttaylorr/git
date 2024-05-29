@@ -17,6 +17,8 @@
 #include "trace2.h"
 #include "tree.h"
 #include "tree-walk.h"
+#include "midx.h"
+#include "pack-revindex.h"
 
 struct bitmapped_commit {
 	struct commit *commit;
@@ -27,9 +29,12 @@ struct bitmapped_commit {
 	uint32_t commit_pos;
 };
 
-void bitmap_writer_init(struct bitmap_writer *writer)
+void bitmap_writer_init(struct bitmap_writer *writer,
+			struct multi_pack_index *midx)
 {
 	memset(writer, 0, sizeof(struct bitmap_writer));
+
+	writer->midx = midx;
 }
 
 void bitmap_writer_free(struct bitmap_writer *writer)
@@ -69,6 +74,11 @@ void bitmap_writer_build_type_index(struct bitmap_writer *writer,
 				    uint32_t index_nr)
 {
 	uint32_t i;
+	uint32_t base_objects = 0;
+
+	if (writer->midx)
+		base_objects = writer->midx->num_objects +
+			writer->midx->num_objects_in_base;
 
 	writer->commits = ewah_new();
 	writer->trees = ewah_new();
@@ -98,19 +108,19 @@ void bitmap_writer_build_type_index(struct bitmap_writer *writer,
 
 		switch (real_type) {
 		case OBJ_COMMIT:
-			ewah_set(writer->commits, i);
+			ewah_set(writer->commits, i + base_objects);
 			break;
 
 		case OBJ_TREE:
-			ewah_set(writer->trees, i);
+			ewah_set(writer->trees, i + base_objects);
 			break;
 
 		case OBJ_BLOB:
-			ewah_set(writer->blobs, i);
+			ewah_set(writer->blobs, i + base_objects);
 			break;
 
 		case OBJ_TAG:
-			ewah_set(writer->tags, i);
+			ewah_set(writer->tags, i + base_objects);
 			break;
 
 		default:
@@ -144,19 +154,37 @@ static inline void push_bitmapped_commit(struct bitmap_writer *writer,
 static uint32_t find_object_pos(struct bitmap_writer *writer,
 				const struct object_id *oid, int *found)
 {
-	struct object_entry *entry = packlist_find(writer->to_pack, oid);
+	struct object_entry *entry;
 
-	if (!entry) {
+	entry = packlist_find(writer->to_pack, oid);
+	if (entry) {
+		uint32_t base_objects = 0;
+		if (writer->midx)
+			base_objects = writer->midx->num_objects +
+				writer->midx->num_objects_in_base;
+
 		if (found)
-			*found = 0;
-		warning("Failed to write bitmap index. Packfile doesn't have full closure "
-			"(object %s is missing)", oid_to_hex(oid));
-		return 0;
+			*found = 1;
+		return oe_in_pack_pos(writer->to_pack, entry) + base_objects;
+	} else if (writer->midx) {
+		uint32_t at, pos;
+
+		if (!bsearch_midx(oid, writer->midx, &at))
+			goto missing;
+		if (midx_to_pack_pos(writer->midx, at, &pos) < 0)
+			goto missing;
+
+		if (found)
+			*found = 1;
+		return pos;
 	}
 
+missing:
 	if (found)
-		*found = 1;
-	return oe_in_pack_pos(writer->to_pack, entry);
+		*found = 0;
+	warning("Failed to write bitmap index. Packfile doesn't have full closure "
+		"(object %s is missing)", oid_to_hex(oid));
+	return 0;
 }
 
 static void compute_xor_offsets(struct bitmap_writer *writer)
@@ -503,7 +531,7 @@ int bitmap_writer_build(struct bitmap_writer *writer,
 	struct prio_queue queue = { compare_commits_by_gen_then_commit_date };
 	struct prio_queue tree_queue = { NULL };
 	struct bitmap_index *old_bitmap;
-	uint32_t *mapping;
+	uint32_t *mapping = NULL;
 	int closed = 1; /* until proven otherwise */
 
 	writer->bitmaps = kh_init_oid_map();
@@ -518,8 +546,6 @@ int bitmap_writer_build(struct bitmap_writer *writer,
 	old_bitmap = prepare_bitmap_git(to_pack->repo);
 	if (old_bitmap)
 		mapping = create_bitmap_mapping(old_bitmap, to_pack);
-	else
-		mapping = NULL;
 
 	bitmap_builder_init(&bb, writer, old_bitmap);
 	for (i = bb.commits_nr; i > 0; i--) {
@@ -804,7 +830,7 @@ void bitmap_writer_finish(struct bitmap_writer *writer,
 	struct strbuf tmp_file = STRBUF_INIT;
 	struct hashfile *f;
 	off_t *offsets = NULL;
-	uint32_t i;
+	uint32_t i, base_objects;
 
 	struct bitmap_disk_header header;
 
@@ -827,6 +853,12 @@ void bitmap_writer_finish(struct bitmap_writer *writer,
 	if (options & BITMAP_OPT_LOOKUP_TABLE)
 		CALLOC_ARRAY(offsets, index_nr);
 
+	if (writer->midx)
+		base_objects = writer->midx->num_objects +
+			writer->midx->num_objects_in_base;
+	else
+		base_objects = 0;
+
 	for (i = 0; i < writer->selected_nr; i++) {
 		struct bitmapped_commit *stored = &writer->selected[i];
 		int commit_pos = oid_pos(&stored->commit->object.oid, index,
@@ -834,7 +866,7 @@ void bitmap_writer_finish(struct bitmap_writer *writer,
 
 		if (commit_pos < 0)
 			BUG(_("trying to write commit not in index"));
-		stored->commit_pos = commit_pos;
+		stored->commit_pos = commit_pos + base_objects;
 	}
 
 	write_selected_commits_v1(writer, f, offsets);
