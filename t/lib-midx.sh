@@ -6,3 +6,7 @@ test_midx_consistent () {
 	test_cmp expect actual &&
 	git multi-pack-index --object-dir=$1 verify
 }
+
+midx_checksum () {
+	test-tool read-midx --checksum "$1"
+}
