@@ -259,20 +259,37 @@ static uint32_t midx_for_object(struct multi_pack_index **_m, uint32_t pos)
 	return pos - m->num_objects_in_base;
 }
 
-int prepare_midx_pack(struct repository *r, struct multi_pack_index *m, uint32_t pack_int_id)
+static uint32_t midx_for_pack(struct multi_pack_index **_m,
+			      uint32_t pack_int_id)
+{
+	struct multi_pack_index *m = *_m;
+	while (m && pack_int_id < m->num_packs_in_base)
+		m = m->base_midx;
+
+	if (!m)
+		BUG("NULL multi-pack-index for pack ID: %"PRIu32, pack_int_id);
+
+	if (pack_int_id >= m->num_packs + m->num_packs_in_base)
+		die(_("bad pack-int-id: %u (%u total packs)"),
+		    pack_int_id, m->num_packs + m->num_packs_in_base);
+
+	*_m = m;
+
+	return pack_int_id - m->num_packs_in_base;
+}
+
+int prepare_midx_pack(struct repository *r, struct multi_pack_index *m,
+		      uint32_t pack_int_id)
 {
 	struct strbuf pack_name = STRBUF_INIT;
 	struct packed_git *p;
+	uint32_t local_pack_int_id = midx_for_pack(&m, pack_int_id);
 
-	if (pack_int_id >= m->num_packs)
-		die(_("bad pack-int-id: %u (%u total packs)"),
-		    pack_int_id, m->num_packs);
-
-	if (m->packs[pack_int_id])
+	if (m->packs[local_pack_int_id])
 		return 0;
 
 	strbuf_addf(&pack_name, "%s/pack/%s", m->object_dir,
-		    m->pack_names[pack_int_id]);
+		    m->pack_names[local_pack_int_id]);
 
 	p = add_packed_git(pack_name.buf, pack_name.len, m->local);
 	strbuf_release(&pack_name);
@@ -281,7 +298,7 @@ int prepare_midx_pack(struct repository *r, struct multi_pack_index *m, uint32_t
 		return 1;
 
 	p->multi_pack_index = 1;
-	m->packs[pack_int_id] = p;
+	m->packs[local_pack_int_id] = p;
 	install_packed_git(r, p);
 	list_add_tail(&p->mru, &r->objects->packed_git_mru);
 
