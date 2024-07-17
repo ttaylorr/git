@@ -35,6 +35,14 @@ struct stored_bitmap {
 	int flags;
 };
 
+struct bitmap_walk {
+	/* Bitmap result of the last performed walk */
+	struct bitmap *result;
+
+	/* "have" bitmap from the last performed walk */
+	struct bitmap *haves;
+};
+
 /*
  * The active bitmap index for a repository. By design, repositories only have
  * a single bitmap index available (the index for the biggest packfile in
@@ -106,11 +114,7 @@ struct bitmap_index {
 		kh_oid_pos_t *positions;
 	} ext_index;
 
-	/* Bitmap result of the last performed walk */
-	struct bitmap *result;
-
-	/* "have" bitmap from the last performed walk */
-	struct bitmap *haves;
+	struct bitmap_walk walk;
 
 	/* Version of the bitmap index */
 	unsigned int version;
@@ -1491,7 +1495,7 @@ static void show_extended_objects(struct bitmap_index *bitmap_git,
 				  struct rev_info *revs,
 				  show_reachable_fn show_reach)
 {
-	struct bitmap *objects = bitmap_git->result;
+	struct bitmap *objects = bitmap_git->walk.result;
 	struct eindex *eindex = &bitmap_git->ext_index;
 	uint32_t i;
 
@@ -1549,7 +1553,7 @@ static void show_objects_for_type(
 	struct ewah_iterator it;
 	eword_t filter;
 
-	struct bitmap *objects = bitmap_git->result;
+	struct bitmap *objects = bitmap_git->walk.result;
 
 	init_type_iterator(&it, bitmap_git, object_type);
 
@@ -2019,8 +2023,8 @@ struct bitmap_index *prepare_bitmap_walk(struct rev_info *revs,
 	if (revs->unpacked)
 		filter_packed_objects_from_bitmap(bitmap_git, wants_bitmap);
 
-	bitmap_git->result = wants_bitmap;
-	bitmap_git->haves = haves_bitmap;
+	bitmap_git->walk.result = wants_bitmap;
+	bitmap_git->walk.haves = haves_bitmap;
 
 	object_list_free(&wants);
 	object_list_free(&haves);
@@ -2149,7 +2153,7 @@ static void reuse_partial_packfile_from_bitmap_1(struct bitmap_index *bitmap_git
 						 struct bitmapped_pack *pack,
 						 struct bitmap *reuse)
 {
-	struct bitmap *result = bitmap_git->result;
+	struct bitmap *result = bitmap_git->walk.result;
 	struct pack_window *w_curs = NULL;
 	size_t pos = pack->bitmap_pos / BITS_IN_EWORD;
 
@@ -2255,7 +2259,7 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 {
 	struct repository *r = the_repository;
 	struct bitmapped_pack *packs = NULL;
-	struct bitmap *result = bitmap_git->result;
+	struct bitmap *result = bitmap_git->walk.result;
 	struct bitmap *reuse;
 	size_t i;
 	size_t packs_nr = 0, packs_alloc = 0;
@@ -2366,7 +2370,7 @@ void traverse_bitmap_commit_list(struct bitmap_index *bitmap_git,
 				 struct rev_info *revs,
 				 show_reachable_fn show_reachable)
 {
-	assert(bitmap_git->result);
+	assert(bitmap_git->walk.result);
 
 	show_objects_for_type(bitmap_git, OBJ_COMMIT, show_reachable);
 	if (revs->tree_objects)
@@ -2382,7 +2386,7 @@ void traverse_bitmap_commit_list(struct bitmap_index *bitmap_git,
 static uint32_t count_object_type(struct bitmap_index *bitmap_git,
 				  enum object_type type)
 {
-	struct bitmap *objects = bitmap_git->result;
+	struct bitmap *objects = bitmap_git->walk.result;
 	struct eindex *eindex = &bitmap_git->ext_index;
 
 	uint32_t i = 0, count = 0;
@@ -2410,7 +2414,7 @@ void count_bitmap_commit_list(struct bitmap_index *bitmap_git,
 			      uint32_t *commits, uint32_t *trees,
 			      uint32_t *blobs, uint32_t *tags)
 {
-	assert(bitmap_git->result);
+	assert(bitmap_git->walk.result);
 
 	if (commits)
 		*commits = count_object_type(bitmap_git, OBJ_COMMIT);
@@ -2845,8 +2849,8 @@ void free_bitmap_index(struct bitmap_index *b)
 	free(b->ext_index.objects);
 	free(b->ext_index.hashes);
 	kh_destroy_oid_pos(b->ext_index.positions);
-	bitmap_free(b->result);
-	bitmap_free(b->haves);
+	bitmap_free(b->walk.result);
+	bitmap_free(b->walk.haves);
 	if (bitmap_is_midx(b)) {
 		/*
 		 * Multi-pack bitmaps need to have resources associated with
@@ -2868,13 +2872,13 @@ int bitmap_has_oid_in_uninteresting(struct bitmap_index *bitmap_git,
 				    const struct object_id *oid)
 {
 	return bitmap_git &&
-		bitmap_walk_contains(bitmap_git, bitmap_git->haves, oid);
+		bitmap_walk_contains(bitmap_git, bitmap_git->walk.haves, oid);
 }
 
 static off_t get_disk_usage_for_type(struct bitmap_index *bitmap_git,
 				     enum object_type object_type)
 {
-	struct bitmap *result = bitmap_git->result;
+	struct bitmap *result = bitmap_git->walk.result;
 	off_t total = 0;
 	struct ewah_iterator it;
 	eword_t filter;
@@ -2928,7 +2932,7 @@ static off_t get_disk_usage_for_type(struct bitmap_index *bitmap_git,
 
 static off_t get_disk_usage_for_extended(struct bitmap_index *bitmap_git)
 {
-	struct bitmap *result = bitmap_git->result;
+	struct bitmap *result = bitmap_git->walk.result;
 	struct eindex *eindex = &bitmap_git->ext_index;
 	off_t total = 0;
 	struct object_info oi = OBJECT_INFO_INIT;
