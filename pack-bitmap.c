@@ -2396,9 +2396,10 @@ void traverse_bitmap_commit_list(struct bitmap_index *bitmap_git,
 }
 
 static uint32_t count_object_type(struct bitmap_index *bitmap_git,
+				  struct bitmap_walk *walk,
 				  enum object_type type)
 {
-	struct bitmap *objects = bitmap_git->walk.result;
+	struct bitmap *objects = walk->result;
 	struct eindex *eindex = &bitmap_git->ext_index;
 
 	uint32_t i = 0, count = 0;
@@ -2429,16 +2430,20 @@ void count_bitmap_commit_list(struct bitmap_index *bitmap_git,
 	assert(bitmap_git->walk.result);
 
 	if (commits)
-		*commits = count_object_type(bitmap_git, OBJ_COMMIT);
+		*commits = count_object_type(bitmap_git, &bitmap_git->walk,
+					     OBJ_COMMIT);
 
 	if (trees)
-		*trees = count_object_type(bitmap_git, OBJ_TREE);
+		*trees = count_object_type(bitmap_git, &bitmap_git->walk,
+					   OBJ_TREE);
 
 	if (blobs)
-		*blobs = count_object_type(bitmap_git, OBJ_BLOB);
+		*blobs = count_object_type(bitmap_git, &bitmap_git->walk,
+					   OBJ_BLOB);
 
 	if (tags)
-		*tags = count_object_type(bitmap_git, OBJ_TAG);
+		*tags = count_object_type(bitmap_git, &bitmap_git->walk,
+					  OBJ_TAG);
 }
 
 struct bitmap_test_data {
