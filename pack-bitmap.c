@@ -2424,6 +2424,10 @@ static void traverse_bitmap_commit_list_1(struct bitmap_index *bitmap_git,
 					  struct rev_info *revs,
 					  show_reachable_fn show_reachable)
 {
+	if (bitmap_git->base)
+		traverse_bitmap_commit_list_1(bitmap_git->base, walk, revs,
+					      show_reachable);
+
 	assert(walk && walk->result);
 
 	show_objects_for_type(bitmap_git, walk, OBJ_COMMIT, show_reachable);
