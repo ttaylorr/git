@@ -2463,6 +2463,9 @@ static uint32_t count_object_type(struct bitmap_index *bitmap_git,
 	struct ewah_iterator it;
 	eword_t filter;
 
+	if (bitmap_git->base)
+		count = count_object_type(bitmap_git->base, walk, type);
+
 	init_type_iterator(&it, bitmap_git, type);
 
 	while (i < objects->word_alloc && ewah_iterator_next(&filter, &it)) {
