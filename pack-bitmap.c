@@ -1492,17 +1492,17 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 }
 
 static void show_extended_objects(struct bitmap_index *bitmap_git,
+				  struct bitmap_walk *walk,
 				  struct rev_info *revs,
 				  show_reachable_fn show_reach)
 {
-	struct bitmap *objects = bitmap_git->walk.result;
 	struct eindex *eindex = &bitmap_git->ext_index;
 	uint32_t i;
 
 	for (i = 0; i < eindex->count; ++i) {
 		struct object *obj;
 
-		if (!bitmap_get(objects, st_add(bitmap_num_objects(bitmap_git), i)))
+		if (!bitmap_get(walk->result, st_add(bitmap_num_objects(bitmap_git), i)))
 			continue;
 
 		obj = eindex->objects[i];
@@ -1542,10 +1542,10 @@ static void init_type_iterator(struct ewah_iterator *it,
 	}
 }
 
-static void show_objects_for_type(
-	struct bitmap_index *bitmap_git,
-	enum object_type object_type,
-	show_reachable_fn show_reach)
+static void show_objects_for_type(struct bitmap_index *bitmap_git,
+				  struct bitmap_walk *walk,
+				  enum object_type object_type,
+				  show_reachable_fn show_reach)
 {
 	size_t i = 0;
 	uint32_t offset;
@@ -1553,7 +1553,7 @@ static void show_objects_for_type(
 	struct ewah_iterator it;
 	eword_t filter;
 
-	struct bitmap *objects = bitmap_git->walk.result;
+	struct bitmap *objects = walk->result;
 
 	init_type_iterator(&it, bitmap_git, object_type);
 
@@ -2366,21 +2366,33 @@ int bitmap_walk_contains(struct bitmap_index *bitmap_git,
 	return idx >= 0 && bitmap_get(bitmap, idx);
 }
 
+static void traverse_bitmap_commit_list_1(struct bitmap_index *bitmap_git,
+					  struct bitmap_walk *walk,
+					  struct rev_info *revs,
+					  show_reachable_fn show_reachable)
+{
+	assert(walk && walk->result);
+
+	show_objects_for_type(bitmap_git, walk, OBJ_COMMIT, show_reachable);
+	if (revs->tree_objects)
+		show_objects_for_type(bitmap_git, walk, OBJ_TREE,
+				      show_reachable);
+	if (revs->blob_objects)
+		show_objects_for_type(bitmap_git, walk, OBJ_BLOB,
+				      show_reachable);
+	if (revs->tag_objects)
+		show_objects_for_type(bitmap_git, walk, OBJ_TAG,
+				      show_reachable);
+
+	show_extended_objects(bitmap_git, walk, revs, show_reachable);
+}
+
 void traverse_bitmap_commit_list(struct bitmap_index *bitmap_git,
 				 struct rev_info *revs,
 				 show_reachable_fn show_reachable)
 {
-	assert(bitmap_git->walk.result);
-
-	show_objects_for_type(bitmap_git, OBJ_COMMIT, show_reachable);
-	if (revs->tree_objects)
-		show_objects_for_type(bitmap_git, OBJ_TREE, show_reachable);
-	if (revs->blob_objects)
-		show_objects_for_type(bitmap_git, OBJ_BLOB, show_reachable);
-	if (revs->tag_objects)
-		show_objects_for_type(bitmap_git, OBJ_TAG, show_reachable);
-
-	show_extended_objects(bitmap_git, revs, show_reachable);
+	traverse_bitmap_commit_list_1(bitmap_git, &bitmap_git->walk, revs,
+				      show_reachable);
 }
 
 static uint32_t count_object_type(struct bitmap_index *bitmap_git,
