@@ -1776,7 +1776,7 @@ static unsigned long get_size_by_pos(struct bitmap_index *bitmap_git,
 			uint32_t midx_pos = pack_pos_to_midx(bitmap_git->midx, pos);
 			uint32_t pack_id = nth_midxed_pack_int_id(bitmap_git->midx, midx_pos);
 
-			pack = bitmap_git->midx->packs[pack_id];
+			pack = nth_midxed_pack(bitmap_git->midx, pack_id);
 			ofs = nth_midxed_offset(bitmap_git->midx, midx_pos);
 		} else {
 			pack = bitmap_git->pack;
@@ -3025,6 +3025,10 @@ static off_t get_disk_usage_for_type(struct bitmap_index *bitmap_git,
 	eword_t filter;
 	size_t i;
 
+	if (bitmap_git->base)
+		total = get_disk_usage_for_type(bitmap_git->base, walk,
+						object_type);
+
 	init_type_iterator(&it, bitmap_git, object_type);
 	for (i = 0; i < result->word_alloc &&
 			ewah_iterator_next(&filter, &it); i++) {
@@ -3047,7 +3051,7 @@ static off_t get_disk_usage_for_type(struct bitmap_index *bitmap_git,
 				off_t offset = nth_midxed_offset(bitmap_git->midx, midx_pos);
 
 				uint32_t pack_id = nth_midxed_pack_int_id(bitmap_git->midx, midx_pos);
-				struct packed_git *pack = bitmap_git->midx->packs[pack_id];
+				struct packed_git *pack = nth_midxed_pack(bitmap_git->midx, pack_id);
 
 				if (offset_to_pack_pos(pack, offset, &pack_pos) < 0) {
 					struct object_id oid;
@@ -3080,6 +3084,9 @@ static off_t get_disk_usage_for_extended(struct bitmap_index *bitmap_git,
 	struct object_info oi = OBJECT_INFO_INIT;
 	off_t object_size;
 	size_t i;
+
+	if (bitmap_git->base)
+		total = get_disk_usage_for_extended(bitmap_git->base, walk);
 
 	oi.disk_sizep = &object_size;
 
