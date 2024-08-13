@@ -1599,6 +1599,10 @@ static void show_objects_for_type(struct bitmap_index *bitmap_git,
 
 	struct bitmap *objects = walk->result;
 
+	if (bitmap_git->base)
+		show_objects_for_type(bitmap_git->base, walk, object_type,
+				      show_reach);
+
 	init_type_iterator(&it, bitmap_git, object_type);
 
 	for (i = 0; i < objects->word_alloc &&
@@ -1629,7 +1633,7 @@ static void show_objects_for_type(struct bitmap_index *bitmap_git,
 				nth_midxed_object_oid(&oid, m, index_pos);
 
 				pack_id = nth_midxed_pack_int_id(m, index_pos);
-				pack = bitmap_git->midx->packs[pack_id];
+				pack = nth_midxed_pack(bitmap_git->midx, pack_id);
 			} else {
 				index_pos = pack_pos_to_index(bitmap_git->pack, pos + offset);
 				ofs = pack_pos_to_offset(bitmap_git->pack, pos + offset);
