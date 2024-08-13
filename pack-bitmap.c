@@ -2893,9 +2893,10 @@ int bitmap_has_oid_in_uninteresting(struct bitmap_index *bitmap_git,
 }
 
 static off_t get_disk_usage_for_type(struct bitmap_index *bitmap_git,
+				     struct bitmap_walk *walk,
 				     enum object_type object_type)
 {
-	struct bitmap *result = bitmap_git->walk.result;
+	struct bitmap *result = walk->result;
 	off_t total = 0;
 	struct ewah_iterator it;
 	eword_t filter;
@@ -2947,9 +2948,10 @@ static off_t get_disk_usage_for_type(struct bitmap_index *bitmap_git,
 	return total;
 }
 
-static off_t get_disk_usage_for_extended(struct bitmap_index *bitmap_git)
+static off_t get_disk_usage_for_extended(struct bitmap_index *bitmap_git,
+					 struct bitmap_walk *walk)
 {
-	struct bitmap *result = bitmap_git->walk.result;
+	struct bitmap *result = walk->result;
 	struct eindex *eindex = &bitmap_git->ext_index;
 	off_t total = 0;
 	struct object_info oi = OBJECT_INFO_INIT;
@@ -2979,15 +2981,19 @@ off_t get_disk_usage_from_bitmap(struct bitmap_index *bitmap_git,
 {
 	off_t total = 0;
 
-	total += get_disk_usage_for_type(bitmap_git, OBJ_COMMIT);
+	total += get_disk_usage_for_type(bitmap_git, &bitmap_git->walk,
+					 OBJ_COMMIT);
 	if (revs->tree_objects)
-		total += get_disk_usage_for_type(bitmap_git, OBJ_TREE);
+		total += get_disk_usage_for_type(bitmap_git, &bitmap_git->walk,
+						 OBJ_TREE);
 	if (revs->blob_objects)
-		total += get_disk_usage_for_type(bitmap_git, OBJ_BLOB);
+		total += get_disk_usage_for_type(bitmap_git, &bitmap_git->walk,
+						 OBJ_BLOB);
 	if (revs->tag_objects)
-		total += get_disk_usage_for_type(bitmap_git, OBJ_TAG);
+		total += get_disk_usage_for_type(bitmap_git, &bitmap_git->walk,
+						 OBJ_TAG);
 
-	total += get_disk_usage_for_extended(bitmap_git);
+	total += get_disk_usage_for_extended(bitmap_git, &bitmap_git->walk);
 
 	return total;
 }
