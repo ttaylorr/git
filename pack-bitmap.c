@@ -1812,18 +1812,19 @@ static unsigned long get_size_by_pos(struct bitmap_index *bitmap_git,
 	return size;
 }
 
-static void filter_bitmap_blob_limit(struct bitmap_index *bitmap_git,
-				     struct object_list *tip_objects,
-				     struct bitmap *to_filter,
-				     unsigned long limit)
+static void filter_bitmap_blob_limit_1(struct bitmap_index *bitmap_git,
+				       struct bitmap *tips,
+				       struct bitmap *to_filter,
+				       unsigned long limit)
 {
-	struct eindex *eindex = &bitmap_git->ext_index;
-	struct bitmap *tips;
+	struct eindex *eindex;
 	struct ewah_iterator it;
 	eword_t mask;
 	uint32_t i;
 
-	tips = find_tip_objects(bitmap_git, tip_objects, OBJ_BLOB);
+	if (bitmap_git->base)
+		filter_bitmap_blob_limit_1(bitmap_git->base, tips, to_filter,
+					   limit);
 
 	for (i = 0, init_type_iterator(&it, bitmap_git, OBJ_BLOB);
 	     i < to_filter->word_alloc && ewah_iterator_next(&mask, &it);
@@ -1845,7 +1846,7 @@ static void filter_bitmap_blob_limit(struct bitmap_index *bitmap_git,
 		}
 	}
 
-	for (i = 0; i < eindex->count; i++) {
+	for (i = 0, eindex = &bitmap_git->ext_index; i < eindex->count; i++) {
 		size_t pos = st_add(i, bitmap_num_objects(bitmap_git));
 		if (eindex->objects[i]->type == OBJ_BLOB &&
 		    bitmap_get(to_filter, pos) &&
@@ -1853,6 +1854,18 @@ static void filter_bitmap_blob_limit(struct bitmap_index *bitmap_git,
 		    get_size_by_pos(bitmap_git, pos) >= limit)
 			bitmap_unset(to_filter, pos);
 	}
+}
+
+static void filter_bitmap_blob_limit(struct bitmap_index *bitmap_git,
+				     struct object_list *tip_objects,
+				     struct bitmap *to_filter,
+				     unsigned long limit)
+{
+	struct bitmap *tips;
+
+	tips = find_tip_objects(bitmap_git, tip_objects, OBJ_BLOB);
+
+	filter_bitmap_blob_limit_1(bitmap_git, tips, to_filter, limit);
 
 	bitmap_free(tips);
 }
