@@ -1705,23 +1705,19 @@ static struct bitmap *find_tip_objects(struct bitmap_index *bitmap_git,
 	return result;
 }
 
-static void filter_bitmap_exclude_type(struct bitmap_index *bitmap_git,
-				       struct object_list *tip_objects,
-				       struct bitmap *to_filter,
-				       enum object_type type)
+static void filter_bitmap_exclude_type_1(struct bitmap_index *bitmap_git,
+					 struct bitmap *tips,
+					 struct bitmap *to_filter,
+					 enum object_type type)
 {
-	struct eindex *eindex = &bitmap_git->ext_index;
-	struct bitmap *tips;
+	struct eindex *eindex;
 	struct ewah_iterator it;
 	eword_t mask;
 	uint32_t i;
 
-	/*
-	 * The non-bitmap version of this filter never removes
-	 * objects which the other side specifically asked for,
-	 * so we must match that behavior.
-	 */
-	tips = find_tip_objects(bitmap_git, tip_objects, type);
+	if (bitmap_git->base)
+		filter_bitmap_exclude_type_1(bitmap_git->base, tips, to_filter,
+					     type);
 
 	/*
 	 * We can use the type-level bitmap for 'type' to work in whole
@@ -1741,13 +1737,30 @@ static void filter_bitmap_exclude_type(struct bitmap_index *bitmap_git,
 	 * not have been caught by the loop above. We'll have to check
 	 * them individually.
 	 */
-	for (i = 0; i < eindex->count; i++) {
+	for (i = 0, eindex = &bitmap_git->ext_index; i < eindex->count; i++) {
 		size_t pos = st_add(i, bitmap_non_extended_bits(bitmap_git));
 		if (eindex->objects[i]->type == type &&
 		    bitmap_get(to_filter, pos) &&
 		    !bitmap_get(tips, pos))
 			bitmap_unset(to_filter, pos);
 	}
+}
+
+static void filter_bitmap_exclude_type(struct bitmap_index *bitmap_git,
+				       struct object_list *tip_objects,
+				       struct bitmap *to_filter,
+				       enum object_type type)
+{
+	struct bitmap *tips;
+
+	/*
+	 * The non-bitmap version of this filter never removes
+	 * objects which the other side specifically asked for,
+	 * so we must match that behavior.
+	 */
+	tips = find_tip_objects(bitmap_git, tip_objects, type);
+
+	filter_bitmap_exclude_type_1(bitmap_git, tips, to_filter, type);
 
 	bitmap_free(tips);
 }
