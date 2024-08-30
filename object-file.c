@@ -115,6 +115,33 @@ static void git_hash_sha1_final_oid(struct object_id *oid, git_hash_ctx *ctx)
 	oid->algo = GIT_HASH_SHA1;
 }
 
+static void git_hash_sha1_init_fast(git_hash_ctx *ctx)
+{
+	git_SHA1_Init_fast(&ctx->sha1_fast);
+}
+
+static void git_hash_sha1_clone_fast(git_hash_ctx *dst, const git_hash_ctx *src)
+{
+	git_SHA1_Clone_fast(&dst->sha1_fast, &src->sha1_fast);
+}
+
+static void git_hash_sha1_update_fast(git_hash_ctx *ctx, const void *data,
+				      size_t len)
+{
+	git_SHA1_Update_fast(&ctx->sha1_fast, data, len);
+}
+
+static void git_hash_sha1_final_fast(unsigned char *hash, git_hash_ctx *ctx)
+{
+	git_SHA1_Final_fast(hash, &ctx->sha1_fast);
+}
+
+static void git_hash_sha1_final_oid_fast(struct object_id *oid, git_hash_ctx *ctx)
+{
+	git_SHA1_Final_fast(oid->hash, &ctx->sha1_fast);
+	memset(oid->hash + GIT_SHA1_RAWSZ, 0, GIT_MAX_RAWSZ - GIT_SHA1_RAWSZ);
+	oid->algo = GIT_HASH_SHA1;
+}
 
 static void git_hash_sha256_init(git_hash_ctx *ctx)
 {
@@ -189,6 +216,11 @@ const struct git_hash_algo hash_algos[GIT_HASH_NALGOS] = {
 		.update_fn = git_hash_unknown_update,
 		.final_fn = git_hash_unknown_final,
 		.final_oid_fn = git_hash_unknown_final_oid,
+		.fast_init_fn = git_hash_unknown_init,
+		.fast_clone_fn = git_hash_unknown_clone,
+		.fast_update_fn = git_hash_unknown_update,
+		.fast_final_fn = git_hash_unknown_final,
+		.fast_final_oid_fn = git_hash_unknown_final_oid,
 		.empty_tree = NULL,
 		.empty_blob = NULL,
 		.null_oid = NULL,
@@ -204,6 +236,11 @@ const struct git_hash_algo hash_algos[GIT_HASH_NALGOS] = {
 		.update_fn = git_hash_sha1_update,
 		.final_fn = git_hash_sha1_final,
 		.final_oid_fn = git_hash_sha1_final_oid,
+		.fast_init_fn = git_hash_sha1_init_fast,
+		.fast_clone_fn = git_hash_sha1_clone_fast,
+		.fast_update_fn = git_hash_sha1_update_fast,
+		.fast_final_fn = git_hash_sha1_final_fast,
+		.fast_final_oid_fn = git_hash_sha1_final_oid_fast,
 		.empty_tree = &empty_tree_oid,
 		.empty_blob = &empty_blob_oid,
 		.null_oid = &null_oid_sha1,
@@ -219,6 +256,11 @@ const struct git_hash_algo hash_algos[GIT_HASH_NALGOS] = {
 		.update_fn = git_hash_sha256_update,
 		.final_fn = git_hash_sha256_final,
 		.final_oid_fn = git_hash_sha256_final_oid,
+		.fast_init_fn = git_hash_sha256_init,
+		.fast_clone_fn = git_hash_sha256_clone,
+		.fast_update_fn = git_hash_sha256_update,
+		.fast_final_fn = git_hash_sha256_final,
+		.fast_final_oid_fn = git_hash_sha256_final_oid,
 		.empty_tree = &empty_tree_oid_sha256,
 		.empty_blob = &empty_blob_oid_sha256,
 		.null_oid = &null_oid_sha256,
