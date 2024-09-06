@@ -1,7 +1,7 @@
 #!/bin/sh
 
 VERSION_A=.
-VERSION_B=v1.0.0
+VERSION_B=v1.6.6.3
 
 : ${LIB_GIT_DAEMON_PORT:=5500}
 LIB_GIT_DAEMON_COMMAND='git.a daemon'
