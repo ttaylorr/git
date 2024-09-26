@@ -2075,6 +2075,7 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 		off_t base_offset;
 		uint32_t base_pos;
 		uint32_t base_bitmap_pos;
+		int cross_pack = 0;
 
 		/*
 		 * Find the position of the base object so we can look it up
@@ -2086,28 +2087,29 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 		 */
 		base_offset = get_delta_base(pack->p, w_curs, &offset, type,
 					     delta_obj_offset);
+
 		if (!base_offset)
 			return 0;
 
 		offset_to_pack_pos(pack->p, base_offset, &base_pos);
 
 		if (bitmap_is_midx(bitmap_git)) {
-			/*
-			 * Cross-pack deltas are rejected for now, but could
-			 * theoretically be supported in the future.
-			 *
-			 * We would need to ensure that we're sending both
-			 * halves of the delta/base pair, regardless of whether
-			 * or not the two cross a pack boundary. If they do,
-			 * then we must convert the delta to an REF_DELTA to
-			 * refer back to the base in the other pack.
-			 * */
-			if (midx_pair_to_pack_pos(bitmap_git->midx,
-						  pack->pack_int_id,
-						  base_offset,
-						  &base_bitmap_pos) < 0) {
+			struct object_id base_oid;
+
+			nth_packed_object_id(&base_oid, pack->p,
+					     pack_pos_to_index(pack->p,
+							       base_pos));
+
+			if (!bsearch_midx(&base_oid, bitmap_git->midx,
+					  &base_pos))
 				return 0;
-			}
+			if (midx_to_pack_pos(bitmap_git->midx, base_pos,
+					      &base_bitmap_pos) < 0)
+				return 0;
+
+			if (pack_pos_to_midx(bitmap_git->midx, bitmap_pos) !=
+			    pack_pos_to_midx(bitmap_git->midx, base_bitmap_pos))
+				cross_pack = 1;
 		} else {
 			if (offset_to_pack_pos(pack->p, base_offset,
 					       &base_pos) < 0)
@@ -2128,15 +2130,18 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 		}
 
 		/*
-		 * And finally, if we're not sending the base as part of our
-		 * reuse chunk, then don't send this object either. The base
-		 * would come after us, along with other objects not
-		 * necessarily in the pack, which means we'd need to convert
-		 * to REF_DELTA on the fly. Better to just let the normal
-		 * object_entry code path handle it.
+		 * Don't send this object if we're not sending the base,
+		 * and the client does not already have it (indicated by
+		 * seeing the base on the HAVES side of the query).
 		 */
-		if (!bitmap_get(reuse, base_bitmap_pos))
-			return 0;
+		if (!bitmap_get(reuse, base_bitmap_pos) || cross_pack) {
+			if (!bitmap_git->haves ||
+			    bitmap_get(bitmap_git->haves, base_bitmap_pos))
+				bitmap_set(pack->to_ref_delta,
+					   bitmap_pos - pack->bitmap_pos);
+			else
+				return 0;
+		}
 	}
 
 	/*
