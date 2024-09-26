@@ -497,6 +497,7 @@ int nth_bitmapped_pack(struct repository *r, struct multi_pack_index *m,
 				 sizeof(uint32_t));
 	bp->pack_int_id = pack_int_id;
 	bp->from_midx = m;
+	bp->to_ref_delta = bitmap_new();
 
 	return 0;
 }

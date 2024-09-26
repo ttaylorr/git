@@ -62,6 +62,8 @@ struct bitmapped_pack {
 
 	struct multi_pack_index *from_midx; /* MIDX only */
 	uint32_t pack_int_id; /* MIDX only */
+
+	struct bitmap *to_ref_delta;
 };
 
 struct bitmap_index *prepare_bitmap_git(struct repository *r);

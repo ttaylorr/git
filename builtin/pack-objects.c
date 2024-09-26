@@ -1018,8 +1018,8 @@ static off_t find_reused_offset(off_t where)
 }
 
 static void write_reused_pack_one(struct bitmapped_pack *reuse_packfile,
-				  size_t pos, struct hashfile *out,
-				  off_t pack_start,
+				  size_t pos, size_t bitmap_pos,
+				  struct hashfile *out, off_t pack_start,
 				  struct pack_window **w_curs)
 {
 	off_t offset, next, cur;
@@ -1046,8 +1046,14 @@ static void write_reused_pack_one(struct bitmapped_pack *reuse_packfile,
 		base_offset = get_delta_base(reuse_packfile->p, w_curs, &cur, type, offset);
 		assert(base_offset != 0);
 
-		/* Convert to REF_DELTA if we must... */
-		if (!allow_ofs_delta) {
+		/*
+		 * Determine if we can send the object as an OFS_DELTA (if the
+		 * delta/base occur in the same pack), or if it needs to be
+		 * converted (otherwise, or if OFS_DELTAs are not allowed).
+		 */
+		if (!allow_ofs_delta ||
+		    bitmap_get(reuse_packfile->to_ref_delta,
+			       bitmap_pos - reuse_packfile->bitmap_pos)) {
 			uint32_t base_pos;
 			struct object_id base_oid;
 
@@ -1118,10 +1124,13 @@ static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_packfile,
 			last = BITS_IN_EWORD;
 
 		for (; offset < last; offset++) {
+			size_t bit_pos = word_pos * BITS_IN_EWORD + offset;
+
 			if (word >> offset == 0)
 				return word_pos;
-			if (!bitmap_get(reuse_packfile_bitmap,
-					word_pos * BITS_IN_EWORD + offset))
+			if (!bitmap_get(reuse_packfile_bitmap, bit_pos) ||
+			    bitmap_get(reuse_packfile->to_ref_delta,
+				       bit_pos - reuse_packfile->bitmap_pos))
 				return word_pos;
 		}
 
@@ -1139,7 +1148,23 @@ static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_packfile,
 	 * pick the last word boundary in the same range. If we have at
 	 * least one word's worth of bits to process, continue on.
 	 */
-	end = reuse_packfile->bitmap_pos + reuse_packfile->bitmap_nr;
+	if (reuse_packfile->bitmap_pos) {
+		/*
+		 * Truncate the reusable region to the last word
+		 * boundary before any bits corresponding to objects
+		 * which have to be converted to REF_DELTAs, since those
+		 * cannot be reused verbatim and must be converted by
+		 * write_reused_pack_one().
+		 */
+		size_t i = pos;
+		for (; i < reuse_packfile->bitmap_pos + reuse_packfile->bitmap_nr; i++)
+			if (bitmap_get(reuse_packfile->to_ref_delta,
+				       i - reuse_packfile->bitmap_pos))
+				break;
+		end = i;
+	} else {
+		end = reuse_packfile->bitmap_pos + reuse_packfile->bitmap_nr;
+	}
 	if (end % BITS_IN_EWORD)
 		end -= end % BITS_IN_EWORD;
 	if (pos >= end)
@@ -1233,8 +1258,9 @@ static void write_reused_pack(struct bitmapped_pack *reuse_packfile,
 				pack_pos = pos + offset;
 			}
 
-			write_reused_pack_one(reuse_packfile, pack_pos, f,
-					      pack_start, &w_curs);
+			write_reused_pack_one(reuse_packfile, pack_pos,
+					      pos + offset, f, pack_start,
+					      &w_curs);
 			display_progress(progress_state, ++written);
 		}
 	}

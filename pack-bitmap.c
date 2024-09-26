@@ -2326,6 +2326,8 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 		packs[packs_nr].bitmap_nr = pack->num_objects;
 		packs[packs_nr].bitmap_pos = 0;
 		packs[packs_nr].from_midx = bitmap_git->midx;
+		packs[packs_nr].to_ref_delta =
+			bitmap_word_alloc(pack->num_objects / BITS_IN_EWORD);
 
 		objects_nr = packs[packs_nr++].bitmap_nr;
 	}
