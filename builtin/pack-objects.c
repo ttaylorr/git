@@ -1017,7 +1017,7 @@ static off_t find_reused_offset(off_t where)
 	return reused_chunks[lo-1].difference;
 }
 
-static void write_reused_pack_one(struct packed_git *reuse_packfile,
+static void write_reused_pack_one(struct bitmapped_pack *reuse_packfile,
 				  size_t pos, struct hashfile *out,
 				  off_t pack_start,
 				  struct pack_window **w_curs)
@@ -1026,14 +1026,14 @@ static void write_reused_pack_one(struct packed_git *reuse_packfile,
 	enum object_type type;
 	unsigned long size;
 
-	offset = pack_pos_to_offset(reuse_packfile, pos);
-	next = pack_pos_to_offset(reuse_packfile, pos + 1);
+	offset = pack_pos_to_offset(reuse_packfile->p, pos);
+	next = pack_pos_to_offset(reuse_packfile->p, pos + 1);
 
 	record_reused_object(offset,
 			     offset - (hashfile_total(out) - pack_start));
 
 	cur = offset;
-	type = unpack_object_header(reuse_packfile, w_curs, &cur, &size);
+	type = unpack_object_header(reuse_packfile->p, w_curs, &cur, &size);
 	assert(type >= 0);
 
 	if (type == OBJ_OFS_DELTA) {
@@ -1043,7 +1043,7 @@ static void write_reused_pack_one(struct packed_git *reuse_packfile,
 		unsigned char header[MAX_PACK_OBJECT_HEADER];
 		unsigned len;
 
-		base_offset = get_delta_base(reuse_packfile, w_curs, &cur, type, offset);
+		base_offset = get_delta_base(reuse_packfile->p, w_curs, &cur, type, offset);
 		assert(base_offset != 0);
 
 		/* Convert to REF_DELTA if we must... */
@@ -1051,20 +1051,20 @@ static void write_reused_pack_one(struct packed_git *reuse_packfile,
 			uint32_t base_pos;
 			struct object_id base_oid;
 
-			if (offset_to_pack_pos(reuse_packfile, base_offset, &base_pos) < 0)
+			if (offset_to_pack_pos(reuse_packfile->p, base_offset, &base_pos) < 0)
 				die(_("expected object at offset %"PRIuMAX" "
 				      "in pack %s"),
 				    (uintmax_t)base_offset,
-				    reuse_packfile->pack_name);
+				    reuse_packfile->p->pack_name);
 
-			nth_packed_object_id(&base_oid, reuse_packfile,
-					     pack_pos_to_index(reuse_packfile, base_pos));
+			nth_packed_object_id(&base_oid, reuse_packfile->p,
+					     pack_pos_to_index(reuse_packfile->p, base_pos));
 
 			len = encode_in_pack_object_header(header, sizeof(header),
 							   OBJ_REF_DELTA, size);
 			hashwrite(out, header, len);
 			hashwrite(out, base_oid.hash, the_hash_algo->rawsz);
-			copy_pack_data(out, reuse_packfile, w_curs, cur, next - cur);
+			copy_pack_data(out, reuse_packfile->p, w_curs, cur, next - cur);
 			return;
 		}
 
@@ -1088,14 +1088,14 @@ static void write_reused_pack_one(struct packed_git *reuse_packfile,
 
 			hashwrite(out, header, len);
 			hashwrite(out, ofs_header + sizeof(ofs_header) - ofs_len, ofs_len);
-			copy_pack_data(out, reuse_packfile, w_curs, cur, next - cur);
+			copy_pack_data(out, reuse_packfile->p, w_curs, cur, next - cur);
 			return;
 		}
 
 		/* ...otherwise we have no fixup, and can write it verbatim */
 	}
 
-	copy_pack_data(out, reuse_packfile, w_curs, offset, next - offset);
+	copy_pack_data(out, reuse_packfile->p, w_curs, offset, next - offset);
 }
 
 static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_packfile,
@@ -1233,7 +1233,7 @@ static void write_reused_pack(struct bitmapped_pack *reuse_packfile,
 				pack_pos = pos + offset;
 			}
 
-			write_reused_pack_one(reuse_packfile->p, pack_pos, f,
+			write_reused_pack_one(reuse_packfile, pack_pos, f,
 					      pack_start, &w_curs);
 			display_progress(progress_state, ++written);
 		}
