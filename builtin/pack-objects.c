@@ -1446,6 +1446,8 @@ static void write_pack_file(void)
 		nr_remaining -= nr_written;
 	} while (nr_remaining && i < to_pack.nr_objects);
 
+	for (i = 0; i < reuse_packfiles_nr; i++)
+		free(reuse_packfiles[i].to_ref_delta);
 	free(reuse_packfiles);
 	free(written_list);
 	free(write_order);
