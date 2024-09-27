@@ -1420,6 +1420,7 @@ static void write_pack_file(void)
 		nr_remaining -= nr_written;
 	} while (nr_remaining && i < to_pack.nr_objects);
 
+	free(reuse_packfiles);
 	free(written_list);
 	free(write_order);
 	stop_progress(&progress_state);
