@@ -2142,7 +2142,8 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 		 * seeing the base on the HAVES side of the query).
 		 */
 		if (!bitmap_get(reuse, base_bitmap_pos) || cross_pack) {
-			if (!bitmap_git->haves ||
+			if (!bitmap_git->filtered &&
+			    bitmap_git->haves &&
 			    bitmap_get(bitmap_git->haves, base_bitmap_pos))
 				bitmap_set(pack->to_ref_delta,
 					   bitmap_pos - pack->bitmap_pos);
