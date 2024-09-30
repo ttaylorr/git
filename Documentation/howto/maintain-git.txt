@@ -122,6 +122,13 @@ Note that before v1.9.0 release, the version numbers used to be
 structured slightly differently.  vX.Y.Z were feature releases while
 vX.Y.Z.W were maintenance releases for vX.Y.Z.
 
+Because most of the lines of code in Git are written by individual
+contributors, and contributions come in the form of e-mailed patches
+published on the mailing list, the project maintains a mapping from
+individual commits to the Message-Id of the e-mail that resulted in
+the commit, to help tracking the origin of the changes. The notes
+in "refs/notes/amlog" are used for this purpose, and are published
+along with the broken-out branches to the maintainer's repository.
 
 A Typical Git Day
 -----------------
@@ -164,6 +171,24 @@ by doing the following:
 
    In practice, almost no patch directly goes to 'master' or
    'maint'.
+
+   The maintainer is expected to update refs/notes/amlog with a
+   mapping between the applied commit and the 'Message-Id'
+   corresponding to the e-mail which carried the patch.
+
+   This mapping is created with the aid of the "post-applypatch" hook
+   found in the 'todo' branch. That hook should be installed before
+   applying patches. It is also helpful to carry forward any relevant
+   amlog entries when rebasing, so the following config may be useful:
+
+      [notes]
+        rewriteRef = refs/notes/amlog
+
+   (note that this configuration is not read by 'cherry-pick').
+
+   Finally, take care that the amlog entries are pushed out during
+   integration cycles since external tools and contributors (in
+   addition to internal scripts) may rely on them.
 
  - Review the last issue of "What's cooking" message, review the
    topics ready for merging (topic->master and topic->maint).  Use
