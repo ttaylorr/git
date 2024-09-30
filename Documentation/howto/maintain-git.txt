@@ -165,6 +165,22 @@ by doing the following:
    In practice, almost no patch directly goes to 'master' or
    'maint'.
 
+   The maintainer is expected to update refs/notes/amlog with a
+   mapping between the applied commit and the 'Message-Id'
+   corresponding to the e-mail which carried the patch.
+
+   This mapping is created with the aid of the "post-applypatch" hook
+   found in the 'todo' branch. That hook should be installed before
+   applying patches. It is also helpful to carry forward any relevant
+   amlog entries when rebasing, so the following config may be useful:
+
+      [notes]
+	rewriteref = refs/notes/amlog
+
+   Finally, take care that the amlog entries are pushed out during
+   integration cycles since external tools and contributors (in
+   addition to internal scripts) may rely on them.
+
  - Review the last issue of "What's cooking" message, review the
    topics ready for merging (topic->master and topic->maint).  Use
    "Meta/cook -w" script (where Meta/ contains a checkout of the
