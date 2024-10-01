@@ -2054,7 +2054,6 @@ cleanup:
 static int try_partial_reuse(struct bitmap_index *bitmap_git,
 			     struct bitmapped_pack *pack,
 			     size_t bitmap_pos,
-			     uint32_t pack_pos,
 			     off_t offset,
 			     struct bitmap *reuse,
 			     struct pack_window **w_curs)
@@ -2062,9 +2061,6 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 	off_t delta_obj_offset;
 	enum object_type type;
 	unsigned long size;
-
-	if (pack_pos >= pack->p->num_objects)
-		return -1; /* not actually in the pack */
 
 	delta_obj_offset = offset;
 	type = unpack_object_header(pack->p, w_curs, &offset, &size);
@@ -2121,8 +2117,13 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 			 * OFS_DELTA is the default). But let's double check to
 			 * make sure the pack wasn't written with odd
 			 * parameters.
+			 *
+			 * Since we're working on a single-pack bitmap, we can
+			 * use the object offset as a proxy for the bit
+			 * position, since the bits are ordered by their
+			 * positions within the pack.
 			 */
-			if (base_pos >= pack_pos)
+			if (base_offset >= offset)
 				return 0;
 			base_bitmap_pos = pack->bitmap_pos + base_pos;
 		}
@@ -2184,7 +2185,6 @@ static void reuse_partial_packfile_from_bitmap_1(struct bitmap_index *bitmap_git
 
 		for (offset = 0; offset < BITS_IN_EWORD; offset++) {
 			size_t bit_pos;
-			uint32_t pack_pos;
 			off_t ofs;
 
 			if (word >> offset == 0)
@@ -2203,12 +2203,9 @@ static void reuse_partial_packfile_from_bitmap_1(struct bitmap_index *bitmap_git
 
 				midx_pos = pack_pos_to_midx(bitmap_git->midx, bit_pos);
 				ofs = nth_midxed_offset(bitmap_git->midx, midx_pos);
-
-				if (offset_to_pack_pos(pack->p, ofs, &pack_pos) < 0)
-					BUG("could not find object in pack %s "
-					    "at offset %"PRIuMAX" in MIDX",
-					    pack_basename(pack->p), (uintmax_t)ofs);
 			} else {
+				uint32_t pack_pos;
+
 				pack_pos = cast_size_t_to_uint32_t(st_sub(bit_pos, pack->bitmap_pos));
 				if (pack_pos >= pack->p->num_objects)
 					BUG("advanced beyond the end of pack %s (%"PRIuMAX" > %"PRIu32")",
@@ -2219,7 +2216,7 @@ static void reuse_partial_packfile_from_bitmap_1(struct bitmap_index *bitmap_git
 			}
 
 			if (try_partial_reuse(bitmap_git, pack, bit_pos,
-					      pack_pos, ofs, reuse, &w_curs) < 0) {
+					      ofs, reuse, &w_curs) < 0) {
 				/*
 				 * try_partial_reuse indicated we couldn't reuse
 				 * any bits, so there is no point in trying more
