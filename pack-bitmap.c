@@ -2085,8 +2085,6 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 		if (!base_offset)
 			return 0;
 
-		offset_to_pack_pos(pack->p, base_offset, &base_pos);
-
 		if (bitmap_is_midx(bitmap_git)) {
 			/*
 			 * Cross-pack deltas are rejected for now, but could
