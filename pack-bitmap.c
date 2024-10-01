@@ -2047,6 +2047,54 @@ cleanup:
 	return NULL;
 }
 
+static int find_base_bitmap_pos(struct bitmap_index *bitmap_git,
+				struct bitmapped_pack *pack,
+				off_t base_offset,
+				off_t delta_obj_offset,
+				uint32_t *base_bitmap_pos)
+{
+	if (bitmap_is_midx(bitmap_git)) {
+		/*
+		 * Cross-pack deltas are rejected for now, but could
+		 * theoretically be supported in the future.
+		 *
+		 * We would need to ensure that we're sending both
+		 * halves of the delta/base pair, regardless of whether
+		 * or not the two cross a pack boundary. If they do,
+		 * then we must convert the delta to an REF_DELTA to
+		 * refer back to the base in the other pack.
+		 * */
+		if (midx_pair_to_pack_pos(bitmap_git->midx, pack->pack_int_id,
+					  base_offset, base_bitmap_pos) < 0)
+			return -1;
+	} else {
+		uint32_t base_pos;
+
+		if (offset_to_pack_pos(pack->p, base_offset, &base_pos) < 0)
+			return -1;
+		/*
+		 * We assume delta dependencies always point backwards.
+		 * This lets us do a single pass, and is basically
+		 * always true due to the way OFS_DELTAs work. You would
+		 * not typically find REF_DELTA in a bitmapped pack,
+		 * since we only bitmap packs we write fresh, and
+		 * OFS_DELTA is the default). But let's double check to
+		 * make sure the pack wasn't written with odd
+		 * parameters.
+		 *
+		 * Since we're working on a single-pack bitmap, we can
+		 * use the object offset as a proxy for the bit
+		 * position, since the bits are ordered by their
+		 * positions within the pack.
+		 */
+		if (base_offset >= delta_obj_offset)
+			return -1;
+		*base_bitmap_pos = pack->bitmap_pos + base_pos;
+	}
+
+	return 0;
+}
+
 /*
  * -1 means "stop trying further objects"; 0 means we may or may not have
  * reused, but you can keep feeding bits.
@@ -2069,7 +2117,6 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 
 	if (type == OBJ_REF_DELTA || type == OBJ_OFS_DELTA) {
 		off_t base_offset;
-		uint32_t base_pos;
 		uint32_t base_bitmap_pos;
 
 		/*
@@ -2082,49 +2129,10 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 		 */
 		base_offset = get_delta_base(pack->p, w_curs, &offset, type,
 					     delta_obj_offset);
-		if (!base_offset)
+		if (!base_offset ||
+		    find_base_bitmap_pos(bitmap_git, pack, base_offset,
+					 delta_obj_offset, &base_bitmap_pos) < 0)
 			return 0;
-
-		if (bitmap_is_midx(bitmap_git)) {
-			/*
-			 * Cross-pack deltas are rejected for now, but could
-			 * theoretically be supported in the future.
-			 *
-			 * We would need to ensure that we're sending both
-			 * halves of the delta/base pair, regardless of whether
-			 * or not the two cross a pack boundary. If they do,
-			 * then we must convert the delta to an REF_DELTA to
-			 * refer back to the base in the other pack.
-			 * */
-			if (midx_pair_to_pack_pos(bitmap_git->midx,
-						  pack->pack_int_id,
-						  base_offset,
-						  &base_bitmap_pos) < 0) {
-				return 0;
-			}
-		} else {
-			if (offset_to_pack_pos(pack->p, base_offset,
-					       &base_pos) < 0)
-				return 0;
-			/*
-			 * We assume delta dependencies always point backwards.
-			 * This lets us do a single pass, and is basically
-			 * always true due to the way OFS_DELTAs work. You would
-			 * not typically find REF_DELTA in a bitmapped pack,
-			 * since we only bitmap packs we write fresh, and
-			 * OFS_DELTA is the default). But let's double check to
-			 * make sure the pack wasn't written with odd
-			 * parameters.
-			 *
-			 * Since we're working on a single-pack bitmap, we can
-			 * use the object offset as a proxy for the bit
-			 * position, since the bits are ordered by their
-			 * positions within the pack.
-			 */
-			if (base_offset >= delta_obj_offset)
-				return 0;
-			base_bitmap_pos = pack->bitmap_pos + base_pos;
-		}
 
 		/*
 		 * And finally, if we're not sending the base as part of our
