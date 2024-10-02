@@ -112,6 +112,12 @@ struct bitmap_index {
 	/* "have" bitmap from the last performed walk */
 	struct bitmap *haves;
 
+	/*
+	 * Whether the last performed walk had objects removed from
+	 * 'result' due to object filtering.
+	 */
+	int filtered;
+
 	/* Version of the bitmap index */
 	unsigned int version;
 };
@@ -2021,6 +2027,7 @@ struct bitmap_index *prepare_bitmap_walk(struct rev_info *revs,
 
 	bitmap_git->result = wants_bitmap;
 	bitmap_git->haves = haves_bitmap;
+	bitmap_git->filtered = revs->unpacked || revs->filter.choice != LOFC_DISABLED;
 
 	object_list_free(&wants);
 	object_list_free(&haves);
