@@ -223,6 +223,7 @@ static size_t reuse_packfiles_nr;
 static size_t reuse_packfiles_used_nr;
 static uint32_t reuse_packfile_objects;
 static struct bitmap *reuse_packfile_bitmap;
+static struct bitmap *reuse_as_ref_delta_packfile_bitmap;
 
 static int use_bitmap_index_default = 1;
 static int use_bitmap_index = -1;
@@ -4074,7 +4075,9 @@ static int get_object_list_from_bitmap(struct rev_info *revs)
 						   &reuse_packfiles,
 						   &reuse_packfiles_nr,
 						   &reuse_packfile_bitmap,
-						   allow_pack_reuse == MULTI_PACK_REUSE);
+						   &reuse_as_ref_delta_packfile_bitmap,
+						   allow_pack_reuse == MULTI_PACK_REUSE,
+						   0);
 
 	if (reuse_packfiles) {
 		reuse_packfile_objects = bitmap_popcount(reuse_packfile_bitmap);

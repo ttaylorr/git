@@ -2058,22 +2058,53 @@ static int find_base_bitmap_pos(struct bitmap_index *bitmap_git,
 				struct bitmapped_pack *pack,
 				off_t base_offset,
 				off_t delta_obj_offset,
+				int can_convert_to_ref_delta,
 				uint32_t *base_bitmap_pos)
 {
 	if (bitmap_is_midx(bitmap_git)) {
-		/*
-		 * Cross-pack deltas are rejected for now, but could
-		 * theoretically be supported in the future.
-		 *
-		 * We would need to ensure that we're sending both
-		 * halves of the delta/base pair, regardless of whether
-		 * or not the two cross a pack boundary. If they do,
-		 * then we must convert the delta to an REF_DELTA to
-		 * refer back to the base in the other pack.
-		 * */
-		if (midx_pair_to_pack_pos(bitmap_git->midx, pack->pack_int_id,
-					  base_offset, base_bitmap_pos) < 0)
-			return -1;
+		if (can_convert_to_ref_delta) {
+			struct object_id base_oid;
+			uint32_t base_pack_pos;
+			uint32_t base_idx_pos;
+			uint32_t base_midx_pos;
+
+			/*
+			 * First convert from the base object's offset
+			 * to its pack position in pack order relative
+			 * to its source pack. Use that information to
+			 * find the base object's OID.
+			 */
+			if (offset_to_pack_pos(pack->p, base_offset,
+					       &base_pack_pos) < 0)
+				return -1;
+			base_idx_pos = pack_pos_to_index(pack->p, base_pack_pos);
+			if (nth_packed_object_id(&base_oid, pack->p, base_idx_pos) < 0)
+				return -1;
+
+			/*
+			 * Now find the base object's lexical position
+			 * in the MIDX, and convert that to a bitmap
+			 * position in the MIDX's pseudo-pack order.
+			 */
+			if (!bsearch_midx(&base_oid, bitmap_git->midx,
+					  &base_midx_pos))
+				return -1;
+			if (midx_to_pack_pos(bitmap_git->midx, base_midx_pos,
+					     base_bitmap_pos) < 0)
+				return -1;
+		} else {
+			/*
+			 * The delta/base objects were selected from
+			 * different packs in the MIDX, so the delta is
+			 * not directly re-usable without converting to
+			 * a REF_DELTA, which we cannot do in this case.
+			 */
+			if (midx_pair_to_pack_pos(bitmap_git->midx,
+						  pack->pack_int_id,
+						  base_offset,
+						  base_bitmap_pos) < 0)
+				return -1;
+		}
 	} else {
 		uint32_t base_pos;
 
@@ -2111,11 +2142,13 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 			     size_t bitmap_pos,
 			     off_t offset,
 			     struct bitmap *reuse,
+			     struct bitmap *reuse_as_ref_delta,
 			     struct pack_window **w_curs)
 {
 	off_t delta_obj_offset;
 	enum object_type type;
 	unsigned long size;
+	int can_convert_to_ref_delta = !!reuse_as_ref_delta;
 
 	delta_obj_offset = offset;
 	type = unpack_object_header(pack->p, w_curs, &offset, &size);
@@ -2125,6 +2158,7 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 	if (type == OBJ_REF_DELTA || type == OBJ_OFS_DELTA) {
 		off_t base_offset;
 		uint32_t base_bitmap_pos;
+		int wants_base, cross_pack;
 
 		/*
 		 * Find the position of the base object so we can look it up
@@ -2138,7 +2172,9 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 					     delta_obj_offset);
 		if (!base_offset ||
 		    find_base_bitmap_pos(bitmap_git, pack, base_offset,
-					 delta_obj_offset, &base_bitmap_pos) < 0)
+					 delta_obj_offset,
+					 can_convert_to_ref_delta,
+					 &base_bitmap_pos) < 0)
 			return 0;
 
 		/*
@@ -2149,8 +2185,18 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 		 * to REF_DELTA on the fly. Better to just let the normal
 		 * object_entry code path handle it.
 		 */
-		if (!bitmap_get(reuse, base_bitmap_pos))
-			return 0;
+		wants_base = bitmap_get(reuse, base_bitmap_pos);
+		cross_pack = base_bitmap_pos < pack->bitmap_pos;
+		if (!wants_base || cross_pack) {
+			int has_base = 0;
+			if (bitmap_git->haves)
+				has_base = bitmap_get(bitmap_git->haves, base_bitmap_pos);
+
+			if (can_convert_to_ref_delta && (wants_base || has_base))
+				bitmap_set(reuse_as_ref_delta, bitmap_pos);
+			else
+				return 0;
+		}
 	}
 
 	/*
@@ -2162,7 +2208,8 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 
 static void reuse_partial_packfile_from_bitmap_1(struct bitmap_index *bitmap_git,
 						 struct bitmapped_pack *pack,
-						 struct bitmap *reuse)
+						 struct bitmap *reuse,
+						 struct bitmap *reuse_as_ref_delta)
 {
 	struct bitmap *result = bitmap_git->result;
 	struct pack_window *w_curs = NULL;
@@ -2229,7 +2276,8 @@ static void reuse_partial_packfile_from_bitmap_1(struct bitmap_index *bitmap_git
 			}
 
 			if (try_partial_reuse(bitmap_git, pack, bit_pos,
-					      ofs, reuse, &w_curs) < 0) {
+					      ofs, reuse, reuse_as_ref_delta,
+					      &w_curs) < 0) {
 				/*
 				 * try_partial_reuse indicated we couldn't reuse
 				 * any bits, so there is no point in trying more
@@ -2264,12 +2312,15 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 					struct bitmapped_pack **packs_out,
 					size_t *packs_nr_out,
 					struct bitmap **reuse_out,
-					int multi_pack_reuse)
+					struct bitmap **reuse_as_ref_delta_out,
+					int multi_pack_reuse,
+					int can_reuse_as_ref_delta)
 {
 	struct repository *r = the_repository;
 	struct bitmapped_pack *packs = NULL;
 	struct bitmap *result = bitmap_git->result;
 	struct bitmap *reuse;
+	struct bitmap *reuse_as_ref_delta = NULL;
 	size_t i;
 	size_t packs_nr = 0, packs_alloc = 0;
 	size_t word_alloc;
@@ -2343,10 +2394,14 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	word_alloc = objects_nr / BITS_IN_EWORD;
 	if (objects_nr % BITS_IN_EWORD)
 		word_alloc++;
+
 	reuse = bitmap_word_alloc(word_alloc);
+	if (can_reuse_as_ref_delta && !bitmap_git->filtered)
+		reuse_as_ref_delta = bitmap_word_alloc(word_alloc);
 
 	for (i = 0; i < packs_nr; i++)
-		reuse_partial_packfile_from_bitmap_1(bitmap_git, &packs[i], reuse);
+		reuse_partial_packfile_from_bitmap_1(bitmap_git, &packs[i],
+						     reuse, reuse_as_ref_delta);
 
 	if (bitmap_is_empty(reuse)) {
 		free(packs);
@@ -2362,6 +2417,7 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	*packs_out = packs;
 	*packs_nr_out = packs_nr;
 	*reuse_out = reuse;
+	*reuse_as_ref_delta_out = reuse_as_ref_delta;
 }
 
 int bitmap_walk_contains(struct bitmap_index *bitmap_git,
