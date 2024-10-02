@@ -1019,8 +1019,8 @@ static off_t find_reused_offset(off_t where)
 }
 
 static void write_reused_pack_one(struct packed_git *reuse_packfile,
-				  size_t pos, struct hashfile *out,
-				  off_t pack_start,
+				  size_t pos, size_t bit_pos,
+				  struct hashfile *out, off_t pack_start,
 				  struct pack_window **w_curs)
 {
 	off_t offset, next, cur;
@@ -1048,7 +1048,9 @@ static void write_reused_pack_one(struct packed_git *reuse_packfile,
 		assert(base_offset != 0);
 
 		/* Convert to REF_DELTA if we must... */
-		if (!allow_ofs_delta) {
+		if (!allow_ofs_delta ||
+		    (reuse_as_ref_delta_packfile_bitmap &&
+		     bitmap_get(reuse_as_ref_delta_packfile_bitmap, bit_pos))) {
 			uint32_t base_pos;
 			struct object_id base_oid;
 
@@ -1124,6 +1126,10 @@ static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_packfile,
 			if (!bitmap_get(reuse_packfile_bitmap,
 					word_pos * BITS_IN_EWORD + offset))
 				return word_pos;
+			if (reuse_as_ref_delta_packfile_bitmap &&
+			    bitmap_get(reuse_as_ref_delta_packfile_bitmap,
+				       word_pos * BITS_IN_EWORD + offset))
+				return word_pos;
 		}
 
 		pos += BITS_IN_EWORD - (pos % BITS_IN_EWORD);
@@ -1146,10 +1152,24 @@ static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_packfile,
 	if (pos >= end)
 		return reuse_packfile->bitmap_pos / BITS_IN_EWORD;
 
-	while (pos < end &&
-	       reuse_packfile_bitmap->words[pos / BITS_IN_EWORD] == (eword_t)~0)
-		pos += BITS_IN_EWORD;
+	while (pos < end) {
+		size_t wpos = pos / BITS_IN_EWORD;
+		eword_t reuse;
 
+		reuse = reuse_packfile_bitmap->words[wpos];
+		if (reuse_as_ref_delta_packfile_bitmap) {
+			/*
+			 * Can't reuse verbatim any objects which need
+			 * to be first rewritten as REF_DELTAs.
+			 */
+			reuse &= ~reuse_as_ref_delta_packfile_bitmap->words[wpos];
+		}
+
+		if (reuse != (eword_t)~0)
+			break;
+
+		pos += BITS_IN_EWORD;
+	}
 	if (pos > end)
 		pos = end;
 
@@ -1234,7 +1254,8 @@ static void write_reused_pack(struct bitmapped_pack *reuse_packfile,
 				pack_pos = pos + offset;
 			}
 
-			write_reused_pack_one(reuse_packfile->p, pack_pos, f,
+			write_reused_pack_one(reuse_packfile->p, pack_pos,
+					      pos + offset, f,
 					      pack_start, &w_curs);
 			display_progress(progress_state, ++written);
 		}
@@ -4077,7 +4098,7 @@ static int get_object_list_from_bitmap(struct rev_info *revs)
 						   &reuse_packfile_bitmap,
 						   &reuse_as_ref_delta_packfile_bitmap,
 						   allow_pack_reuse == MULTI_PACK_REUSE,
-						   0);
+						   thin);
 
 	if (reuse_packfiles) {
 		reuse_packfile_objects = bitmap_popcount(reuse_packfile_bitmap);
