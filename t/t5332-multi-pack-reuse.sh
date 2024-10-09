@@ -51,6 +51,33 @@ test_pack_objects_reused () {
 	git index-pack --strict -o got.idx got.pack
 }
 
+# test_pack_objects_reused_thin <pack-reused> <packs-reused>
+test_pack_objects_reused_thin () {
+	: >trace2.txt &&
+	GIT_TRACE2_EVENT="$PWD/trace2.txt" \
+		git pack-objects --thin --delta-base-offset --stdout --revs \
+		>got.pack &&
+
+	test_pack_reused "$1" <trace2.txt &&
+	test_packs_reused "$2" <trace2.txt &&
+
+	git index-pack --strict --stdin --fix-thin -o got.idx <got.pack
+}
+
+# test_pack_objects_reused_filter <filter> <pack-reused> <packs-reused>
+test_pack_objects_reused_filter () {
+	: >trace2.txt &&
+	GIT_TRACE2_EVENT="$PWD/trace2.txt" \
+		git pack-objects --thin --delta-base-offset --stdout --revs \
+			--thin --filter="$1" \
+		>got.pack &&
+
+	test_pack_reused "$2" <trace2.txt &&
+	test_packs_reused "$3" <trace2.txt &&
+
+	git index-pack --strict --stdin --fix-thin -o got.idx <got.pack
+}
+
 test_expect_success 'preferred pack is reused for single-pack reuse' '
 	test_config pack.allowPackReuse single &&
 
@@ -208,6 +235,45 @@ test_expect_success 'can retain delta from uninteresting base (cross pack)' '
 	objects_nr="$(git rev-list --count --all --objects)" &&
 
 	test_pack_objects_reused_all $objects_nr $packs_nr
+'
+
+test_expect_success 'converts OFS_DELTA to REF_DELTA when possible' '
+	git init ofs-to-ref-delta &&
+	(
+		cd ofs-to-ref-delta &&
+
+		git config pack.allowPackReuse multi &&
+
+		test_seq 64 >f &&
+		git add f &&
+		test_tick &&
+		git commit -m "base" &&
+		base="$(git rev-parse HEAD)" &&
+
+		test_seq 32 >f &&
+		test_tick &&
+		git commit -a -m "delta" &&
+		delta="$(git rev-parse HEAD)" &&
+
+		git repack -ad &&
+
+		test_commit other &&
+
+		pack=$(git pack-objects --all --unpacked $packdir/pack) &&
+		git multi-pack-index write --bitmap \
+				--preferred-pack=pack-$pack.pack &&
+
+		have_delta "$(git rev-parse $delta:f)" "$(git rev-parse $base:f)" &&
+
+		cat >in <<-EOF &&
+		$delta
+		^$base
+		EOF
+
+		test_pack_objects_reused_thin 3 1 <in &&
+		test_pack_objects_reused 2 1 <in &&
+		test_pack_objects_reused_filter "blob:none" 2 1 <in
+	)
 '
 
 test_expect_success 'non-omitted delta in MIDX preferred pack' '

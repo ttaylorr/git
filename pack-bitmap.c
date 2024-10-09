@@ -2131,6 +2131,7 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 			     off_t offset,
 			     struct bitmap *reuse,
 			     struct bitmap *reuse_as_ref_delta,
+			     int thin_deltas,
 			     struct pack_window **w_curs)
 {
 	off_t delta_obj_offset;
@@ -2145,7 +2146,7 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 	if (type == OBJ_REF_DELTA || type == OBJ_OFS_DELTA) {
 		off_t base_offset;
 		uint32_t base_bitmap_pos;
-		int cross_pack;
+		int wants_base, cross_pack;
 
 		/*
 		 * Find the position of the base object so we can look it up
@@ -2164,19 +2165,25 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 			return 0;
 
 		/*
-		 * And finally, if we're not sending the base as part of our
-		 * reuse chunk, then don't send this object either. The base
-		 * would come after us, along with other objects not
-		 * necessarily in the pack, which means we'd need to convert
-		 * to REF_DELTA on the fly. Better to just let the normal
-		 * object_entry code path handle it.
+		 * And finally, if we're not sending the base as part of
+		 * our reuse chunk, then either convert the delta to a
+		 * REF_DELTA if the client supports thin deltas, or
+		 * don't send this object either.
 		 */
-		if (!bitmap_get(reuse, base_bitmap_pos))
-			return 0;
-
+		wants_base = bitmap_get(reuse, base_bitmap_pos);
 		cross_pack = base_bitmap_pos < pack->bitmap_pos;
-		if (cross_pack)
+
+		if (!wants_base) {
+			if (!thin_deltas)
+				return 0;
+			if (!bitmap_git->haves ||
+			    !bitmap_get(bitmap_git->haves, base_bitmap_pos))
+				return 0;
+
 			bitmap_set(reuse_as_ref_delta, bitmap_pos);
+		} else if (cross_pack) {
+			bitmap_set(reuse_as_ref_delta, bitmap_pos);
+		}
 	}
 	/*
 	 * If we got here, then the object is OK to reuse. Mark it.
@@ -2188,7 +2195,8 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 static void reuse_partial_packfile_from_bitmap_1(struct bitmap_index *bitmap_git,
 						 struct bitmapped_pack *pack,
 						 struct bitmap *reuse,
-						 struct bitmap *reuse_as_ref_delta)
+						 struct bitmap *reuse_as_ref_delta,
+						 int thin_deltas)
 {
 	struct bitmap *result = bitmap_git->result;
 	struct pack_window *w_curs = NULL;
@@ -2256,7 +2264,7 @@ static void reuse_partial_packfile_from_bitmap_1(struct bitmap_index *bitmap_git
 
 			if (try_partial_reuse(bitmap_git, pack, bit_pos,
 					      ofs, reuse, reuse_as_ref_delta,
-					      &w_curs) < 0) {
+					      thin_deltas, &w_curs) < 0) {
 				/*
 				 * try_partial_reuse indicated we couldn't reuse
 				 * any bits, so there is no point in trying more
@@ -2292,7 +2300,8 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 					size_t *packs_nr_out,
 					struct bitmap **reuse_out,
 					struct bitmap **reuse_as_ref_delta_out,
-					int multi_pack_reuse)
+					int multi_pack_reuse,
+					int thin_deltas)
 {
 	struct repository *r = the_repository;
 	struct bitmapped_pack *packs = NULL;
@@ -2375,9 +2384,22 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	reuse = bitmap_word_alloc(word_alloc);
 	reuse_as_ref_delta = bitmap_word_alloc(word_alloc);
 
+	if (bitmap_git->filtered) {
+		/*
+		 * If the bitmap traversal filtered objects, then we
+		 * can't trust the client actually has all of the
+		 * objects that appear in the 'haves' bitmap. In that
+		 * case, pretend like we don't support thin-deltas,
+		 * since we can't guarantee that the client has all of
+		 * the objects we think it has.
+		 */
+		thin_deltas = 0;
+	}
+
 	for (i = 0; i < packs_nr; i++)
 		reuse_partial_packfile_from_bitmap_1(bitmap_git, &packs[i],
-						     reuse, reuse_as_ref_delta);
+						     reuse, reuse_as_ref_delta,
+						     thin_deltas);
 
 	if (bitmap_is_empty(reuse)) {
 		free(packs);
