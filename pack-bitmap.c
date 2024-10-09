@@ -2102,11 +2102,6 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 				return 0;
 			}
 		} else {
-			uint32_t base_pos;
-
-			if (offset_to_pack_pos(pack->p, base_offset,
-					       &base_pos) < 0)
-				return 0;
 			/*
 			 * We assume delta dependencies always point backwards.
 			 * This lets us do a single pass, and is basically
@@ -2124,7 +2119,9 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 			 */
 			if (base_offset >= offset)
 				return 0;
-			base_bitmap_pos = pack->bitmap_pos + base_pos;
+			if (offset_to_pack_pos(pack->p, base_offset,
+					       &base_bitmap_pos) < 0)
+				return 0;
 		}
 
 		/*
