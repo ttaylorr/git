@@ -43,7 +43,7 @@ test_pack_objects_reused_all () {
 test_pack_objects_reused () {
 	: >trace2.txt &&
 	GIT_TRACE2_EVENT="$PWD/trace2.txt" \
-		git pack-objects --stdout --revs >got.pack &&
+		git pack-objects --delta-base-offset --stdout --revs >got.pack &&
 
 	test_pack_reused "$1" <trace2.txt &&
 	test_packs_reused "$2" <trace2.txt &&
