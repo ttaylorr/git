@@ -2069,7 +2069,6 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 
 	if (type == OBJ_REF_DELTA || type == OBJ_OFS_DELTA) {
 		off_t base_offset;
-		uint32_t base_pos;
 		uint32_t base_bitmap_pos;
 
 		/*
@@ -2084,8 +2083,6 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 					     delta_obj_offset);
 		if (!base_offset)
 			return 0;
-
-		offset_to_pack_pos(pack->p, base_offset, &base_pos);
 
 		if (bitmap_is_midx(bitmap_git)) {
 			/*
@@ -2105,6 +2102,8 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 				return 0;
 			}
 		} else {
+			uint32_t base_pos;
+
 			if (offset_to_pack_pos(pack->p, base_offset,
 					       &base_pos) < 0)
 				return 0;
