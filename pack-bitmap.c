@@ -2117,7 +2117,7 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 			 * position, since the bits are ordered by their
 			 * positions within the pack.
 			 */
-			if (base_offset >= offset)
+			if (base_offset >= delta_obj_offset)
 				return 0;
 			if (offset_to_pack_pos(pack->p, base_offset,
 					       &base_bitmap_pos) < 0)
