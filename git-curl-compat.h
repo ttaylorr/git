@@ -76,7 +76,7 @@
  * CURLOPT_PINNEDPUBLICKEY was added in 7.39.0, released in November
  * 2014. CURLE_SSL_PINNEDPUBKEYNOTMATCH was added in that same version.
  */
-#if LIBCURL_VERSION_NUM >= 0x072c00
+#if LIBCURL_VERSION_NUM >= 0x072700
 #define GIT_CURL_HAVE_CURLOPT_PINNEDPUBLICKEY 1
 #define GIT_CURL_HAVE_CURLE_SSL_PINNEDPUBKEYNOTMATCH 1
 #endif
@@ -118,7 +118,7 @@
 #endif
 
 /**
- * CURL_SSLVERSION_TLSv1_3 was added in 7.53.0, released in February
+ * CURL_SSLVERSION_TLSv1_3 was added in 7.52.0, released in August
  * 2017.
  */
 #if LIBCURL_VERSION_NUM >= 0x073400
