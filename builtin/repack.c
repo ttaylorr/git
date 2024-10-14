@@ -321,6 +321,23 @@ static int write_oid(const struct object_id *oid,
 	return 0;
 }
 
+static int write_loose_oid(const struct object_id *oid,
+			   const char *path UNUSED,
+			   void *data)
+{
+	struct child_process *cmd = data;
+
+	if (cmd->in == -1) {
+		if (start_command(cmd))
+			die(_("could not start pack-objects to repack promisor objects"));
+	}
+
+	if (write_in_full(cmd->in, oid_to_hex(oid), the_hash_algo->hexsz) < 0 ||
+	    write_in_full(cmd->in, "\n", 1) < 0)
+		die(_("failed to feed promisor objects to pack-objects"));
+	return 0;
+}
+
 static struct {
 	const char *name;
 	unsigned optional:1;
@@ -370,12 +387,15 @@ static int has_pack_ext(const struct generated_pack_data *data,
 	BUG("unknown pack extension: '%s'", ext);
 }
 
-static void repack_promisor_objects(const struct pack_objects_args *args,
-				    struct string_list *names)
+static int repack_promisor_objects(const struct pack_objects_args *args,
+				    struct string_list *names,
+				    struct string_list *list,
+				    int pack_all)
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	FILE *out;
 	struct strbuf line = STRBUF_INIT;
+	struct string_list_item *item;
 
 	prepare_pack_objects(&cmd, args, packtmp);
 	cmd.in = -1;
@@ -387,13 +407,19 @@ static void repack_promisor_objects(const struct pack_objects_args *args,
 	 * {type -> existing pack order} ordering when computing deltas instead
 	 * of a {type -> size} ordering, which may produce better deltas.
 	 */
-	for_each_packed_object(write_oid, &cmd,
-			       FOR_EACH_OBJECT_PROMISOR_ONLY);
+	if (pack_all)
+		for_each_packed_object(write_oid, &cmd, 0);
+	else
+		for_each_string_list_item(item, list) {
+			pack_mark_retained(item);
+		}
+
+	for_each_loose_object(write_loose_oid, &cmd, 0);
 
 	if (cmd.in == -1) {
 		/* No packed objects; cmd was never started */
 		child_process_clear(&cmd);
-		return;
+		return 0;
 	}
 
 	close(cmd.in);
@@ -431,6 +457,7 @@ static void repack_promisor_objects(const struct pack_objects_args *args,
 	if (finish_command(&cmd))
 		die(_("could not finish pack-objects to repack promisor objects"));
 	strbuf_release(&line);
+	return 0;
 }
 
 struct pack_geometry {
@@ -1323,9 +1350,13 @@ int cmd_repack(int argc,
 	if (use_delta_islands)
 		strvec_push(&cmd.args, "--delta-islands");
 
-	if (pack_everything & ALL_INTO_ONE) {
-		repack_promisor_objects(&po_args, &names);
+	if (repo_has_promisor_remote(the_repository)) {
+		ret = repack_promisor_objects(&po_args, &names,
+			&existing.non_kept_packs, pack_everything & ALL_INTO_ONE);
+		goto pack_objects_end;
+	}
 
+	if (pack_everything & ALL_INTO_ONE) {
 		if (has_existing_non_kept_packs(&existing) &&
 		    delete_redundant &&
 		    !(pack_everything & PACK_CRUFT)) {
@@ -1445,6 +1476,7 @@ int cmd_repack(int argc,
 		}
 	}
 
+pack_objects_end:
 	if (po_args.filter_options.choice) {
 		if (!filter_to)
 			filter_to = packtmp;
