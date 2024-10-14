@@ -643,16 +643,9 @@ test_expect_success 'fetch from a partial clone, protocol v2' '
 	grep "version 2" trace
 '
 
-test_expect_success 'repack does not loosen promisor objects' '
-	rm -rf client trace &&
-	git clone --bare --filter=blob:none "file://$(pwd)/srv.bare" client &&
-	test_when_finished "rm -rf client trace" &&
-	GIT_TRACE2_PERF="$(pwd)/trace" git -C client repack -A -d &&
-	grep "loosen_unused_packed_objects/loosened:0" trace
-'
-
 test_expect_success 'lazy-fetch in submodule succeeds' '
 	# setup
+	rm -rf client &&
 	test_config_global protocol.file.allow always &&
 
 	test_when_finished "rm -rf src-sub" &&
