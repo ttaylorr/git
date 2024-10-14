@@ -124,6 +124,10 @@ their "<name>.pack" and "<name>.idx" files.
 +
 When Git encounters a missing object, Git can see if it is a promisor object
 and handle it appropriately.  If not, Git can report a corruption.
+
+To prevent `repack` from removing locally created objects, `repack` packs all
+the objects into one promisor packfile. It's no longer possible to determine
+the cause of missing objects after `gc`.[7]
 +
 This means that there is no need for the client to explicitly maintain an
 expensive-to-modify list of missing objects.[a]
@@ -156,8 +160,9 @@ and prefetch those objects in bulk.
 
 - `fsck` has been updated to be fully aware of promisor objects.
 
-- `repack` in GC has been updated to not touch promisor packfiles at all,
-  and to only repack other objects.
+- `repack` in GC has been taught to handle partial clone repo differently.
+  `repack` will pack every objects into one promisor packfile for partial
+  repos.
 
 - The global variable "fetch_if_missing" is used to control whether an
   object lookup will attempt to dynamically fetch a missing object or
@@ -244,8 +249,7 @@ remote in a specific order.
   objects.  We assume that promisor remotes have a complete view of the
   repository and can satisfy all such requests.
 
-- Repack essentially treats promisor and non-promisor packfiles as 2
-  distinct partitions and does not mix them.
+- It's not possible to discard dangling objects in repack.
 
 - Dynamic object fetching invokes fetch-pack once *for each item*
   because most algorithms stumble upon a missing object and need to have
@@ -365,3 +369,7 @@ Related Links
 [6] https://lore.kernel.org/git/20170714132651.170708-1-benpeart@microsoft.com/ +
     Subject: [RFC/PATCH v2 0/1] Add support for downloading blobs on demand +
     Date: Fri, 14 Jul 2017 09:26:50 -0400
+
+[7] https://lore.kernel.org/git/20240802073143.56731-1-hanyang.tony@bytedance.com/ +
+    Subject: [PATCH 0/1] revision: fix reachable objects being gc'ed in no blob clone repo +
+    Date: Fri,  2 Aug 2024 15:31:42 +0800
