@@ -66,6 +66,13 @@
 #endif
 
 /**
+ * CURLOPT_PROXYHEADER was added in 7.37.0, released in May 2014.
+ */
+#if LIBCURL_VERSION_NUM >= 0x072500
+#define GIT_CURL_HAVE_CURLOPT_PROXYHEADER
+#endif
+
+/**
  * CURLOPT_PINNEDPUBLICKEY was added in 7.39.0, released in November
  * 2014. CURLE_SSL_PINNEDPUBKEYNOTMATCH was added in that same version.
  */

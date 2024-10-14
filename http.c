@@ -652,8 +652,12 @@ static void set_proxyauth_name_password(CURL *result)
 		curl_easy_setopt(result, CURLOPT_PROXYPASSWORD,
 			proxy_auth.password);
 	} else if (proxy_auth.authtype && proxy_auth.credential) {
+#ifdef GIT_CURL_HAVE_CURLOPT_PROXYHEADER
 		curl_easy_setopt(result, CURLOPT_PROXYHEADER,
 				 http_append_auth_header(&proxy_auth, NULL));
+#else
+		warning(_("CURLOPT_PROXYHEADER not supported with cURL < 7.37.0"));
+#endif
 	}
 }
 
