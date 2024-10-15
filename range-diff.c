@@ -442,7 +442,7 @@ static void output_pair_header(struct diff_options *diffopt,
 			strbuf_addf(buf, "%s%s", color_reset, color);
 
 		strbuf_addch(buf, ' ');
-		pp_commit_easy(CMIT_FMT_ONELINE, commit, buf);
+		pp_commit_easy(the_repository, CMIT_FMT_ONELINE, commit, buf);
 	}
 	strbuf_addf(buf, "%s\n", color_reset);
 

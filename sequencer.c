@@ -1477,7 +1477,7 @@ void print_commit_summary(struct repository *r,
 
 	rev.verbose_header = 1;
 	rev.show_root_diff = 1;
-	get_commit_format(format.buf, &rev);
+	get_commit_format(the_repository, format.buf, &rev);
 	rev.always_show_header = 0;
 	rev.diffopt.detect_rename = DIFF_DETECT_RENAME;
 	diff_setup_done(&rev.diffopt);
@@ -5883,7 +5883,7 @@ static int make_script_with_merges(struct pretty_print_context *pp,
 			continue;
 
 		strbuf_reset(&oneline);
-		pretty_print_commit(pp, commit, &oneline);
+		pretty_print_commit(the_repository, pp, commit, &oneline);
 
 		to_merge = commit->parents ? commit->parents->next : NULL;
 		if (!to_merge) {
@@ -6017,7 +6017,8 @@ static int make_script_with_merges(struct pretty_print_context *pp,
 				strbuf_addf(out, "%s onto\n", cmd_reset);
 			else {
 				strbuf_reset(&oneline);
-				pretty_print_commit(pp, commit, &oneline);
+				pretty_print_commit(the_repository, pp,
+						    commit, &oneline);
 				strbuf_addf(out, "%s %s # %s\n",
 					    cmd_reset, to, oneline.buf);
 			}
@@ -6088,7 +6089,7 @@ int sequencer_make_script(struct repository *r, struct strbuf *out, int argc,
 		free(format);
 		format = xstrdup("%s");
 	}
-	get_commit_format(format, &revs);
+	get_commit_format(the_repository, format, &revs);
 	free(format);
 	pp.fmt = revs.commit_format;
 	pp.output_encoding = repo_get_log_output_encoding(r);
@@ -6122,7 +6123,7 @@ int sequencer_make_script(struct repository *r, struct strbuf *out, int argc,
 			continue;
 		strbuf_addf(out, "%s %s ", insn,
 			    oid_to_hex(&commit->object.oid));
-		pretty_print_commit(&pp, commit, out);
+		pretty_print_commit(the_repository, &pp, commit, out);
 		if (is_empty)
 			strbuf_addf(out, " %s empty", comment_line_str);
 		strbuf_addch(out, '\n');

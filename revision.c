@@ -2553,7 +2553,7 @@ static int handle_revision_opt(struct rev_info *revs, int argc, const char **arg
 	} else if (!strcmp(arg, "--pretty")) {
 		revs->verbose_header = 1;
 		revs->pretty_given = 1;
-		get_commit_format(NULL, revs);
+		get_commit_format(the_repository, NULL, revs);
 	} else if (skip_prefix(arg, "--pretty=", &optarg) ||
 		   skip_prefix(arg, "--format=", &optarg)) {
 		/*
@@ -2562,7 +2562,7 @@ static int handle_revision_opt(struct rev_info *revs, int argc, const char **arg
 		 */
 		revs->verbose_header = 1;
 		revs->pretty_given = 1;
-		get_commit_format(optarg, revs);
+		get_commit_format(the_repository, optarg, revs);
 	} else if (!strcmp(arg, "--expand-tabs")) {
 		revs->expand_tabs_in_log = 8;
 	} else if (!strcmp(arg, "--no-expand-tabs")) {
@@ -2606,7 +2606,7 @@ static int handle_revision_opt(struct rev_info *revs, int argc, const char **arg
 		revs->notes_opt.use_default_notes = 0;
 	} else if (!strcmp(arg, "--oneline")) {
 		revs->verbose_header = 1;
-		get_commit_format("oneline", revs);
+		get_commit_format(the_repository, "oneline", revs);
 		revs->pretty_given = 1;
 		revs->abbrev_commit = 1;
 	} else if (!strcmp(arg, "--graph")) {

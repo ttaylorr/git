@@ -1,5 +1,3 @@
-#define USE_THE_REPOSITORY_VARIABLE
-
 #include "git-compat-util.h"
 #include "config.h"
 #include "commit.h"
@@ -42,7 +40,8 @@ static struct cmt_fmt_map {
 static size_t builtin_formats_len;
 static size_t commit_formats_len;
 static size_t commit_formats_alloc;
-static struct cmt_fmt_map *find_commit_format(const char *sought);
+static struct cmt_fmt_map *find_commit_format(struct repository *r,
+					      const char *sought);
 
 int commit_format_is_empty(enum cmit_fmt fmt)
 {
@@ -116,7 +115,7 @@ static int git_pretty_formats_config(const char *var, const char *value,
 	return 0;
 }
 
-static void setup_commit_formats(void)
+static void setup_commit_formats(struct repository *r)
 {
 	struct cmt_fmt_map builtin_formats[] = {
 		{ "raw",	CMIT_FMT_RAW,		0,	0 },
@@ -140,7 +139,7 @@ static void setup_commit_formats(void)
 	COPY_ARRAY(commit_formats, builtin_formats,
 		   ARRAY_SIZE(builtin_formats));
 
-	git_config(git_pretty_formats_config, NULL);
+	repo_config(r, git_pretty_formats_config, NULL);
 }
 
 static struct cmt_fmt_map *find_commit_format_recursive(const char *sought,
@@ -178,15 +177,17 @@ static struct cmt_fmt_map *find_commit_format_recursive(const char *sought,
 	return found;
 }
 
-static struct cmt_fmt_map *find_commit_format(const char *sought)
+static struct cmt_fmt_map *find_commit_format(struct repository *r,
+					      const char *sought)
 {
 	if (!commit_formats)
-		setup_commit_formats();
+		setup_commit_formats(r);
 
 	return find_commit_format_recursive(sought, sought, 0);
 }
 
-void get_commit_format(const char *arg, struct rev_info *rev)
+void get_commit_format(struct repository *r, const char *arg,
+		       struct rev_info *rev)
 {
 	struct cmt_fmt_map *commit_format;
 
@@ -205,7 +206,7 @@ void get_commit_format(const char *arg, struct rev_info *rev)
 		return;
 	}
 
-	commit_format = find_commit_format(arg);
+	commit_format = find_commit_format(r, arg);
 	if (!commit_format)
 		die("invalid --pretty format: %s", arg);
 
@@ -1434,7 +1435,8 @@ static void free_decoration_options(const struct decoration_options *opts)
 	free(opts->tag);
 }
 
-static size_t format_commit_one(struct strbuf *sb, /* in UTF-8 */
+static size_t format_commit_one(struct repository *r,
+				struct strbuf *sb, /* in UTF-8 */
 				const char *placeholder,
 				void *context)
 {
@@ -1546,7 +1548,7 @@ static size_t format_commit_one(struct strbuf *sb, /* in UTF-8 */
 
 	/* these depend on the commit */
 	if (!commit->object.parsed)
-		parse_object(the_repository, &commit->object.oid);
+		parse_object(r, &commit->object.oid);
 
 	switch (placeholder[0]) {
 	case 'H':		/* commit hash */
@@ -1784,7 +1786,8 @@ static size_t format_commit_one(struct strbuf *sb, /* in UTF-8 */
 	return 0;	/* unknown placeholder */
 }
 
-static size_t format_and_pad_commit(struct strbuf *sb, /* in UTF-8 */
+static size_t format_and_pad_commit(struct repository *r,
+				    struct strbuf *sb, /* in UTF-8 */
 				    const char *placeholder,
 				    struct format_commit_context *c)
 {
@@ -1803,7 +1806,8 @@ static size_t format_and_pad_commit(struct strbuf *sb, /* in UTF-8 */
 	}
 	while (1) {
 		int modifier = *placeholder == 'C';
-		size_t consumed = format_commit_one(&local_sb, placeholder, c);
+		size_t consumed = format_commit_one(r, &local_sb,
+						    placeholder, c);
 		total_consumed += consumed;
 
 		if (!modifier)
@@ -1888,7 +1892,8 @@ static size_t format_and_pad_commit(struct strbuf *sb, /* in UTF-8 */
 	return total_consumed;
 }
 
-static size_t format_commit_item(struct strbuf *sb, /* in UTF-8 */
+static size_t format_commit_item(struct repository *r,
+				 struct strbuf *sb, /* in UTF-8 */
 				 const char *placeholder,
 				 struct format_commit_context *context)
 {
@@ -1930,9 +1935,9 @@ static size_t format_commit_item(struct strbuf *sb, /* in UTF-8 */
 
 	orig_len = sb->len;
 	if (context->flush_type == no_flush)
-		consumed = format_commit_one(sb, placeholder, context);
+		consumed = format_commit_one(r, sb, placeholder, context);
 	else
-		consumed = format_and_pad_commit(sb, placeholder, context);
+		consumed = format_and_pad_commit(r, sb, placeholder, context);
 	if (magic == NO_MAGIC)
 		return consumed;
 
@@ -2001,7 +2006,7 @@ void repo_format_commit_message(struct repository *r,
 
 		if (skip_prefix(format, "%", &format))
 			strbuf_addch(sb, '%');
-		else if ((len = format_commit_item(sb, format, &context)))
+		else if ((len = format_commit_item(r, sb, format, &context)))
 			format += len;
 		else
 			strbuf_addch(sb, '%');
@@ -2034,7 +2039,8 @@ void repo_format_commit_message(struct repository *r,
 	repo_unuse_commit_buffer(r, commit, context.message);
 }
 
-static void pp_header(struct pretty_print_context *pp,
+static void pp_header(struct repository *r,
+		      struct pretty_print_context *pp,
 		      const char *encoding,
 		      const struct commit *commit,
 		      const char **msg_p,
@@ -2060,7 +2066,7 @@ static void pp_header(struct pretty_print_context *pp,
 		}
 
 		if (starts_with(line, "parent ")) {
-			if (linelen != the_hash_algo->hexsz + 8)
+			if (linelen != r->hash_algo->hexsz + 8)
 				die("bad parent line in commit");
 			continue;
 		}
@@ -2279,7 +2285,8 @@ void pp_remainder(struct pretty_print_context *pp,
 	}
 }
 
-void pretty_print_commit(struct pretty_print_context *pp,
+void pretty_print_commit(struct repository *r,
+			 struct pretty_print_context *pp,
 			 const struct commit *commit,
 			 struct strbuf *sb)
 {
@@ -2291,14 +2298,13 @@ void pretty_print_commit(struct pretty_print_context *pp,
 	int need_8bit_cte = pp->need_8bit_cte;
 
 	if (pp->fmt == CMIT_FMT_USERFORMAT) {
-		repo_format_commit_message(the_repository, commit,
+		repo_format_commit_message(r, commit,
 					   user_format, sb, pp);
 		return;
 	}
 
-	encoding = repo_get_log_output_encoding(the_repository);
-	msg = reencoded = repo_logmsg_reencode(the_repository, commit, NULL,
-					       encoding);
+	encoding = repo_get_log_output_encoding(r);
+	msg = reencoded = repo_logmsg_reencode(r, commit, NULL, encoding);
 
 	if (pp->fmt == CMIT_FMT_ONELINE || cmit_fmt_is_mail(pp->fmt))
 		indent = 0;
@@ -2326,7 +2332,7 @@ void pretty_print_commit(struct pretty_print_context *pp,
 		}
 	}
 
-	pp_header(pp, encoding, commit, &msg, sb);
+	pp_header(r, pp, encoding, commit, &msg, sb);
 	if (pp->fmt != CMIT_FMT_ONELINE && !cmit_fmt_is_mail(pp->fmt)) {
 		strbuf_addch(sb, '\n');
 	}
@@ -2358,13 +2364,14 @@ void pretty_print_commit(struct pretty_print_context *pp,
 	if (cmit_fmt_is_mail(pp->fmt) && sb->len <= beginning_of_body)
 		strbuf_addch(sb, '\n');
 
-	repo_unuse_commit_buffer(the_repository, commit, reencoded);
+	repo_unuse_commit_buffer(r, commit, reencoded);
 }
 
-void pp_commit_easy(enum cmit_fmt fmt, const struct commit *commit,
+void pp_commit_easy(struct repository *r, enum cmit_fmt fmt,
+		    const struct commit *commit,
 		    struct strbuf *sb)
 {
 	struct pretty_print_context pp = {0};
 	pp.fmt = fmt;
-	pretty_print_commit(&pp, commit, sb);
+	pretty_print_commit(r, &pp, commit, sb);
 }

@@ -81,8 +81,8 @@ void userformat_find_requirements(const char *fmt, struct userformat_want *w);
  * Shortcut for invoking pretty_print_commit if we do not have any context.
  * Context would be set empty except "fmt".
  */
-void pp_commit_easy(enum cmit_fmt fmt, const struct commit *commit,
-			struct strbuf *sb);
+void pp_commit_easy(struct repository *r, enum cmit_fmt fmt,
+		    const struct commit *commit, struct strbuf *sb);
 
 /*
  * Get information about user and date from "line", format it and
@@ -124,16 +124,18 @@ void repo_format_commit_message(struct repository *r,
  * Parse given arguments from "arg", check it for correctness and
  * fill struct rev_info.
  */
-void get_commit_format(const char *arg, struct rev_info *);
+void get_commit_format(struct repository *r, const char *arg,
+		       struct rev_info *);
 
 /*
  * Make a commit message with all rules from given "pp"
  * and put it into "sb".
  * Please use this function if you have a context (candidate for "pp").
  */
-void pretty_print_commit(struct pretty_print_context *pp,
-			const struct commit *commit,
-			struct strbuf *sb);
+void pretty_print_commit(struct repository *r,
+			 struct pretty_print_context *pp,
+			 const struct commit *commit,
+			 struct strbuf *sb);
 
 /*
  * Change line breaks in "msg" to "line_separator" and put it into "sb".
