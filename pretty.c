@@ -2296,7 +2296,7 @@ void pretty_print_commit(struct pretty_print_context *pp,
 		return;
 	}
 
-	encoding = get_log_output_encoding();
+	encoding = repo_get_log_output_encoding(the_repository);
 	msg = reencoded = repo_logmsg_reencode(the_repository, commit, NULL,
 					       encoding);
 

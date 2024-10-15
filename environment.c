@@ -37,8 +37,6 @@ int assume_unchanged;
 int is_bare_repository_cfg = -1; /* unspecified */
 int warn_on_object_refname_ambiguity = 1;
 int repository_format_precious_objects;
-char *git_commit_encoding;
-char *git_log_output_encoding;
 char *apply_default_whitespace;
 char *apply_default_ignorewhitespace;
 char *git_attributes_file;
@@ -197,17 +195,6 @@ const char *strip_namespace(const char *namespaced_ref)
 	if (skip_prefix(namespaced_ref, get_git_namespace(), &out))
 		return out;
 	return NULL;
-}
-
-const char *get_log_output_encoding(void)
-{
-	return git_log_output_encoding ? git_log_output_encoding
-		: get_commit_output_encoding();
-}
-
-const char *get_commit_output_encoding(void)
-{
-	return git_commit_encoding ? git_commit_encoding : "UTF-8";
 }
 
 static int the_shared_repository = PERM_UMASK;

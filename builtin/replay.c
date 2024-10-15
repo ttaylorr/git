@@ -59,7 +59,8 @@ static struct commit *create_commit(struct tree *tree,
 	char *sign_commit = NULL; /* FIXME: cli users might want to sign again */
 	struct commit_extra_header *extra = NULL;
 	struct strbuf msg = STRBUF_INIT;
-	const char *out_enc = get_commit_output_encoding();
+	const char *out_enc =
+		repo_get_commit_output_encoding(the_repository);
 	const char *message = repo_logmsg_reencode(the_repository, based_on,
 						   NULL, out_enc);
 	const char *orig_message = NULL;

@@ -131,6 +131,19 @@ const char *repo_get_work_tree(struct repository *repo)
 	return repo->worktree;
 }
 
+const char *repo_get_log_output_encoding(struct repository *repo)
+{
+	return (repo && repo->git_log_output_encoding) ?
+	       repo->git_log_output_encoding :
+	       repo_get_commit_output_encoding(repo);
+}
+
+const char *repo_get_commit_output_encoding(struct repository *repo)
+{
+	return (repo && repo->git_commit_encoding) ?
+	       repo->git_commit_encoding : "UTF-8";
+}
+
 static void repo_set_commondir(struct repository *repo,
 			       const char *commondir)
 {

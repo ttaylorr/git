@@ -93,7 +93,8 @@ int cmd_mailinfo(int argc,
 
 	switch (meta_charset.policy) {
 	case CHARSET_DEFAULT:
-		mi.metainfo_charset = get_commit_output_encoding();
+		mi.metainfo_charset =
+			repo_get_commit_output_encoding(the_repository);
 		break;
 	case CHARSET_NO_REENCODE:
 		mi.metainfo_charset = NULL;

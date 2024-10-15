@@ -207,12 +207,6 @@ extern int grafts_keep_true_parents;
 
 extern int repository_format_precious_objects;
 
-const char *get_log_output_encoding(void);
-const char *get_commit_output_encoding(void);
-
-extern char *git_commit_encoding;
-extern char *git_log_output_encoding;
-
 extern char *editor_program;
 extern char *askpass_program;
 extern char *excludes_file;

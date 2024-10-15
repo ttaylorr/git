@@ -150,6 +150,8 @@ struct repository {
 
 	/* Configurations */
 	int repository_format_worktree_config;
+	char *git_commit_encoding;
+	char *git_log_output_encoding;
 
 	/* Indicate if a repository has a different 'commondir' from 'gitdir' */
 	unsigned different_commondir:1;
@@ -178,6 +180,10 @@ struct set_gitdir_args {
 	const char *alternate_db;
 	int disable_ref_updates;
 };
+
+/* Get configurations */
+const char *repo_get_log_output_encoding(struct repository *repo);
+const char *repo_get_commit_output_encoding(struct repository *repo);
 
 void repo_set_gitdir(struct repository *repo, const char *root,
 		     const struct set_gitdir_args *extra_args);

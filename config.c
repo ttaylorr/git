@@ -1690,13 +1690,15 @@ static int git_default_sparse_config(const char *var, const char *value)
 static int git_default_i18n_config(const char *var, const char *value)
 {
 	if (!strcmp(var, "i18n.commitencoding")) {
-		FREE_AND_NULL(git_commit_encoding);
-		return git_config_string(&git_commit_encoding, var, value);
+		FREE_AND_NULL(the_repository->git_commit_encoding);
+		return git_config_string(&the_repository->git_commit_encoding,
+					 var, value);
 	}
 
 	if (!strcmp(var, "i18n.logoutputencoding")) {
-		FREE_AND_NULL(git_log_output_encoding);
-		return git_config_string(&git_log_output_encoding, var, value);
+		FREE_AND_NULL(the_repository->git_log_output_encoding);
+		return git_config_string(&the_repository->git_log_output_encoding,
+					 var, value);
 	}
 
 	/* Add other config variables here and to Documentation/config.txt. */

@@ -4,6 +4,7 @@
 #include "git-curl-compat.h"
 #include "config.h"
 #include "environment.h"
+#include "repository.h"
 #include "gettext.h"
 #include "hex.h"
 #include "remote.h"
@@ -378,7 +379,8 @@ static int show_http_message(struct strbuf *type, struct strbuf *charset,
 	if (strcmp(type->buf, "text/plain"))
 		return -1;
 	if (charset->len)
-		strbuf_reencode(msg, charset->buf, get_log_output_encoding());
+		strbuf_reencode(msg, charset->buf,
+				repo_get_log_output_encoding(the_repository));
 
 	strbuf_trim(msg);
 	if (!msg->len)
