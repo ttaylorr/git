@@ -1980,6 +1980,42 @@ const char *branch_get_upstream(struct branch *branch, struct strbuf *err)
 	return branch->merge[0]->dst;
 }
 
+const char *branch_get_upstream_head(struct branch *branch, struct strbuf *err)
+{
+	struct strbuf retval = STRBUF_INIT, refstring = STRBUF_INIT;
+	struct string_list l = STRING_LIST_INIT_DUP;
+
+	if (!branch)
+		return error_buf(err, _("HEAD does not point to a branch"));
+
+	if (!branch->merge || !branch->merge[0]) {
+		/*
+		 * no merge config; is it because the user didn't define any,
+		 * or because it is not a real branch, and get_branch
+		 * auto-vivified it?
+		 */
+		if (!refs_ref_exists(get_main_ref_store(the_repository), branch->refname))
+			return error_buf(err, _("no such branch: '%s'"),
+					 branch->name);
+		return error_buf(err,
+				 _("no upstream configured for branch '%s'"),
+				 branch->name);
+	}
+
+	if (!branch->merge[0]->dst)
+		return error_buf(err,
+				 _("upstream branch '%s' not stored as a remote-tracking branch"),
+				 branch->merge[0]->src);
+
+	string_list_split(&l, branch->merge[0]->dst, '/', -1);
+	strbuf_addf(&refstring, "refs/remotes/%s/HEAD", l.items[2].string);
+
+	if (refs_read_symbolic_ref(get_main_ref_store(the_repository), refstring.buf, &retval))
+			return error_buf(err, _("%s does not exist"), refstring.buf);
+
+	return retval.buf;
+}
+
 static const char *tracking_for_push_dest(struct remote *remote,
 					  const char *refname,
 					  struct strbuf *err)

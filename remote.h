@@ -360,6 +360,14 @@ const char *branch_get_upstream(struct branch *branch, struct strbuf *err);
  */
 const char *branch_get_push(struct branch *branch, struct strbuf *err);
 
+/**
+ * Return the fully-qualified refname of the HEAD branch for the same remote
+ * that "branch@{upstream}" is on.
+ *
+ * The return value and `err` conventions match those of `branch_get_upstream`.
+ */
+const char *branch_get_upstream_head(struct branch *branch, struct strbuf *err);
+
 /* Flags to match_refs. */
 enum match_refs_flags {
 	MATCH_REFS_NONE		= 0,
