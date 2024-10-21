@@ -1615,10 +1615,11 @@ out:
 	return type;
 }
 
-static void *unpack_compressed_entry(struct packed_git *p,
-				    struct pack_window **w_curs,
-				    off_t curpos,
-				    unsigned long size)
+static void *unpack_compressed_entry(struct repository *repo,
+				     struct packed_git *p,
+				     struct pack_window **w_curs,
+				     off_t curpos,
+				     unsigned long size)
 {
 	int st;
 	git_zstream stream;
@@ -1633,8 +1634,7 @@ static void *unpack_compressed_entry(struct packed_git *p,
 
 	git_inflate_init(&stream);
 	do {
-		in = use_pack(the_repository, p, w_curs, curpos,
-			      &stream.avail_in);
+		in = use_pack(repo, p, w_curs, curpos, &stream.avail_in);
 		stream.next_in = in;
 		/*
 		 * Note: we must ensure the window section returned by
@@ -1777,7 +1777,8 @@ void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 	case OBJ_BLOB:
 	case OBJ_TAG:
 		if (!base_from_cache)
-			data = unpack_compressed_entry(p, &w_curs, curpos, size);
+			data = unpack_compressed_entry(r, p, &w_curs, curpos,
+						       size);
 		break;
 	default:
 		data = NULL;
@@ -1838,7 +1839,8 @@ void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 		if (!base)
 			continue;
 
-		delta_data = unpack_compressed_entry(p, &w_curs, curpos, delta_size);
+		delta_data = unpack_compressed_entry(r, p, &w_curs, curpos,
+						     delta_size);
 
 		if (!delta_data) {
 			error("failed to unpack compressed delta "
