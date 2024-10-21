@@ -210,7 +210,7 @@ int has_pack_index(struct repository *repo, const unsigned char *sha1);
  * Return 1 if an object in a promisor packfile is or refers to the given
  * object, 0 otherwise.
  */
-int is_promisor_object(const struct object_id *oid);
+int is_promisor_object(struct repository *repo, const struct object_id *oid);
 
 /*
  * Expose a function for fuzz testing.
