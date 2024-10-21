@@ -455,7 +455,7 @@ int prepare_midx_pack(struct repository *r, struct multi_pack_index *m,
 	strbuf_addf(&pack_name, "%s/pack/%s", m->object_dir,
 		    m->pack_names[pack_int_id]);
 
-	p = add_packed_git(pack_name.buf, pack_name.len, m->local);
+	p = add_packed_git(r, pack_name.buf, pack_name.len, m->local);
 	strbuf_release(&pack_name);
 
 	if (!p)

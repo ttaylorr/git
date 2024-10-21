@@ -706,7 +706,8 @@ void unuse_pack(struct pack_window **w_cursor)
 	}
 }
 
-struct packed_git *add_packed_git(const char *path, size_t path_len, int local)
+struct packed_git *add_packed_git(struct repository *repo, const char *path,
+				  size_t path_len, int local)
 {
 	struct stat st;
 	size_t alloc;
@@ -751,9 +752,9 @@ struct packed_git *add_packed_git(const char *path, size_t path_len, int local)
 	p->pack_size = st.st_size;
 	p->pack_local = local;
 	p->mtime = st.st_mtime;
-	if (path_len < the_hash_algo->hexsz ||
-	    get_hash_hex(path + path_len - the_hash_algo->hexsz, p->hash))
-		hashclr(p->hash, the_repository->hash_algo);
+	if (path_len < repo->hash_algo->hexsz ||
+	    get_hash_hex(path + path_len - repo->hash_algo->hexsz, p->hash))
+		hashclr(p->hash, repo->hash_algo);
 	return p;
 }
 
@@ -880,7 +881,8 @@ static void prepare_pack(const char *full_name, size_t full_name_len,
 
 		/* Don't reopen a pack we already have. */
 		if (!hashmap_get(&data->r->objects->pack_map, &hent, pack_name)) {
-			p = add_packed_git(full_name, full_name_len, data->local);
+			p = add_packed_git(data->r, full_name, full_name_len,
+					   data->local);
 			if (p)
 				install_packed_git(data->r, p);
 		}
@@ -1113,9 +1115,8 @@ unsigned long unpack_object_header_buffer(const unsigned char *buf,
 	return used;
 }
 
-unsigned long get_size_from_delta(struct packed_git *p,
-				  struct pack_window **w_curs,
-				  off_t curpos)
+unsigned long get_size_from_delta(struct repository *repo, struct packed_git *p,
+				  struct pack_window **w_curs, off_t curpos)
 {
 	const unsigned char *data;
 	unsigned char delta_head[20], *in;
@@ -1128,7 +1129,7 @@ unsigned long get_size_from_delta(struct packed_git *p,
 
 	git_inflate_init(&stream);
 	do {
-		in = use_pack(the_repository, p, w_curs, curpos, &stream.avail_in);
+		in = use_pack(repo, p, w_curs, curpos, &stream.avail_in);
 		stream.next_in = in;
 		/*
 		 * Note: the window section returned by use_pack() must be
@@ -1559,7 +1560,7 @@ int packed_object_info(struct repository *r, struct packed_git *p,
 				type = OBJ_BAD;
 				goto out;
 			}
-			*oi->sizep = get_size_from_delta(p, &w_curs, tmp_pos);
+			*oi->sizep = get_size_from_delta(r, p, &w_curs, tmp_pos);
 			if (*oi->sizep == 0) {
 				type = OBJ_BAD;
 				goto out;
