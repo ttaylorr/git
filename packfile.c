@@ -2028,9 +2028,8 @@ struct packed_git *find_sha1_pack(struct repository *repo,
 
 }
 
-static int fill_pack_entry(const struct object_id *oid,
-			   struct pack_entry *e,
-			   struct packed_git *p)
+static int fill_pack_entry(struct repository *repo, const struct object_id *oid,
+			   struct pack_entry *e, struct packed_git *p)
 {
 	off_t offset;
 
@@ -2038,7 +2037,7 @@ static int fill_pack_entry(const struct object_id *oid,
 	    oidset_contains(&p->bad_objects, oid))
 		return 0;
 
-	offset = find_pack_entry_one(the_repository, oid->hash, p);
+	offset = find_pack_entry_one(repo, oid->hash, p);
 	if (!offset)
 		return 0;
 
@@ -2049,7 +2048,7 @@ static int fill_pack_entry(const struct object_id *oid,
 	 * answer, as it may have been deleted since the index was
 	 * loaded!
 	 */
-	if (!is_pack_valid(the_repository, p))
+	if (!is_pack_valid(repo, p))
 		return 0;
 	e->offset = offset;
 	e->p = p;
@@ -2072,7 +2071,7 @@ int find_pack_entry(struct repository *r, const struct object_id *oid, struct pa
 
 	list_for_each(pos, &r->objects->packed_git_mru) {
 		struct packed_git *p = list_entry(pos, struct packed_git, mru);
-		if (!p->multi_pack_index && fill_pack_entry(oid, e, p)) {
+		if (!p->multi_pack_index && fill_pack_entry(r, oid, e, p)) {
 			list_move(&p->mru, &r->objects->packed_git_mru);
 			return 1;
 		}
@@ -2134,7 +2133,7 @@ int find_kept_pack_entry(struct repository *r,
 
 	for (cache = kept_pack_cache(r, flags); *cache; cache++) {
 		struct packed_git *p = *cache;
-		if (fill_pack_entry(oid, e, p))
+		if (fill_pack_entry(r, oid, e, p))
 			return 1;
 	}
 
