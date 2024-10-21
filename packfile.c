@@ -462,13 +462,13 @@ static void find_lru_pack(struct packed_git *p, struct packed_git **lru_p, struc
 	*accept_windows_inuse = has_windows_inuse;
 }
 
-static int close_one_pack(void)
+static int close_one_pack(struct repository *repo)
 {
 	struct packed_git *p, *lru_p = NULL;
 	struct pack_window *mru_w = NULL;
 	int accept_windows_inuse = 1;
 
-	for (p = the_repository->objects->packed_git; p; p = p->next) {
+	for (p = repo->objects->packed_git; p; p = p->next) {
 		if (p->pack_fd == -1)
 			continue;
 		find_lru_pack(p, &lru_p, &mru_w, &accept_windows_inuse);
@@ -535,7 +535,7 @@ const char *pack_basename(struct packed_git *p)
  * Do not call this directly as this leaks p->pack_fd on error return;
  * call open_packed_git() instead.
  */
-static int open_packed_git_1(struct packed_git *p)
+static int open_packed_git_1(struct repository *repo, struct packed_git *p)
 {
 	struct stat st;
 	struct pack_header hdr;
@@ -557,7 +557,7 @@ static int open_packed_git_1(struct packed_git *p)
 			pack_max_fds = 1;
 	}
 
-	while (pack_max_fds <= pack_open_fds && close_one_pack())
+	while (pack_max_fds <= pack_open_fds && close_one_pack(repo))
 		; /* nothing */
 
 	p->pack_fd = git_open(p->pack_name);
@@ -599,14 +599,14 @@ static int open_packed_git_1(struct packed_git *p)
 	if (read_result != hashsz)
 		return error("packfile %s signature is unavailable", p->pack_name);
 	idx_hash = ((unsigned char *)p->index_data) + p->index_size - hashsz * 2;
-	if (!hasheq(hash, idx_hash, the_repository->hash_algo))
+	if (!hasheq(hash, idx_hash, repo->hash_algo))
 		return error("packfile %s does not match index", p->pack_name);
 	return 0;
 }
 
-static int open_packed_git(struct packed_git *p)
+static int open_packed_git(struct repository *repo, struct packed_git *p)
 {
-	if (!open_packed_git_1(p))
+	if (!open_packed_git_1(repo, p))
 		return 0;
 	close_pack_fd(p);
 	return -1;
@@ -636,7 +636,7 @@ unsigned char *use_pack(struct repository *repo, struct packed_git *p,
 	 * hash, and the in_window function above wouldn't match
 	 * don't allow an offset too close to the end of the file.
 	 */
-	if (!p->pack_size && p->pack_fd == -1 && open_packed_git(p))
+	if (!p->pack_size && p->pack_fd == -1 && open_packed_git(repo, p))
 		die("packfile %s cannot be accessed", p->pack_name);
 	if (offset > (p->pack_size - the_hash_algo->rawsz))
 		die("offset beyond end of packfile (truncated pack?)");
@@ -654,7 +654,7 @@ unsigned char *use_pack(struct repository *repo, struct packed_git *p,
 			size_t window_align = packed_git_window_size / 2;
 			off_t len;
 
-			if (p->pack_fd == -1 && open_packed_git(p))
+			if (p->pack_fd == -1 && open_packed_git(repo, p))
 				die("packfile %s cannot be accessed", p->pack_name);
 
 			CALLOC_ARRAY(win, 1);
@@ -1994,7 +1994,7 @@ off_t find_pack_entry_one(const unsigned char *sha1,
 	return 0;
 }
 
-int is_pack_valid(struct packed_git *p)
+int is_pack_valid(struct repository *repo, struct packed_git *p)
 {
 	/* An already open pack is known to be valid. */
 	if (p->pack_fd != -1)
@@ -2012,7 +2012,7 @@ int is_pack_valid(struct packed_git *p)
 	}
 
 	/* Force the pack to open to prove its valid. */
-	return !open_packed_git(p);
+	return !open_packed_git(repo, p);
 }
 
 struct packed_git *find_sha1_pack(const unsigned char *sha1,
@@ -2049,7 +2049,7 @@ static int fill_pack_entry(const struct object_id *oid,
 	 * answer, as it may have been deleted since the index was
 	 * loaded!
 	 */
-	if (!is_pack_valid(p))
+	if (!is_pack_valid(the_repository, p))
 		return 0;
 	e->offset = offset;
 	e->p = p;

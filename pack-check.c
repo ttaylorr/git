@@ -64,7 +64,7 @@ static int verify_packfile(struct repository *r,
 	int err = 0;
 	struct idx_entry *entries;
 
-	if (!is_pack_valid(p))
+	if (!is_pack_valid(the_repository, p))
 		return error("packfile %s cannot be accessed", p->pack_name);
 
 	r->hash_algo->init_fn(&ctx);

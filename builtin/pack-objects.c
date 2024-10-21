@@ -1482,7 +1482,7 @@ static int want_found_object(const struct object_id *oid, int exclude,
 	if (incremental)
 		return 0;
 
-	if (!is_pack_valid(p))
+	if (!is_pack_valid(the_repository, p))
 		return -1;
 
 	/*
@@ -1560,7 +1560,7 @@ static int want_object_in_pack_one(struct packed_git *p,
 
 	if (offset) {
 		if (!*found_pack) {
-			if (!is_pack_valid(p))
+			if (!is_pack_valid(the_repository, p))
 				return -1;
 			*found_offset = offset;
 			*found_pack = p;
@@ -3513,7 +3513,7 @@ static void read_packs_list_from_stdin(void)
 		struct packed_git *p = item->util;
 		if (!p)
 			die(_("could not find pack '%s'"), item->string);
-		if (!is_pack_valid(p))
+		if (!is_pack_valid(the_repository, p))
 			die(_("packfile %s cannot be accessed"), p->pack_name);
 	}
 

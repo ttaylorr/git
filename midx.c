@@ -597,7 +597,7 @@ int fill_midx_entry(struct repository *r,
 	* answer, as it may have been deleted since the MIDX was
 	* loaded!
 	*/
-	if (!is_pack_valid(p))
+	if (!is_pack_valid(r, p))
 		return 0;
 
 	if (oidset_size(&p->bad_objects) &&

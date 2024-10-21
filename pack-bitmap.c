@@ -451,7 +451,7 @@ static int open_midx_bitmap_1(struct bitmap_index *bitmap_git,
 	}
 
 	preferred = bitmap_git->midx->packs[preferred_pack];
-	if (!is_pack_valid(preferred)) {
+	if (!is_pack_valid(the_repository, preferred)) {
 		warning(_("preferred pack (%s) is invalid"),
 			preferred->pack_name);
 		goto cleanup;
@@ -498,7 +498,7 @@ static int open_pack_bitmap_1(struct bitmap_index *bitmap_git, struct packed_git
 		return -1;
 	}
 
-	if (!is_pack_valid(packfile)) {
+	if (!is_pack_valid(the_repository, packfile)) {
 		close(fd);
 		return -1;
 	}
