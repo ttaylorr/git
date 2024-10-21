@@ -5,12 +5,13 @@
 #define MTIMES_VERSION 1
 
 struct packed_git;
+struct repository;
 
 /*
  * Loads the .mtimes file corresponding to "p", if any, returning zero
  * on success.
  */
-int load_pack_mtimes(struct packed_git *p);
+int load_pack_mtimes(struct repository *repo, struct packed_git *p);
 
 /* Returns the mtime associated with the object at position "pos" (in
  * lexicographic/index order) in pack "p".

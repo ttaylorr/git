@@ -291,7 +291,7 @@ static int add_recent_packed(struct repository *repo,
 	if (obj && obj->flags & SEEN)
 		return 0;
 	if (p->is_cruft) {
-		if (load_pack_mtimes(p) < 0)
+		if (load_pack_mtimes(repo, p) < 0)
 			die(_("could not load cruft pack .mtimes"));
 		mtime = nth_packed_mtime(p, pos);
 	}

@@ -3902,7 +3902,7 @@ static void show_edge(struct commit *commit)
 	add_preferred_base(&commit->object.oid);
 }
 
-static int add_object_in_unpacked_pack(struct repository *repo UNUSED,
+static int add_object_in_unpacked_pack(struct repository *repo,
 				       const struct object_id *oid,
 				       struct packed_git *pack,
 				       uint32_t pos,
@@ -3913,7 +3913,7 @@ static int add_object_in_unpacked_pack(struct repository *repo UNUSED,
 		time_t mtime;
 
 		if (pack->is_cruft) {
-			if (load_pack_mtimes(pack) < 0)
+			if (load_pack_mtimes(repo, pack) < 0)
 				die(_("could not load cruft pack .mtimes"));
 			mtime = nth_packed_mtime(pack, pos);
 		} else {
@@ -4035,7 +4035,7 @@ static void loosen_unused_packed_objects(void)
 		if (!p->pack_local || p->pack_keep || p->pack_keep_in_core)
 			continue;
 
-		if (open_pack_index(p))
+		if (open_pack_index(the_repository, p))
 			die(_("cannot open pack index"));
 
 		for (i = 0; i < p->num_objects; i++) {

@@ -988,7 +988,7 @@ int cmd_fsck(int argc,
 			if (show_progress) {
 				for (p = get_all_packs(the_repository); p;
 				     p = p->next) {
-					if (open_pack_index(p))
+					if (open_pack_index(the_repository, p))
 						continue;
 					total += p->num_objects;
 				}

@@ -97,7 +97,7 @@ void pack_report(void);
  * mmap the index file for the specified packfile (if it is not
  * already mmapped).  Return 0 on success.
  */
-int open_pack_index(struct packed_git *);
+int open_pack_index(struct repository *repo, struct packed_git *);
 
 /*
  * munmap the index file for the specified packfile (if it is
@@ -107,7 +107,8 @@ void close_pack_index(struct packed_git *);
 
 int close_pack_fd(struct packed_git *p);
 
-uint32_t get_pack_fanout(struct packed_git *p, uint32_t value);
+uint32_t get_pack_fanout(struct repository *repo, struct packed_git *p,
+			 uint32_t value);
 
 struct raw_object_store;
 

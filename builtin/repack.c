@@ -461,7 +461,7 @@ struct pack_geometry {
 
 static uint32_t geometry_pack_weight(struct packed_git *p)
 {
-	if (open_pack_index(p))
+	if (open_pack_index(the_repository, p))
 		die(_("cannot open index for %s"), p->pack_name);
 	return p->num_objects;
 }

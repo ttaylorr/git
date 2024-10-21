@@ -175,7 +175,7 @@ static void unique_in_pack(struct packed_git *p,
 	if (p->multi_pack_index)
 		return;
 
-	if (open_pack_index(p) || !p->num_objects)
+	if (open_pack_index(ds->repo, p) || !p->num_objects)
 		return;
 
 	num = p->num_objects;
@@ -761,7 +761,7 @@ static void find_abbrev_len_for_pack(struct packed_git *p,
 	if (p->multi_pack_index)
 		return;
 
-	if (open_pack_index(p) || !p->num_objects)
+	if (open_pack_index(mad->repo, p) || !p->num_objects)
 		return;
 
 	num = p->num_objects;

@@ -11,7 +11,7 @@
 static void dump_mtimes(struct packed_git *p)
 {
 	uint32_t i;
-	if (load_pack_mtimes(p) < 0)
+	if (load_pack_mtimes(the_repository, p) < 0)
 		die("could not load pack .mtimes");
 
 	for (i = 0; i < p->num_objects; i++) {

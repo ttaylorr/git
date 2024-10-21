@@ -161,7 +161,7 @@ static void add_pack_to_midx(const char *full_path, size_t full_path_len,
 			return;
 		}
 
-		if (open_pack_index(p)) {
+		if (open_pack_index(the_repository, p)) {
 			warning(_("failed to open pack-index '%s'"),
 				full_path);
 			close_pack(p);
@@ -301,8 +301,8 @@ static void midx_fanout_add_pack_fanout(struct midx_fanout *fanout,
 	uint32_t cur_object;
 
 	if (cur_fanout)
-		start = get_pack_fanout(pack, cur_fanout - 1);
-	end = get_pack_fanout(pack, cur_fanout);
+		start = get_pack_fanout(the_repository, pack, cur_fanout - 1);
+	end = get_pack_fanout(the_repository, pack, cur_fanout);
 
 	for (cur_object = start; cur_object < end; cur_object++) {
 		midx_fanout_grow(fanout, fanout->nr + 1);
@@ -950,7 +950,7 @@ static int fill_packs_from_midx(struct write_midx_context *ctx,
 					return 1;
 				}
 
-				if (open_pack_index(m->packs[i]))
+				if (open_pack_index(the_repository, m->packs[i]))
 					die(_("could not open index for %s"),
 					    m->packs[i]->pack_name);
 			}
@@ -1612,7 +1612,7 @@ static int want_included_pack(struct repository *r,
 		return 0;
 	if (p->is_cruft)
 		return 0;
-	if (open_pack_index(p) || !p->num_objects)
+	if (open_pack_index(r, p) || !p->num_objects)
 		return 0;
 	return 1;
 }

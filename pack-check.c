@@ -176,7 +176,7 @@ int verify_pack_index(struct packed_git *p)
 {
 	int err = 0;
 
-	if (open_pack_index(p))
+	if (open_pack_index(the_repository, p))
 		return error("packfile %s index not opened", p->pack_name);
 
 	/* Verify SHA1 sum of the index file */

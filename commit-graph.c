@@ -1920,7 +1920,7 @@ static int fill_oids_from_packs(struct write_commit_graph_context *ctx,
 			ret = error(_("error adding pack %s"), packname.buf);
 			goto cleanup;
 		}
-		if (open_pack_index(p)) {
+		if (open_pack_index(the_repository, p)) {
 			ret = error(_("error opening index for %s"), packname.buf);
 			goto cleanup;
 		}

@@ -84,13 +84,14 @@ void pack_report(void)
  * consistency checks, then record its information to p.  Return 0 on
  * success.
  */
-static int check_packed_git_idx(const char *path, struct packed_git *p)
+static int check_packed_git_idx(struct repository *repo, const char *path,
+				struct packed_git *p)
 {
 	void *idx_map;
 	size_t idx_size;
 	int fd = git_open(path), ret;
 	struct stat st;
-	const unsigned int hashsz = the_hash_algo->rawsz;
+	const unsigned int hashsz = repo->hash_algo->rawsz;
 
 	if (fd < 0)
 		return -1;
@@ -194,7 +195,7 @@ int load_idx(const char *path, const unsigned int hashsz, void *idx_map,
 	return 0;
 }
 
-int open_pack_index(struct packed_git *p)
+int open_pack_index(struct repository *repo, struct packed_git *p)
 {
 	char *idx_name;
 	size_t len;
@@ -206,17 +207,18 @@ int open_pack_index(struct packed_git *p)
 	if (!strip_suffix(p->pack_name, ".pack", &len))
 		BUG("pack_name does not end in .pack");
 	idx_name = xstrfmt("%.*s.idx", (int)len, p->pack_name);
-	ret = check_packed_git_idx(idx_name, p);
+	ret = check_packed_git_idx(repo, idx_name, p);
 	free(idx_name);
 	return ret;
 }
 
-uint32_t get_pack_fanout(struct packed_git *p, uint32_t value)
+uint32_t get_pack_fanout(struct repository *repo, struct packed_git *p,
+			 uint32_t value)
 {
 	const uint32_t *level1_ofs = p->index_data;
 
 	if (!level1_ofs) {
-		if (open_pack_index(p))
+		if (open_pack_index(repo, p))
 			return 0;
 		level1_ofs = p->index_data;
 	}
@@ -246,7 +248,7 @@ struct packed_git *parse_pack_index(struct repository *repo,
 
 	memcpy(p->pack_name, path, alloc); /* includes NUL */
 	hashcpy(p->hash, sha1, repo->hash_algo);
-	if (check_packed_git_idx(idx_path, p)) {
+	if (check_packed_git_idx(repo, idx_path, p)) {
 		free(p);
 		return NULL;
 	}
@@ -544,7 +546,7 @@ static int open_packed_git_1(struct repository *repo, struct packed_git *p)
 	ssize_t read_result;
 	const unsigned hashsz = the_hash_algo->rawsz;
 
-	if (open_pack_index(p))
+	if (open_pack_index(repo, p))
 		return error("packfile %s index unavailable", p->pack_name);
 
 	if (!pack_max_fds) {
@@ -951,7 +953,7 @@ unsigned long repo_approximate_object_count(struct repository *r)
 		for (m = get_multi_pack_index(r); m; m = m->next)
 			count += m->num_objects;
 		for (p = r->objects->packed_git; p; p = p->next) {
-			if (open_pack_index(p))
+			if (open_pack_index(r, p))
 				continue;
 			count += p->num_objects;
 		}
@@ -1923,7 +1925,7 @@ int nth_packed_object_id(struct repository *repo, struct object_id *oid,
 	const unsigned char *index = p->index_data;
 	const unsigned int hashsz = repo->hash_algo->rawsz;
 	if (!index) {
-		if (open_pack_index(p))
+		if (open_pack_index(repo, p))
 			return -1;
 		index = p->index_data;
 	}
@@ -1983,7 +1985,7 @@ off_t find_pack_entry_one(struct repository *repo, const unsigned char *sha1,
 	uint32_t result;
 
 	if (!index) {
-		if (open_pack_index(p))
+		if (open_pack_index(repo, p))
 			return 0;
 	}
 
@@ -2226,7 +2228,7 @@ int for_each_packed_object(struct repository *repo, each_packed_object_fn cb,
 		if ((flags & FOR_EACH_OBJECT_SKIP_ON_DISK_KEPT_PACKS) &&
 		    p->pack_keep)
 			continue;
-		if (open_pack_index(p)) {
+		if (open_pack_index(repo, p)) {
 			pack_errors = 1;
 			continue;
 		}

@@ -131,7 +131,7 @@ int cmd_count_objects(int argc,
 		for (p = get_all_packs(the_repository); p; p = p->next) {
 			if (!p->pack_local)
 				continue;
-			if (open_pack_index(p))
+			if (open_pack_index(the_repository, p))
 				continue;
 			packed += p->num_objects;
 			size_pack += p->pack_size + p->index_size;

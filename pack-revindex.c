@@ -178,7 +178,7 @@ static int create_pack_revindex_in_memory(struct packed_git *p)
 	if (git_env_bool(GIT_TEST_REV_INDEX_DIE_IN_MEMORY, 0))
 		die("dying as requested by '%s'",
 		    GIT_TEST_REV_INDEX_DIE_IN_MEMORY);
-	if (open_pack_index(p))
+	if (open_pack_index(the_repository, p))
 		return -1;
 	create_pack_revindex(p);
 	return 0;
@@ -274,7 +274,7 @@ int load_pack_revindex_from_disk(struct packed_git *p)
 {
 	char *revindex_name;
 	int ret;
-	if (open_pack_index(p))
+	if (open_pack_index(the_repository, p))
 		return -1;
 
 	revindex_name = pack_revindex_filename(p);

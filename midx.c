@@ -966,7 +966,7 @@ int verify_midx_file(struct repository *r, const char *object_dir, unsigned flag
 			continue;
 		}
 
-		if (open_pack_index(e.p)) {
+		if (open_pack_index(the_repository, e.p)) {
 			midx_report(_("failed to load pack-index for packfile %s"),
 				    e.p->pack_name);
 			break;

@@ -545,7 +545,7 @@ static struct pack_list * add_pack(struct packed_git *p)
 	l.pack = p;
 	llist_init(&l.remaining_objects);
 
-	if (open_pack_index(p))
+	if (open_pack_index(the_repository, p))
 		return NULL;
 
 	base = p->index_data;

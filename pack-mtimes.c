@@ -97,7 +97,7 @@ cleanup:
 	return ret;
 }
 
-int load_pack_mtimes(struct packed_git *p)
+int load_pack_mtimes(struct repository *repo, struct packed_git *p)
 {
 	char *mtimes_name = NULL;
 	int ret = 0;
@@ -107,7 +107,7 @@ int load_pack_mtimes(struct packed_git *p)
 	if (p->mtimes_map)
 		return ret; /* already loaded */
 
-	ret = open_pack_index(p);
+	ret = open_pack_index(repo, p);
 	if (ret < 0)
 		goto cleanup;
 

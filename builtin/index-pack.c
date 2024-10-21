@@ -1656,7 +1656,7 @@ static void read_idx_option(struct pack_idx_option *opts, const char *pack_name)
 
 	if (!p)
 		die(_("Cannot open existing pack file '%s'"), pack_name);
-	if (open_pack_index(p))
+	if (open_pack_index(the_repository, p))
 		die(_("Cannot open existing pack idx file for '%s'"), pack_name);
 
 	/* Read the attributes from the existing idx file */
