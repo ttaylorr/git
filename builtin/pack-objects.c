@@ -1044,7 +1044,8 @@ static void write_reused_pack_one(struct packed_git *reuse_packfile,
 		unsigned char header[MAX_PACK_OBJECT_HEADER];
 		unsigned len;
 
-		base_offset = get_delta_base(reuse_packfile, w_curs, &cur, type, offset);
+		base_offset = get_delta_base(the_repository, reuse_packfile,
+					     w_curs, &cur, type, offset);
 		assert(base_offset != 0);
 
 		/* Convert to REF_DELTA if we must... */

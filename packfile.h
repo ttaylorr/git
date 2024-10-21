@@ -171,9 +171,9 @@ unsigned long get_size_from_delta(struct repository *repo, struct packed_git *,
 				  struct pack_window **, off_t);
 int unpack_object_header(struct repository *repo, struct packed_git *,
 			 struct pack_window **, off_t *, unsigned long *);
-off_t get_delta_base(struct packed_git *p, struct pack_window **w_curs,
-		     off_t *curpos, enum object_type type,
-		     off_t delta_obj_offset);
+off_t get_delta_base(struct repository *repo, struct packed_git *p,
+		     struct pack_window **w_curs, off_t *curpos,
+		     enum object_type type, off_t delta_obj_offset);
 
 void release_pack_memory(size_t);
 

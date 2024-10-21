@@ -1210,13 +1210,11 @@ const struct packed_git *has_packed_and_bad(struct repository *r,
 	return NULL;
 }
 
-off_t get_delta_base(struct packed_git *p,
-		     struct pack_window **w_curs,
-		     off_t *curpos,
-		     enum object_type type,
-		     off_t delta_obj_offset)
+off_t get_delta_base(struct repository *repo, struct packed_git *p,
+		     struct pack_window **w_curs, off_t *curpos,
+		     enum object_type type, off_t delta_obj_offset)
 {
-	unsigned char *base_info = use_pack(the_repository, p, w_curs, *curpos, NULL);
+	unsigned char *base_info = use_pack(repo, p, w_curs, *curpos, NULL);
 	off_t base_offset;
 
 	/* use_pack() assured us we have [base_info, base_info + 20)
@@ -1243,7 +1241,7 @@ off_t get_delta_base(struct packed_git *p,
 	} else if (type == OBJ_REF_DELTA) {
 		/* The base entry _must_ be in the same pack */
 		base_offset = find_pack_entry_one(base_info, p);
-		*curpos += the_hash_algo->rawsz;
+		*curpos += repo->hash_algo->rawsz;
 	} else
 		die("I am totally screwed");
 	return base_offset;
@@ -1255,22 +1253,19 @@ off_t get_delta_base(struct packed_git *p,
  * the final object lookup), but more expensive for OFS deltas (we
  * have to load the revidx to convert the offset back into a sha1).
  */
-static int get_delta_base_oid(struct packed_git *p,
-			      struct pack_window **w_curs,
-			      off_t curpos,
-			      struct object_id *oid,
-			      enum object_type type,
+static int get_delta_base_oid(struct repository *repo, struct packed_git *p,
+			      struct pack_window **w_curs, off_t curpos,
+			      struct object_id *oid, enum object_type type,
 			      off_t delta_obj_offset)
 {
 	if (type == OBJ_REF_DELTA) {
-		unsigned char *base = use_pack(the_repository, p, w_curs,
-					       curpos, NULL);
-		oidread(oid, base, the_repository->hash_algo);
+		unsigned char *base = use_pack(repo, p, w_curs, curpos, NULL);
+		oidread(oid, base, repo->hash_algo);
 		return 0;
 	} else if (type == OBJ_OFS_DELTA) {
 		uint32_t base_pos;
-		off_t base_offset = get_delta_base(p, w_curs, &curpos,
-						   type, delta_obj_offset);
+		off_t base_offset = get_delta_base(repo, p, w_curs, &curpos, type,
+						   delta_obj_offset);
 
 		if (!base_offset)
 			return -1;
@@ -1327,7 +1322,8 @@ static enum object_type packed_to_object_type(struct repository *r,
 		}
 		poi_stack[poi_stack_nr++] = obj_offset;
 		/* If parsing the base offset fails, just unwind */
-		base_offset = get_delta_base(p, w_curs, &curpos, type, obj_offset);
+		base_offset = get_delta_base(r, p, w_curs, &curpos, type,
+					     obj_offset);
 		if (!base_offset)
 			goto unwind;
 		curpos = obj_offset = base_offset;
@@ -1553,8 +1549,9 @@ int packed_object_info(struct repository *r, struct packed_git *p,
 	if (!oi->contentp && oi->sizep) {
 		if (type == OBJ_OFS_DELTA || type == OBJ_REF_DELTA) {
 			off_t tmp_pos = curpos;
-			off_t base_offset = get_delta_base(p, &w_curs, &tmp_pos,
-							   type, obj_offset);
+			off_t base_offset = get_delta_base(r, p, &w_curs,
+							   &tmp_pos, type,
+							   obj_offset);
 			if (!base_offset) {
 				type = OBJ_BAD;
 				goto out;
@@ -1600,7 +1597,7 @@ int packed_object_info(struct repository *r, struct packed_git *p,
 
 	if (oi->delta_base_oid) {
 		if (type == OBJ_OFS_DELTA || type == OBJ_REF_DELTA) {
-			if (get_delta_base_oid(p, &w_curs, curpos,
+			if (get_delta_base_oid(r, p, &w_curs, curpos,
 					       oi->delta_base_oid,
 					       type, obj_offset) < 0) {
 				type = OBJ_BAD;
@@ -1739,7 +1736,8 @@ void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 		if (type != OBJ_OFS_DELTA && type != OBJ_REF_DELTA)
 			break;
 
-		base_offset = get_delta_base(p, &w_curs, &curpos, type, obj_offset);
+		base_offset = get_delta_base(r, p, &w_curs, &curpos, type,
+					     obj_offset);
 		if (!base_offset) {
 			error("failed to validate delta base reference "
 			      "at offset %"PRIuMAX" from %s",

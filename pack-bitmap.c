@@ -2085,8 +2085,8 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 		 * and the normal slow path will complain about it in
 		 * more detail.
 		 */
-		base_offset = get_delta_base(pack->p, w_curs, &offset, type,
-					     delta_obj_offset);
+		base_offset = get_delta_base(the_repository, pack->p, w_curs,
+					     &offset, type, delta_obj_offset);
 		if (!base_offset)
 			return 0;
 
