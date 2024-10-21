@@ -688,7 +688,7 @@ int cmd_pack_redundant(int argc, const char **argv, const char *prefix UNUSED, s
 	pl = red = pack_list_difference(local_packs, min);
 	while (pl) {
 		printf("%s\n%s\n",
-		       sha1_pack_index_name(pl->pack->hash),
+		       sha1_pack_index_name(the_repository, pl->pack->hash),
 		       pl->pack->pack_name);
 		pl = pl->next;
 	}

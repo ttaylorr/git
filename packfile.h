@@ -29,21 +29,22 @@ struct pack_entry {
  *
  * Example: odb_pack_name(out, sha1, "idx") => ".git/objects/pack/pack-1234..idx"
  */
-char *odb_pack_name(struct strbuf *buf, const unsigned char *sha1, const char *ext);
+char *odb_pack_name(struct repository *repo, struct strbuf *buf,
+		    const unsigned char *sha1, const char *ext);
 
 /*
  * Return the name of the (local) packfile with the specified sha1 in
  * its name.  The return value is a pointer to memory that is
  * overwritten each time this function is called.
  */
-char *sha1_pack_name(const unsigned char *sha1);
+char *sha1_pack_name(struct repository *repo, const unsigned char *sha1);
 
 /*
  * Return the name of the (local) pack index file with the specified
  * sha1 in its name.  The return value is a pointer to memory that is
  * overwritten each time this function is called.
  */
-char *sha1_pack_index_name(const unsigned char *sha1);
+char *sha1_pack_index_name(struct repository *repo, const unsigned char *sha1);
 
 /*
  * Return the basename of the packfile, omitting any containing directory
@@ -51,7 +52,9 @@ char *sha1_pack_index_name(const unsigned char *sha1);
  */
 const char *pack_basename(struct packed_git *p);
 
-struct packed_git *parse_pack_index(unsigned char *sha1, const char *idx_path);
+struct packed_git *parse_pack_index(struct repository *repo,
+				    unsigned char *sha1,
+				    const char *idx_path);
 
 typedef void each_file_in_pack_dir_fn(const char *full_path, size_t full_path_len,
 				      const char *file_name, void *data);
@@ -193,7 +196,7 @@ int find_kept_pack_entry(struct repository *r, const struct object_id *oid, unsi
 int has_object_pack(const struct object_id *oid);
 int has_object_kept_pack(const struct object_id *oid, unsigned flags);
 
-int has_pack_index(const unsigned char *sha1);
+int has_pack_index(struct repository *repo, const unsigned char *sha1);
 
 /*
  * Return 1 if an object in a promisor packfile is or refers to the given

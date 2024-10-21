@@ -25,26 +25,25 @@
 #include "pack-revindex.h"
 #include "promisor-remote.h"
 
-char *odb_pack_name(struct strbuf *buf,
-		    const unsigned char *hash,
-		    const char *ext)
+char *odb_pack_name(struct repository *repo, struct strbuf *buf,
+		    const unsigned char *hash, const char *ext)
 {
 	strbuf_reset(buf);
-	strbuf_addf(buf, "%s/pack/pack-%s.%s", repo_get_object_directory(the_repository),
+	strbuf_addf(buf, "%s/pack/pack-%s.%s", repo_get_object_directory(repo),
 		    hash_to_hex(hash), ext);
 	return buf->buf;
 }
 
-char *sha1_pack_name(const unsigned char *sha1)
+char *sha1_pack_name(struct repository *repo, const unsigned char *sha1)
 {
 	static struct strbuf buf = STRBUF_INIT;
-	return odb_pack_name(&buf, sha1, "pack");
+	return odb_pack_name(repo, &buf, sha1, "pack");
 }
 
-char *sha1_pack_index_name(const unsigned char *sha1)
+char *sha1_pack_index_name(struct repository *repo, const unsigned char *sha1)
 {
 	static struct strbuf buf = STRBUF_INIT;
-	return odb_pack_name(&buf, sha1, "idx");
+	return odb_pack_name(repo, &buf, sha1, "idx");
 }
 
 static unsigned int pack_used_ctr;
@@ -237,14 +236,16 @@ static struct packed_git *alloc_packed_git(int extra)
 	return p;
 }
 
-struct packed_git *parse_pack_index(unsigned char *sha1, const char *idx_path)
+struct packed_git *parse_pack_index(struct repository *repo,
+				    unsigned char *sha1,
+				    const char *idx_path)
 {
-	const char *path = sha1_pack_name(sha1);
+	const char *path = sha1_pack_name(repo, sha1);
 	size_t alloc = st_add(strlen(path), 1);
 	struct packed_git *p = alloc_packed_git(alloc);
 
 	memcpy(p->pack_name, path, alloc); /* includes NUL */
-	hashcpy(p->hash, sha1, the_repository->hash_algo);
+	hashcpy(p->hash, sha1, repo->hash_algo);
 	if (check_packed_git_idx(idx_path, p)) {
 		free(p);
 		return NULL;
@@ -2151,10 +2152,10 @@ int has_object_kept_pack(const struct object_id *oid, unsigned flags)
 	return find_kept_pack_entry(the_repository, oid, flags, &e);
 }
 
-int has_pack_index(const unsigned char *sha1)
+int has_pack_index(struct repository *repo, const unsigned char *sha1)
 {
 	struct stat st;
-	if (stat(sha1_pack_index_name(sha1), &st))
+	if (stat(sha1_pack_index_name(repo, sha1), &st))
 		return 0;
 	return 1;
 }
