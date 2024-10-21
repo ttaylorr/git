@@ -401,7 +401,7 @@ static int check_pack_inflate(struct packed_git *p,
 	memset(&stream, 0, sizeof(stream));
 	git_inflate_init(&stream);
 	do {
-		in = use_pack(p, w_curs, offset, &stream.avail_in);
+		in = use_pack(the_repository, p, w_curs, offset, &stream.avail_in);
 		stream.next_in = in;
 		stream.next_out = fakebuf;
 		stream.avail_out = sizeof(fakebuf);
@@ -424,7 +424,7 @@ static void copy_pack_data(struct hashfile *f,
 	unsigned long avail;
 
 	while (len) {
-		in = use_pack(p, w_curs, offset, &avail);
+		in = use_pack(the_repository, p, w_curs, offset, &avail);
 		if (avail > len)
 			avail = (unsigned long)len;
 		hashwrite(f, in, avail);
@@ -2071,7 +2071,7 @@ static void check_object(struct object_entry *entry, uint32_t object_index)
 		enum object_type type;
 		unsigned long in_pack_size;
 
-		buf = use_pack(p, &w_curs, entry->in_pack_offset, &avail);
+		buf = use_pack(the_repository, p, &w_curs, entry->in_pack_offset, &avail);
 
 		/*
 		 * We want in_pack_type even if we do not reuse delta
@@ -2105,7 +2105,7 @@ static void check_object(struct object_entry *entry, uint32_t object_index)
 		case OBJ_REF_DELTA:
 			if (reuse_delta && !entry->preferred_base) {
 				oidread(&base_ref,
-					use_pack(p, &w_curs,
+					use_pack(the_repository, p, &w_curs,
 						 entry->in_pack_offset + used,
 						 NULL),
 					the_repository->hash_algo);
@@ -2114,7 +2114,7 @@ static void check_object(struct object_entry *entry, uint32_t object_index)
 			entry->in_pack_header_size = used + the_hash_algo->rawsz;
 			break;
 		case OBJ_OFS_DELTA:
-			buf = use_pack(p, &w_curs,
+			buf = use_pack(the_repository, p, &w_curs,
 				       entry->in_pack_offset + used, NULL);
 			used_0 = 0;
 			c = buf[used_0++];
@@ -2574,7 +2574,7 @@ unsigned long oe_get_size_slow(struct packing_data *pack,
 
 	packing_data_lock(&to_pack);
 	w_curs = NULL;
-	buf = use_pack(p, &w_curs, e->in_pack_offset, &avail);
+	buf = use_pack(the_repository, p, &w_curs, e->in_pack_offset, &avail);
 	used = unpack_object_header_buffer(buf, avail, &type, &size);
 	if (used == 0)
 		die(_("unable to parse object header of %s"),

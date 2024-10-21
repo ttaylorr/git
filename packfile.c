@@ -273,14 +273,14 @@ static void scan_windows(struct packed_git *p,
 	}
 }
 
-static int unuse_one_window(struct packed_git *current)
+static int unuse_one_window(struct repository *repo, struct packed_git *current)
 {
 	struct packed_git *p, *lru_p = NULL;
 	struct pack_window *lru_w = NULL, *lru_l = NULL;
 
 	if (current)
 		scan_windows(current, &lru_p, &lru_w, &lru_l);
-	for (p = the_repository->objects->packed_git; p; p = p->next)
+	for (p = repo->objects->packed_git; p; p = p->next)
 		scan_windows(p, &lru_p, &lru_w, &lru_l);
 	if (lru_p) {
 		munmap(lru_w->base, lru_w->len);
@@ -625,10 +625,9 @@ static int in_window(struct pack_window *win, off_t offset)
 		&& (offset + the_hash_algo->rawsz) <= (win_off + win->len);
 }
 
-unsigned char *use_pack(struct packed_git *p,
-		struct pack_window **w_cursor,
-		off_t offset,
-		unsigned long *left)
+unsigned char *use_pack(struct repository *repo, struct packed_git *p,
+			struct pack_window **w_cursor,
+			off_t offset, unsigned long *left)
 {
 	struct pack_window *win = *w_cursor;
 
@@ -666,7 +665,7 @@ unsigned char *use_pack(struct packed_git *p,
 			win->len = (size_t)len;
 			pack_mapped += win->len;
 			while (packed_git_limit < pack_mapped
-				&& unuse_one_window(p))
+				&& unuse_one_window(repo, p))
 				; /* nothing */
 			win->base = xmmap_gently(NULL, win->len,
 				PROT_READ, MAP_PRIVATE,
@@ -1129,7 +1128,7 @@ unsigned long get_size_from_delta(struct packed_git *p,
 
 	git_inflate_init(&stream);
 	do {
-		in = use_pack(p, w_curs, curpos, &stream.avail_in);
+		in = use_pack(the_repository, p, w_curs, curpos, &stream.avail_in);
 		stream.next_in = in;
 		/*
 		 * Note: the window section returned by use_pack() must be
@@ -1185,7 +1184,7 @@ int unpack_object_header(struct packed_git *p,
 	 * the maximum deflated object size is 2^137, which is just
 	 * insane, so we know won't exceed what we have been given.
 	 */
-	base = use_pack(p, w_curs, *curpos, &left);
+	base = use_pack(the_repository, p, w_curs, *curpos, &left);
 	used = unpack_object_header_buffer(base, left, &type, sizep);
 	if (!used) {
 		type = OBJ_BAD;
@@ -1217,7 +1216,7 @@ off_t get_delta_base(struct packed_git *p,
 		     enum object_type type,
 		     off_t delta_obj_offset)
 {
-	unsigned char *base_info = use_pack(p, w_curs, *curpos, NULL);
+	unsigned char *base_info = use_pack(the_repository, p, w_curs, *curpos, NULL);
 	off_t base_offset;
 
 	/* use_pack() assured us we have [base_info, base_info + 20)
@@ -1264,7 +1263,8 @@ static int get_delta_base_oid(struct packed_git *p,
 			      off_t delta_obj_offset)
 {
 	if (type == OBJ_REF_DELTA) {
-		unsigned char *base = use_pack(p, w_curs, curpos, NULL);
+		unsigned char *base = use_pack(the_repository, p, w_curs,
+					       curpos, NULL);
 		oidread(oid, base, the_repository->hash_algo);
 		return 0;
 	} else if (type == OBJ_OFS_DELTA) {
@@ -1636,7 +1636,8 @@ static void *unpack_compressed_entry(struct packed_git *p,
 
 	git_inflate_init(&stream);
 	do {
-		in = use_pack(p, w_curs, curpos, &stream.avail_in);
+		in = use_pack(the_repository, p, w_curs, curpos,
+			      &stream.avail_in);
 		stream.next_in = in;
 		/*
 		 * Note: we must ensure the window section returned by

@@ -34,7 +34,7 @@ int check_pack_crc(struct packed_git *p, struct pack_window **w_curs,
 
 	do {
 		unsigned long avail;
-		void *data = use_pack(p, w_curs, offset, &avail);
+		void *data = use_pack(the_repository, p, w_curs, offset, &avail);
 		if (avail > len)
 			avail = len;
 		data_crc = crc32(data_crc, data, avail);
@@ -70,7 +70,7 @@ static int verify_packfile(struct repository *r,
 	r->hash_algo->init_fn(&ctx);
 	do {
 		unsigned long remaining;
-		unsigned char *in = use_pack(p, w_curs, offset, &remaining);
+		unsigned char *in = use_pack(the_repository, p, w_curs, offset, &remaining);
 		offset += remaining;
 		if (!pack_sig_ofs)
 			pack_sig_ofs = p->pack_size - r->hash_algo->rawsz;
@@ -79,7 +79,7 @@ static int verify_packfile(struct repository *r,
 		r->hash_algo->update_fn(&ctx, in, remaining);
 	} while (offset < pack_sig_ofs);
 	r->hash_algo->final_fn(hash, &ctx);
-	pack_sig = use_pack(p, w_curs, pack_sig_ofs, NULL);
+	pack_sig = use_pack(the_repository, p, w_curs, pack_sig_ofs, NULL);
 	if (!hasheq(hash, pack_sig, the_repository->hash_algo))
 		err = error("%s pack checksum mismatch",
 			    p->pack_name);

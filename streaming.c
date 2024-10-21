@@ -292,7 +292,7 @@ static ssize_t read_istream_pack_non_delta(struct git_istream *st, char *buf,
 		struct pack_window *window = NULL;
 		unsigned char *mapped;
 
-		mapped = use_pack(st->u.in_pack.pack, &window,
+		mapped = use_pack(the_repository, st->u.in_pack.pack, &window,
 				  st->u.in_pack.pos, &st->z.avail_in);
 
 		st->z.next_out = (unsigned char *)buf + total_read;
