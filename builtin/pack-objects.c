@@ -3361,7 +3361,8 @@ static int git_pack_config(const char *k, const char *v,
 static int stdin_packs_found_nr;
 static int stdin_packs_hints_nr;
 
-static int add_object_entry_from_pack(const struct object_id *oid,
+static int add_object_entry_from_pack(struct repository *repo UNUSED,
+				      const struct object_id *oid,
 				      struct packed_git *p,
 				      uint32_t pos,
 				      void *_data)
@@ -3901,7 +3902,8 @@ static void show_edge(struct commit *commit)
 	add_preferred_base(&commit->object.oid);
 }
 
-static int add_object_in_unpacked_pack(const struct object_id *oid,
+static int add_object_in_unpacked_pack(struct repository *repo UNUSED,
+				       const struct object_id *oid,
 				       struct packed_git *pack,
 				       uint32_t pos,
 				       void *data UNUSED)

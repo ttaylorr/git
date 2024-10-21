@@ -600,7 +600,8 @@ static int collect_loose_object(const struct object_id *oid,
 	return 0;
 }
 
-static int collect_packed_object(const struct object_id *oid,
+static int collect_packed_object(struct repository *repo UNUSED,
+				 const struct object_id *oid,
 				 struct packed_git *pack UNUSED,
 				 uint32_t pos UNUSED,
 				 void *data)
@@ -631,7 +632,8 @@ static int batch_unordered_loose(const struct object_id *oid,
 	return batch_unordered_object(oid, NULL, 0, data);
 }
 
-static int batch_unordered_packed(const struct object_id *oid,
+static int batch_unordered_packed(struct repository *repo UNUSED,
+				  const struct object_id *oid,
 				  struct packed_git *pack,
 				  uint32_t pos,
 				  void *data)

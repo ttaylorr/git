@@ -321,7 +321,8 @@ static void prepare_pack_objects(struct child_process *cmd,
  * Write oid to the given struct child_process's stdin, starting it first if
  * necessary.
  */
-static int write_oid(const struct object_id *oid,
+static int write_oid(struct repository *repo,
+		     const struct object_id *oid,
 		     struct packed_git *pack UNUSED,
 		     uint32_t pos UNUSED, void *data)
 {
@@ -332,7 +333,7 @@ static int write_oid(const struct object_id *oid,
 			die(_("could not start pack-objects to repack promisor objects"));
 	}
 
-	if (write_in_full(cmd->in, oid_to_hex(oid), the_hash_algo->hexsz) < 0 ||
+	if (write_in_full(cmd->in, oid_to_hex(oid), repo->hash_algo->hexsz) < 0 ||
 	    write_in_full(cmd->in, "\n", 1) < 0)
 		die(_("failed to feed promisor objects to pack-objects"));
 	return 0;

@@ -274,7 +274,8 @@ static int add_recent_loose(const struct object_id *oid,
 	return 0;
 }
 
-static int add_recent_packed(const struct object_id *oid,
+static int add_recent_packed(struct repository *repo,
+			     const struct object_id *oid,
 			     struct packed_git *p,
 			     uint32_t pos,
 			     void *data)
@@ -285,7 +286,7 @@ static int add_recent_packed(const struct object_id *oid,
 	if (!want_recent_object(data, oid))
 		return 0;
 
-	obj = lookup_object(the_repository, oid);
+	obj = lookup_object(repo, oid);
 
 	if (obj && obj->flags & SEEN)
 		return 0;

@@ -2199,7 +2199,7 @@ int for_each_object_in_pack(struct repository *repo,
 			return error("unable to get sha1 of object %u in %s",
 				     index_pos, p->pack_name);
 
-		r = cb(&oid, p, index_pos, data);
+		r = cb(repo, &oid, p, index_pos, data);
 		if (r)
 			break;
 	}
@@ -2237,7 +2237,8 @@ int for_each_packed_object(struct repository *repo, each_packed_object_fn cb,
 	return r ? r : pack_errors;
 }
 
-static int add_promisor_object(const struct object_id *oid,
+static int add_promisor_object(struct repository *repo,
+			       const struct object_id *oid,
 			       struct packed_git *pack UNUSED,
 			       uint32_t pos UNUSED,
 			       void *set_)
@@ -2246,12 +2247,12 @@ static int add_promisor_object(const struct object_id *oid,
 	struct object *obj;
 	int we_parsed_object;
 
-	obj = lookup_object(the_repository, oid);
+	obj = lookup_object(repo, oid);
 	if (obj && obj->parsed) {
 		we_parsed_object = 0;
 	} else {
 		we_parsed_object = 1;
-		obj = parse_object(the_repository, oid);
+		obj = parse_object(repo, oid);
 	}
 
 	if (!obj)

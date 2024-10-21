@@ -1487,7 +1487,8 @@ static int write_graph_chunk_bloom_data(struct hashfile *f,
 	return 0;
 }
 
-static int add_packed_commits(const struct object_id *oid,
+static int add_packed_commits(struct repository *repo UNUSED,
+			      const struct object_id *oid,
 			      struct packed_git *pack,
 			      uint32_t pos,
 			      void *data)

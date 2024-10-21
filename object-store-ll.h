@@ -538,7 +538,8 @@ int for_each_loose_object(each_loose_object_fn, void *,
  * Each pack is visited in an unspecified order. By default, objects within a
  * pack are visited in pack-idx order (i.e., sorted by oid).
  */
-typedef int each_packed_object_fn(const struct object_id *oid,
+typedef int each_packed_object_fn(struct repository *repo,
+				  const struct object_id *oid,
 				  struct packed_git *pack,
 				  uint32_t pos,
 				  void *data);

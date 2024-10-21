@@ -250,7 +250,8 @@ static int mark_loose_unreachable_referents(const struct object_id *oid,
 	return 0;
 }
 
-static int mark_packed_unreachable_referents(const struct object_id *oid,
+static int mark_packed_unreachable_referents(struct repository *repo UNUSED,
+					     const struct object_id *oid,
 					     struct packed_git *pack UNUSED,
 					     uint32_t pos UNUSED,
 					     void *data UNUSED)
@@ -861,7 +862,8 @@ static int mark_loose_for_connectivity(const struct object_id *oid,
 	return 0;
 }
 
-static int mark_packed_for_connectivity(const struct object_id *oid,
+static int mark_packed_for_connectivity(struct repository *repo UNUSED,
+					const struct object_id *oid,
 					struct packed_git *pack UNUSED,
 					uint32_t pos UNUSED,
 					void *data UNUSED)
