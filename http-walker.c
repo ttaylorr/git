@@ -431,7 +431,7 @@ static int http_fetch_pack(struct walker *walker, struct alt_base *repo, unsigne
 
 	if (fetch_indices(walker, repo))
 		return -1;
-	target = find_sha1_pack(sha1, repo->packs);
+	target = find_sha1_pack(the_repository, sha1, repo->packs);
 	if (!target)
 		return -1;
 	close_pack_index(target);

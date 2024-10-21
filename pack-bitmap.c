@@ -935,7 +935,8 @@ static inline int bitmap_position_packfile(struct bitmap_index *bitmap_git,
 					   const struct object_id *oid)
 {
 	uint32_t pos;
-	off_t offset = find_pack_entry_one(oid->hash, bitmap_git->pack);
+	off_t offset = find_pack_entry_one(the_repository, oid->hash,
+					   bitmap_git->pack);
 	if (!offset)
 		return -1;
 
@@ -1609,7 +1610,8 @@ static int in_bitmapped_pack(struct bitmap_index *bitmap_git,
 			if (bsearch_midx(&object->oid, bitmap_git->midx, NULL))
 				return 1;
 		} else {
-			if (find_pack_entry_one(object->oid.hash, bitmap_git->pack) > 0)
+			if (find_pack_entry_one(the_repository, object->oid.hash,
+						bitmap_git->pack) > 0)
 				return 1;
 		}
 	}

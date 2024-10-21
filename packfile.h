@@ -87,7 +87,8 @@ struct packed_git *get_all_packs(struct repository *r);
  */
 unsigned long repo_approximate_object_count(struct repository *r);
 
-struct packed_git *find_sha1_pack(const unsigned char *sha1,
+struct packed_git *find_sha1_pack(struct repository *repo,
+				  const unsigned char *sha1,
 				  struct packed_git *packs);
 
 void pack_report(void);
@@ -163,7 +164,8 @@ off_t nth_packed_object_offset(const struct packed_git *, uint32_t n);
  * If the object named sha1 is present in the specified packfile,
  * return its offset within the packfile; otherwise, return 0.
  */
-off_t find_pack_entry_one(const unsigned char *sha1, struct packed_git *);
+off_t find_pack_entry_one(struct repository *repo, const unsigned char *sha1,
+			  struct packed_git *);
 
 int is_pack_valid(struct repository *repo, struct packed_git *);
 void *unpack_entry(struct repository *r, struct packed_git *, off_t, enum object_type *, unsigned long *);
