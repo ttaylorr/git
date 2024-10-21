@@ -30,7 +30,7 @@ char *odb_pack_name(struct repository *repo, struct strbuf *buf,
 {
 	strbuf_reset(buf);
 	strbuf_addf(buf, "%s/pack/pack-%s.%s", repo_get_object_directory(repo),
-		    hash_to_hex(hash), ext);
+		    hash_to_hex_algop(hash, repo->hash_algo), ext);
 	return buf->buf;
 }
 
@@ -544,7 +544,7 @@ static int open_packed_git_1(struct repository *repo, struct packed_git *p)
 	unsigned char hash[GIT_MAX_RAWSZ];
 	unsigned char *idx_hash;
 	ssize_t read_result;
-	const unsigned hashsz = the_hash_algo->rawsz;
+	const unsigned hashsz = repo->hash_algo->rawsz;
 
 	if (open_pack_index(repo, p))
 		return error("packfile %s index unavailable", p->pack_name);
@@ -614,7 +614,8 @@ static int open_packed_git(struct repository *repo, struct packed_git *p)
 	return -1;
 }
 
-static int in_window(struct pack_window *win, off_t offset)
+static int in_window(struct repository *repo, struct pack_window *win,
+		     off_t offset)
 {
 	/* We must promise at least one full hash after the
 	 * offset is available from this window, otherwise the offset
@@ -624,7 +625,7 @@ static int in_window(struct pack_window *win, off_t offset)
 	 */
 	off_t win_off = win->offset;
 	return win_off <= offset
-		&& (offset + the_hash_algo->rawsz) <= (win_off + win->len);
+		&& (offset + repo->hash_algo->rawsz) <= (win_off + win->len);
 }
 
 unsigned char *use_pack(struct repository *repo, struct packed_git *p,
@@ -640,16 +641,16 @@ unsigned char *use_pack(struct repository *repo, struct packed_git *p,
 	 */
 	if (!p->pack_size && p->pack_fd == -1 && open_packed_git(repo, p))
 		die("packfile %s cannot be accessed", p->pack_name);
-	if (offset > (p->pack_size - the_hash_algo->rawsz))
+	if (offset > (p->pack_size - repo->hash_algo->rawsz))
 		die("offset beyond end of packfile (truncated pack?)");
 	if (offset < 0)
 		die(_("offset before end of packfile (broken .idx?)"));
 
-	if (!win || !in_window(win, offset)) {
+	if (!win || !in_window(repo, win, offset)) {
 		if (win)
 			win->inuse_cnt--;
 		for (win = p->windows; win; win = win->next) {
-			if (in_window(win, offset))
+			if (in_window(repo, win, offset))
 				break;
 		}
 		if (!win) {
@@ -714,6 +715,7 @@ struct packed_git *add_packed_git(struct repository *repo, const char *path,
 	struct stat st;
 	size_t alloc;
 	struct packed_git *p;
+	struct object_id oid;
 
 	/*
 	 * Make sure a corresponding .pack file exists and that
@@ -755,8 +757,12 @@ struct packed_git *add_packed_git(struct repository *repo, const char *path,
 	p->pack_local = local;
 	p->mtime = st.st_mtime;
 	if (path_len < repo->hash_algo->hexsz ||
-	    get_hash_hex(path + path_len - repo->hash_algo->hexsz, p->hash))
+	    get_oid_hex_algop(path + path_len - repo->hash_algo->hexsz, &oid,
+			      repo->hash_algo))
 		hashclr(p->hash, repo->hash_algo);
+	else
+		memcpy(p->hash, oid.hash, repo->hash_algo->rawsz);
+
 	return p;
 }
 
@@ -1895,11 +1901,12 @@ out:
 	return data;
 }
 
-int bsearch_pack(const struct object_id *oid, const struct packed_git *p, uint32_t *result)
+int bsearch_pack(struct repository *repo, const struct object_id *oid,
+		 const struct packed_git *p, uint32_t *result)
 {
 	const unsigned char *index_fanout = p->index_data;
 	const unsigned char *index_lookup;
-	const unsigned int hashsz = the_hash_algo->rawsz;
+	const unsigned int hashsz = repo->hash_algo->rawsz;
 	int index_lookup_width;
 
 	if (!index_fanout)
@@ -1990,7 +1997,7 @@ off_t find_pack_entry_one(struct repository *repo, const unsigned char *sha1,
 	}
 
 	hashcpy(oid.hash, sha1, repo->hash_algo);
-	if (bsearch_pack(&oid, p, &result))
+	if (bsearch_pack(repo, &oid, p, &result))
 		return nth_packed_object_offset(p, result);
 	return 0;
 }

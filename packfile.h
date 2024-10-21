@@ -145,7 +145,8 @@ void check_pack_index_ptr(const struct packed_git *p, const void *ptr);
  *
  * See 'bsearch_hash' for more information.
  */
-int bsearch_pack(const struct object_id *oid, const struct packed_git *p, uint32_t *result);
+int bsearch_pack(struct repository *repo, const struct object_id *oid,
+		 const struct packed_git *p, uint32_t *result);
 
 /*
  * Write the oid of the nth object within the specified packfile into the first

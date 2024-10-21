@@ -179,7 +179,7 @@ static void unique_in_pack(struct packed_git *p,
 		return;
 
 	num = p->num_objects;
-	bsearch_pack(&ds->bin_pfx, p, &first);
+	bsearch_pack(ds->repo, &ds->bin_pfx, p, &first);
 
 	/*
 	 * At this point, "first" is the location of the lowest object
@@ -766,7 +766,7 @@ static void find_abbrev_len_for_pack(struct packed_git *p,
 
 	num = p->num_objects;
 	mad_oid = mad->oid;
-	match = bsearch_pack(mad_oid, p, &first);
+	match = bsearch_pack(mad->repo, mad_oid, p, &first);
 
 	/*
 	 * first is now the position in the packfile where we would insert

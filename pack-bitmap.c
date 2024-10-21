@@ -741,7 +741,7 @@ static uint32_t bitmap_bsearch_pos(struct bitmap_index *bitmap_git,
 	if (bitmap_is_midx(bitmap_git))
 		found = bsearch_midx(oid, bitmap_git->midx, result);
 	else
-		found = bsearch_pack(oid, bitmap_git->pack, result);
+		found = bsearch_pack(the_repository, oid, bitmap_git->pack, result);
 
 	return found;
 }
