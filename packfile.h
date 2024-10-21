@@ -150,7 +150,8 @@ int bsearch_pack(const struct object_id *oid, const struct packed_git *p, uint32
  * parameter. Open the index if it is not already open.  Returns 0 on success,
  * negative otherwise.
  */
-int nth_packed_object_id(struct object_id *, struct packed_git *, uint32_t n);
+int nth_packed_object_id(struct repository *repo, struct object_id *,
+			 struct packed_git *, uint32_t n);
 
 /*
  * Return the offset of the nth object within the specified packfile.

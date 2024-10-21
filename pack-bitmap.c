@@ -318,7 +318,7 @@ static int nth_bitmap_object_oid(struct bitmap_index *index,
 {
 	if (index->midx)
 		return nth_midxed_object_oid(oid, index->midx, n) ? 0 : -1;
-	return nth_packed_object_id(oid, index->pack, n);
+	return nth_packed_object_id(the_repository, oid, index->pack, n);
 }
 
 static int load_bitmap_entries_v1(struct bitmap_index *index)

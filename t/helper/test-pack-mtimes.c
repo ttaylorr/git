@@ -16,7 +16,7 @@ static void dump_mtimes(struct packed_git *p)
 
 	for (i = 0; i < p->num_objects; i++) {
 		struct object_id oid;
-		if (nth_packed_object_id(&oid, p, i) < 0)
+		if (nth_packed_object_id(the_repository, &oid, p, i) < 0)
 			die("could not load object id at position %"PRIu32, i);
 
 		printf("%s %"PRIu32"\n",

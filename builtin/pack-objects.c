@@ -1059,7 +1059,7 @@ static void write_reused_pack_one(struct packed_git *reuse_packfile,
 				    (uintmax_t)base_offset,
 				    reuse_packfile->pack_name);
 
-			nth_packed_object_id(&base_oid, reuse_packfile,
+			nth_packed_object_id(the_repository, &base_oid, reuse_packfile,
 					     pack_pos_to_index(reuse_packfile, base_pos));
 
 			len = encode_in_pack_object_header(header, sizeof(header),
@@ -2141,7 +2141,7 @@ static void check_object(struct object_entry *entry, uint32_t object_index)
 				uint32_t pos;
 				if (offset_to_pack_pos(p, ofs, &pos) < 0)
 					goto give_up;
-				if (!nth_packed_object_id(&base_ref, p,
+				if (!nth_packed_object_id(the_repository, &base_ref, p,
 							  pack_pos_to_index(p, pos)))
 					have_base = 1;
 			}
@@ -4036,7 +4036,7 @@ static void loosen_unused_packed_objects(void)
 			die(_("cannot open pack index"));
 
 		for (i = 0; i < p->num_objects; i++) {
-			nth_packed_object_id(&oid, p, i);
+			nth_packed_object_id(the_repository, &oid, p, i);
 			if (!packlist_find(&to_pack, &oid) &&
 			    !has_sha1_pack_kept_or_nonlocal(&oid) &&
 			    !loosened_object_can_be_discarded(&oid, p->mtime)) {

@@ -111,7 +111,7 @@ static int verify_packfile(struct repository *r,
 		off_t curpos;
 		int data_valid;
 
-		if (nth_packed_object_id(&oid, p, entries[i].nr) < 0)
+		if (nth_packed_object_id(r, &oid, p, entries[i].nr) < 0)
 			BUG("unable to get oid of object %lu from %s",
 			    (unsigned long)entries[i].nr, p->pack_name);
 

@@ -188,7 +188,7 @@ static void unique_in_pack(struct packed_git *p,
 	 */
 	for (i = first; i < num && !ds->ambiguous; i++) {
 		struct object_id oid;
-		nth_packed_object_id(&oid, p, i);
+		nth_packed_object_id(ds->repo, &oid, p, i);
 		if (!match_hash(len, ds->bin_pfx.hash, oid.hash))
 			break;
 		update_candidates(ds, &oid);
@@ -776,14 +776,14 @@ static void find_abbrev_len_for_pack(struct packed_git *p,
 	 */
 	mad->init_len = 0;
 	if (!match) {
-		if (!nth_packed_object_id(&oid, p, first))
+		if (!nth_packed_object_id(mad->repo, &oid, p, first))
 			extend_abbrev_len(&oid, mad);
 	} else if (first < num - 1) {
-		if (!nth_packed_object_id(&oid, p, first + 1))
+		if (!nth_packed_object_id(mad->repo, &oid, p, first + 1))
 			extend_abbrev_len(&oid, mad);
 	}
 	if (first > 0) {
-		if (!nth_packed_object_id(&oid, p, first - 1))
+		if (!nth_packed_object_id(mad->repo, &oid, p, first - 1))
 			extend_abbrev_len(&oid, mad);
 	}
 	mad->init_len = mad->cur_len;

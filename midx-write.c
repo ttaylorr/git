@@ -227,7 +227,7 @@ static void fill_pack_entry(uint32_t pack_int_id,
 			    struct pack_midx_entry *entry,
 			    int preferred)
 {
-	if (nth_packed_object_id(&entry->oid, p, cur_object) < 0)
+	if (nth_packed_object_id(the_repository, &entry->oid, p, cur_object) < 0)
 		die(_("failed to locate object %d in packfile"), cur_object);
 
 	entry->pack_int_id = pack_int_id;
