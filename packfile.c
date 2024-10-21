@@ -1169,9 +1169,8 @@ unsigned long get_size_from_delta(struct repository *repo, struct packed_git *p,
 	return get_delta_hdr_size(&data, delta_head+sizeof(delta_head));
 }
 
-int unpack_object_header(struct packed_git *p,
-			 struct pack_window **w_curs,
-			 off_t *curpos,
+int unpack_object_header(struct repository *r, struct packed_git *p,
+			 struct pack_window **w_curs, off_t *curpos,
 			 unsigned long *sizep)
 {
 	unsigned char *base;
@@ -1185,7 +1184,7 @@ int unpack_object_header(struct packed_git *p,
 	 * the maximum deflated object size is 2^137, which is just
 	 * insane, so we know won't exceed what we have been given.
 	 */
-	base = use_pack(the_repository, p, w_curs, *curpos, &left);
+	base = use_pack(r, p, w_curs, *curpos, &left);
 	used = unpack_object_header_buffer(base, left, &type, sizep);
 	if (!used) {
 		type = OBJ_BAD;
@@ -1332,7 +1331,7 @@ static enum object_type packed_to_object_type(struct repository *r,
 		if (!base_offset)
 			goto unwind;
 		curpos = obj_offset = base_offset;
-		type = unpack_object_header(p, w_curs, &curpos, &size);
+		type = unpack_object_header(r, p, w_curs, &curpos, &size);
 		if (type <= OBJ_NONE) {
 			/* If getting the base itself fails, we first
 			 * retry the base, otherwise unwind */
@@ -1548,7 +1547,7 @@ int packed_object_info(struct repository *r, struct packed_git *p,
 		if (!*oi->contentp)
 			type = OBJ_BAD;
 	} else {
-		type = unpack_object_header(p, &w_curs, &curpos, &size);
+		type = unpack_object_header(r, p, &w_curs, &curpos, &size);
 	}
 
 	if (!oi->contentp && oi->sizep) {
@@ -1736,7 +1735,7 @@ void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 			}
 		}
 
-		type = unpack_object_header(p, &w_curs, &curpos, &size);
+		type = unpack_object_header(r, p, &w_curs, &curpos, &size);
 		if (type != OBJ_OFS_DELTA && type != OBJ_REF_DELTA)
 			break;
 

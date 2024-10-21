@@ -1033,7 +1033,8 @@ static void write_reused_pack_one(struct packed_git *reuse_packfile,
 			     offset - (hashfile_total(out) - pack_start));
 
 	cur = offset;
-	type = unpack_object_header(reuse_packfile, w_curs, &cur, &size);
+	type = unpack_object_header(the_repository, reuse_packfile, w_curs,
+				    &cur, &size);
 	assert(type >= 0);
 
 	if (type == OBJ_OFS_DELTA) {

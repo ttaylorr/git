@@ -127,7 +127,8 @@ static int verify_packfile(struct repository *r,
 		}
 
 		curpos = entries[i].offset;
-		type = unpack_object_header(p, w_curs, &curpos, &size);
+		type = unpack_object_header(the_repository, p, w_curs, &curpos,
+					    &size);
 		unuse_pack(w_curs);
 
 		if (type == OBJ_BLOB && big_file_threshold <= size) {

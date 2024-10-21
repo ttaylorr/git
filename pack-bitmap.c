@@ -2067,7 +2067,8 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 		return -1; /* not actually in the pack */
 
 	delta_obj_offset = offset;
-	type = unpack_object_header(pack->p, w_curs, &offset, &size);
+	type = unpack_object_header(the_repository, pack->p, w_curs, &offset,
+				    &size);
 	if (type < 0)
 		return -1; /* broken packfile, punt */
 
