@@ -1,4 +1,3 @@
-#define USE_THE_REPOSITORY_VARIABLE
 
 #include "git-compat-util.h"
 #include "environment.h"
@@ -26,6 +25,17 @@
 #include "promisor-remote.h"
 #include "config.h"
 #include "pack-objects.h"
+
+struct packfile_config {
+	unsigned long packed_git_window_size;
+	unsigned long packed_git_limit;
+};
+
+#define PACKFILE_CONFIG_INIT \
+{ \
+	.packed_git_window_size = DEFAULT_PACKED_GIT_WINDOW_SIZE, \
+	.packed_git_limit = DEFAULT_PACKED_GIT_LIMIT,  \
+}
 
 char *odb_pack_name(struct repository *repo, struct strbuf *buf,
 		    const unsigned char *hash, const char *ext)
@@ -60,15 +70,44 @@ static size_t pack_mapped;
 #define SZ_FMT PRIuMAX
 static inline uintmax_t sz_fmt(size_t s) { return s; }
 
-void pack_report(void)
+static int packfile_config(const char *var, const char *value,
+			   const struct config_context *ctx, void *cb)
 {
+	struct packfile_config *config = cb;
+
+	if (!strcmp(var, "core.packedgitwindowsize")) {
+		int pgsz_x2 = getpagesize() * 2;
+		config->packed_git_window_size = git_config_ulong(var, value, ctx->kvi);
+
+		/* This value must be multiple of (pagesize * 2) */
+		config->packed_git_window_size /= pgsz_x2;
+		if (config->packed_git_window_size < 1)
+			config->packed_git_window_size = 1;
+		config->packed_git_window_size *= pgsz_x2;
+		return 0;
+	}
+
+	if (!strcmp(var, "core.packedgitlimit")) {
+		config->packed_git_limit = git_config_ulong(var, value, ctx->kvi);
+		return 0;
+	}
+
+	return git_default_config(var, value, ctx, cb);
+}
+
+
+void pack_report(struct repository *repo)
+{
+	struct packfile_config config = PACKFILE_CONFIG_INIT;
+	repo_config(repo, packfile_config, &config);
+
 	fprintf(stderr,
 		"pack_report: getpagesize()            = %10" SZ_FMT "\n"
 		"pack_report: core.packedGitWindowSize = %10" SZ_FMT "\n"
 		"pack_report: core.packedGitLimit      = %10" SZ_FMT "\n",
 		sz_fmt(getpagesize()),
-		sz_fmt(packed_git_window_size),
-		sz_fmt(packed_git_limit));
+		sz_fmt(config.packed_git_window_size),
+		sz_fmt(config.packed_git_limit));
 	fprintf(stderr,
 		"pack_report: pack_used_ctr            = %10u\n"
 		"pack_report: pack_mmap_calls          = %10u\n"
@@ -656,8 +695,12 @@ unsigned char *use_pack(struct repository *repo, struct packed_git *p,
 				break;
 		}
 		if (!win) {
-			size_t window_align = packed_git_window_size / 2;
+			struct packfile_config config = PACKFILE_CONFIG_INIT;
+			size_t window_align;
 			off_t len;
+
+			repo_config(repo, packfile_config, &config);
+			window_align = config.packed_git_window_size / 2;
 
 			if (p->pack_fd == -1 && open_packed_git(repo, p))
 				die("packfile %s cannot be accessed", p->pack_name);
@@ -665,11 +708,11 @@ unsigned char *use_pack(struct repository *repo, struct packed_git *p,
 			CALLOC_ARRAY(win, 1);
 			win->offset = (offset / window_align) * window_align;
 			len = p->pack_size - win->offset;
-			if (len > packed_git_window_size)
-				len = packed_git_window_size;
+			if (len > config.packed_git_window_size)
+				len = config.packed_git_window_size;
 			win->len = (size_t)len;
 			pack_mapped += win->len;
-			while (packed_git_limit < pack_mapped
+			while (config.packed_git_limit < pack_mapped
 				&& unuse_one_window(repo, p))
 				; /* nothing */
 			win->base = xmmap_gently(NULL, win->len,

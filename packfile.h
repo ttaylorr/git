@@ -91,7 +91,7 @@ struct packed_git *find_sha1_pack(struct repository *repo,
 				  const unsigned char *sha1,
 				  struct packed_git *packs);
 
-void pack_report(void);
+void pack_report(struct repository *repo);
 
 /*
  * mmap the index file for the specified packfile (if it is not
