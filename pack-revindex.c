@@ -466,7 +466,8 @@ off_t pack_pos_to_offset(struct packed_git *p, uint32_t pos)
 	else if (pos == p->num_objects)
 		return p->pack_size - the_hash_algo->rawsz;
 	else
-		return nth_packed_object_offset(p, pack_pos_to_index(p, pos));
+		return nth_packed_object_offset(the_repository, p,
+						pack_pos_to_index(p, pos));
 }
 
 uint32_t pack_pos_to_midx(struct multi_pack_index *m, uint32_t pos)

@@ -1495,7 +1495,7 @@ static int add_packed_commits(struct repository *repo UNUSED,
 {
 	struct write_commit_graph_context *ctx = (struct write_commit_graph_context*)data;
 	enum object_type type;
-	off_t offset = nth_packed_object_offset(pack, pos);
+	off_t offset = nth_packed_object_offset(ctx->r, pack, pos);
 	struct object_info oi = OBJECT_INFO_INIT;
 
 	if (ctx->progress)

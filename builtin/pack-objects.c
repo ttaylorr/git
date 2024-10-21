@@ -3361,7 +3361,7 @@ static int git_pack_config(const char *k, const char *v,
 static int stdin_packs_found_nr;
 static int stdin_packs_hints_nr;
 
-static int add_object_entry_from_pack(struct repository *repo UNUSED,
+static int add_object_entry_from_pack(struct repository *repo,
 				      const struct object_id *oid,
 				      struct packed_git *p,
 				      uint32_t pos,
@@ -3375,7 +3375,7 @@ static int add_object_entry_from_pack(struct repository *repo UNUSED,
 	if (have_duplicate_entry(oid, 0))
 		return 0;
 
-	ofs = nth_packed_object_offset(p, pos);
+	ofs = nth_packed_object_offset(repo, p, pos);
 	if (!want_object_in_pack(oid, 0, &p, &ofs))
 		return 0;
 
@@ -3919,7 +3919,7 @@ static int add_object_in_unpacked_pack(struct repository *repo,
 		} else {
 			mtime = pack->mtime;
 		}
-		offset = nth_packed_object_offset(pack, pos);
+		offset = nth_packed_object_offset(repo, pack, pos);
 
 		add_cruft_object_entry(oid, OBJ_NONE, pack, offset,
 				       NULL, mtime);

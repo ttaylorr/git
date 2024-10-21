@@ -233,7 +233,7 @@ static void fill_pack_entry(uint32_t pack_int_id,
 	entry->pack_int_id = pack_int_id;
 	entry->pack_mtime = p->mtime;
 
-	entry->offset = nth_packed_object_offset(p, cur_object);
+	entry->offset = nth_packed_object_offset(the_repository, p, cur_object);
 	entry->preferred = !!preferred;
 }
 

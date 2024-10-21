@@ -160,7 +160,9 @@ int nth_packed_object_id(struct repository *repo, struct object_id *,
  * Return the offset of the nth object within the specified packfile.
  * The index must already be opened.
  */
-off_t nth_packed_object_offset(const struct packed_git *, uint32_t n);
+off_t nth_packed_object_offset(struct repository *repo,
+			       const struct packed_git *,
+			       uint32_t n);
 
 /*
  * If the object named sha1 is present in the specified packfile,

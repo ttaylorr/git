@@ -632,14 +632,14 @@ static int batch_unordered_loose(const struct object_id *oid,
 	return batch_unordered_object(oid, NULL, 0, data);
 }
 
-static int batch_unordered_packed(struct repository *repo UNUSED,
+static int batch_unordered_packed(struct repository *repo,
 				  const struct object_id *oid,
 				  struct packed_git *pack,
 				  uint32_t pos,
 				  void *data)
 {
 	return batch_unordered_object(oid, pack,
-				      nth_packed_object_offset(pack, pos),
+				      nth_packed_object_offset(repo, pack, pos),
 				      data);
 }
 

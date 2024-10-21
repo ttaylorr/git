@@ -1964,10 +1964,12 @@ void check_pack_index_ptr(const struct packed_git *p, const void *vptr)
 		    p->pack_name);
 }
 
-off_t nth_packed_object_offset(const struct packed_git *p, uint32_t n)
+off_t nth_packed_object_offset(struct repository *repo,
+			       const struct packed_git *p,
+			       uint32_t n)
 {
 	const unsigned char *index = p->index_data;
-	const unsigned int hashsz = the_hash_algo->rawsz;
+	const unsigned int hashsz = repo->hash_algo->rawsz;
 	index += 4 * 256;
 	if (p->index_version == 1) {
 		return ntohl(*((uint32_t *)(index + st_mult(hashsz + 4, n))));
@@ -1998,7 +2000,7 @@ off_t find_pack_entry_one(struct repository *repo, const unsigned char *sha1,
 
 	hashcpy(oid.hash, sha1, repo->hash_algo);
 	if (bsearch_pack(repo, &oid, p, &result))
-		return nth_packed_object_offset(p, result);
+		return nth_packed_object_offset(repo, p, result);
 	return 0;
 }
 

@@ -295,7 +295,8 @@ static int add_recent_packed(struct repository *repo,
 			die(_("could not load cruft pack .mtimes"));
 		mtime = nth_packed_mtime(p, pos);
 	}
-	add_recent_object(oid, p, nth_packed_object_offset(p, pos), mtime, data);
+	add_recent_object(oid, p, nth_packed_object_offset(repo, p, pos), mtime,
+			  data);
 	return 0;
 }
 
