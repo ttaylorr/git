@@ -10,6 +10,9 @@ diff-highlight: shebang.perl DiffHighlight.pm diff-highlight.perl
 	chmod +x $@+
 	mv $@+ $@
 
+install: diff-highlight
+	test -w $(DESTDIR) && ln -s $(abspath $<) $(DESTDIR)
+
 shebang.perl: FORCE
 	@echo '#!$(PERL_PATH_SQ)' >$@+
 	@cmp $@+ $@ >/dev/null 2>/dev/null || mv $@+ $@
@@ -18,6 +21,9 @@ test: all
 	$(MAKE) -C t
 
 clean:
+	test ! -L $(DESTDIR)/diff-highlight || \
+		$(RM) -f $(DESTDIR)/diff-highlight
 	$(RM) diff-highlight
 
 .PHONY: FORCE
+.PHONY: install
