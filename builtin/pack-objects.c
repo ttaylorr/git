@@ -1058,7 +1058,43 @@ static off_t find_reused_offset(off_t where)
 	return reused_chunks[lo-1].difference;
 }
 
-static void write_reused_pack_one(struct packed_git *reuse_packfile,
+static uint32_t bitmap_to_pack_pos(struct bitmapped_pack *reuse_packfile,
+				   size_t pos)
+{
+	if (reuse_packfile->bitmap_pos) {
+		/*
+		 * When doing multi-pack reuse on a
+		 * non-preferred pack, translate bit positions
+		 * from the MIDX pseudo-pack order back to their
+		 * pack-relative positions before attempting
+		 * reuse.
+		 */
+		struct multi_pack_index *m = bitmap_midx(bitmap_git);
+		uint32_t midx_pos, pack_pos;
+		off_t pack_ofs;
+
+		if (!m)
+			BUG("non-zero bitmap position without MIDX");
+
+		midx_pos = pack_pos_to_midx(m, pos);
+		pack_ofs = nth_midxed_offset(m, midx_pos);
+
+		if (offset_to_pack_pos(reuse_packfile->p, pack_ofs, &pack_pos) < 0)
+			BUG("could not find expected object at offset %"PRIuMAX" in pack %s",
+			    (uintmax_t)pack_ofs, pack_basename(reuse_packfile->p));
+
+		return pack_pos;
+	} else {
+		/*
+		 * Can use bit positions directly, even for MIDX
+		 * bitmaps. See comment in try_partial_reuse()
+		 * for why.
+		 */
+		return pos;
+	}
+}
+
+static void write_reused_pack_one(struct bitmapped_pack *p,
 				  size_t pos, struct hashfile *out,
 				  off_t pack_start,
 				  struct pack_window **w_curs)
@@ -1066,9 +1102,11 @@ static void write_reused_pack_one(struct packed_git *reuse_packfile,
 	off_t offset, next, cur;
 	enum object_type type;
 	unsigned long size;
+	struct packed_git *reuse_packfile = p->p;
+	uint32_t pack_pos = bitmap_to_pack_pos(p, pos);
 
-	offset = pack_pos_to_offset(reuse_packfile, pos);
-	next = pack_pos_to_offset(reuse_packfile, pos + 1);
+	offset = pack_pos_to_offset(reuse_packfile, pack_pos);
+	next = pack_pos_to_offset(reuse_packfile, pack_pos + 1);
 
 	record_reused_object(offset,
 			     offset - (hashfile_total(out) - pack_start));
@@ -1217,7 +1255,6 @@ static void write_reused_pack(struct bitmapped_pack *reuse_packfile,
 		size_t pos = (i * BITS_IN_EWORD);
 
 		for (offset = 0; offset < BITS_IN_EWORD; ++offset) {
-			uint32_t pack_pos;
 			if ((word >> offset) == 0)
 				break;
 
@@ -1227,39 +1264,7 @@ static void write_reused_pack(struct bitmapped_pack *reuse_packfile,
 			if (pos + offset >= reuse_packfile->bitmap_pos + reuse_packfile->bitmap_nr)
 				goto done;
 
-			if (reuse_packfile->bitmap_pos) {
-				/*
-				 * When doing multi-pack reuse on a
-				 * non-preferred pack, translate bit positions
-				 * from the MIDX pseudo-pack order back to their
-				 * pack-relative positions before attempting
-				 * reuse.
-				 */
-				struct multi_pack_index *m = bitmap_midx(bitmap_git);
-				uint32_t midx_pos;
-				off_t pack_ofs;
-
-				if (!m)
-					BUG("non-zero bitmap position without MIDX");
-
-				midx_pos = pack_pos_to_midx(m, pos + offset);
-				pack_ofs = nth_midxed_offset(m, midx_pos);
-
-				if (offset_to_pack_pos(reuse_packfile->p,
-						       pack_ofs, &pack_pos) < 0)
-					BUG("could not find expected object at offset %"PRIuMAX" in pack %s",
-					    (uintmax_t)pack_ofs,
-					    pack_basename(reuse_packfile->p));
-			} else {
-				/*
-				 * Can use bit positions directly, even for MIDX
-				 * bitmaps. See comment in try_partial_reuse()
-				 * for why.
-				 */
-				pack_pos = pos + offset;
-			}
-
-			write_reused_pack_one(reuse_packfile->p, pack_pos, f,
+			write_reused_pack_one(reuse_packfile, pos + offset, f,
 					      pack_start, &w_curs);
 			display_progress(progress_state, ++written);
 		}
