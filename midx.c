@@ -988,3 +988,17 @@ cleanup:
 
 	return verify_midx_error;
 }
+
+void midx_populate_forward_index(struct multi_pack_index *m)
+{
+	uint32_t i;
+
+	ALLOC_ARRAY(m->forward_idx, m->num_objects);
+
+	trace2_region_enter("midx", "populate_forward_index", the_repository);
+
+	for (i = 0; i < m->num_objects; i++)
+		m->forward_idx[pack_pos_to_midx(m, i)] = i;
+
+	trace2_region_leave("midx", "populate_forward_index", the_repository);
+}

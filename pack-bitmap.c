@@ -2092,9 +2092,13 @@ static int find_base_bitmap_pos(struct bitmap_index *bitmap_git,
 		if (!bsearch_midx(&base_oid, bitmap_git->midx,
 				  &base_midx_pos))
 			return -1;
+#if 0
 		if (midx_to_pack_pos(bitmap_git->midx, base_midx_pos,
 				     base_bitmap_pos) < 0)
 			return -1;
+#else
+		*base_bitmap_pos = bitmap_git->midx->forward_idx[base_midx_pos];
+#endif
 	} else {
 		/*
 		 * We assume delta dependencies always point backwards.
@@ -2316,6 +2320,7 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 	assert(result);
 
 	load_reverse_index(r, bitmap_git);
+	midx_populate_forward_index(bitmap_git->midx);
 
 	if (!bitmap_is_midx(bitmap_git) || !bitmap_git->midx->chunk_bitmapped_packs)
 		multi_pack_reuse = 0;

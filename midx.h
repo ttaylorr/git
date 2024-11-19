@@ -65,6 +65,8 @@ struct multi_pack_index {
 	const unsigned char *chunk_revindex;
 	size_t chunk_revindex_len;
 
+	uint32_t *forward_idx;
+
 	struct multi_pack_index *base_midx;
 	uint32_t num_objects_in_base;
 	uint32_t num_packs_in_base;
@@ -73,6 +75,8 @@ struct multi_pack_index {
 	struct packed_git **packs;
 	char object_dir[FLEX_ARRAY];
 };
+
+void midx_populate_forward_index(struct multi_pack_index *m);
 
 #define MIDX_PROGRESS     (1 << 0)
 #define MIDX_WRITE_REV_INDEX (1 << 1)
