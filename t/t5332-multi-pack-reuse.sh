@@ -194,7 +194,7 @@ test_expect_success 'omit delta with uninteresting base (same pack)' '
 	test_pack_objects_reused 3 1 <in
 '
 
-test_expect_success 'omit delta from uninteresting base (cross pack)' '
+test_expect_success 'can retain delta from uninteresting base (cross pack)' '
 	cat >in <<-EOF &&
 	$(git rev-parse $base)
 	^$(git rev-parse $delta)
@@ -207,7 +207,7 @@ test_expect_success 'omit delta from uninteresting base (cross pack)' '
 	packs_nr="$(find $packdir -type f -name "pack-*.pack" | wc -l)" &&
 	objects_nr="$(git rev-list --count --all --objects)" &&
 
-	test_pack_objects_reused_all $(($objects_nr - 1)) $packs_nr
+	test_pack_objects_reused_all $objects_nr $packs_nr
 '
 
 test_expect_success 'non-omitted delta in MIDX preferred pack' '
