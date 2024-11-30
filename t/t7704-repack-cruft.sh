@@ -30,6 +30,12 @@ test_expect_success '--expire-to stores pruned objects (now)' '
 		git branch -D cruft &&
 		git reflog expire --all --expire=all &&
 
+		for obj in $(cat moved.want)
+		do
+			path="$objdir/$(test_oid_to_path $obj)" &&
+			test_path_is_file "$path" || return 1
+		done &&
+
 		git init --bare expired.git &&
 		git repack -d \
 			--cruft --cruft-expiration="now" \
@@ -37,6 +43,12 @@ test_expect_success '--expire-to stores pruned objects (now)' '
 
 		expired="$(ls expired.git/objects/pack/pack-*.idx)" &&
 		test_path_is_file "${expired%.idx}.mtimes" &&
+
+		for obj in $(cat moved.want)
+		do
+			path="$objdir/$(test_oid_to_path $obj)" &&
+			test_path_is_missing "$path" || return 1
+		done &&
 
 		# Since the `--cruft-expiration` is "now", the effective
 		# behavior is to move _all_ unreachable objects out to

@@ -1553,6 +1553,21 @@ int cmd_repack(int argc,
 							&existing);
 		if (show_progress)
 			opts |= PRUNE_PACKED_VERBOSE;
+
+		if (expire_to && *expire_to) {
+			char *alt = dirname(xstrdup(expire_to));
+			size_t len = strlen(alt);
+
+			if (strip_suffix(alt, "pack", &len) &&
+			    is_dir_sep(alt[len - 1])) {
+				alt[len - 1] = '\0';
+
+				add_to_alternates_memory(alt);
+				reprepare_packed_git(the_repository);
+			}
+
+			free(alt);
+		}
 		prune_packed_objects(opts);
 
 		if (!keep_unreachable &&
