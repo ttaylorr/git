@@ -24,6 +24,7 @@
 #include "commit-graph.h"
 #include "pack-revindex.h"
 #include "promisor-remote.h"
+#include "pack-mtimes.h"
 
 char *odb_pack_name(struct repository *r, struct strbuf *buf,
 		    const unsigned char *hash, const char *ext)
@@ -2157,6 +2158,45 @@ int find_kept_pack_entry(struct repository *r,
 	return 0;
 }
 
+int find_recent_kept_pack_entry(struct repository *r,
+				const struct object_id *oid,
+				unsigned flags,
+				struct pack_entry *e,
+				uint32_t mtime)
+{
+	struct packed_git **cache;
+
+	for (cache = kept_pack_cache(r, flags); *cache; cache++) {
+		struct packed_git *p = *cache;
+		struct pack_entry candidate;
+		uint32_t candidate_mtime;
+
+		if (!fill_pack_entry(oid, &candidate, p))
+			continue;
+
+		if (p->is_cruft && !load_pack_mtimes(p)) {
+			uint32_t pos;
+			if (offset_to_pack_pos(p, candidate.offset, &pos) < 0)
+				continue;
+			candidate_mtime = nth_packed_mtime(p, pos);
+		} else {
+			/*
+			 * Pack 'p' is either not a cruft pack, or is one whose
+			 * *.mtimes file cannot be loaded. Assume the pack's
+			 * mtime in either case.
+			 */
+			candidate_mtime = p->mtime;
+		}
+
+		if (candidate_mtime >= mtime) {
+			*e = candidate;
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 int has_object_pack(struct repository *r, const struct object_id *oid)
 {
 	struct pack_entry e;
@@ -2168,6 +2208,14 @@ int has_object_kept_pack(struct repository *r, const struct object_id *oid,
 {
 	struct pack_entry e;
 	return find_kept_pack_entry(r, oid, flags, &e);
+}
+
+int has_object_kept_pack_recent(struct repository *r,
+				const struct object_id *oid, unsigned flags,
+				uint32_t mtime)
+{
+	struct pack_entry e;
+	return find_recent_kept_pack_entry(r, oid, flags, &e, mtime);
 }
 
 int for_each_object_in_pack(struct packed_git *p,

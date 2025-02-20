@@ -206,6 +206,7 @@ static int have_non_local_packs;
 static int incremental;
 static int ignore_packed_keep_on_disk;
 static int ignore_packed_keep_in_core;
+static int ignore_packed_keep_in_core_has_cruft;
 static int allow_ofs_delta;
 static struct pack_idx_option pack_idx_opts;
 static const char *base_name;
@@ -1503,7 +1504,7 @@ static int have_duplicate_entry(const struct object_id *oid,
 }
 
 static int want_found_object(const struct object_id *oid, int exclude,
-			     struct packed_git *p)
+			     struct packed_git *p, uint32_t mtime)
 {
 	if (exclude)
 		return 1;
@@ -1548,17 +1549,34 @@ static int want_found_object(const struct object_id *oid, int exclude,
 		 * the in-core ones.
 		 */
 		unsigned flags = 0;
+
 		if (ignore_packed_keep_on_disk)
 			flags |= ON_DISK_KEEP_PACKS;
 		if (ignore_packed_keep_in_core)
 			flags |= IN_CORE_KEEP_PACKS;
 
-		if (ignore_packed_keep_on_disk && p->pack_keep)
-			return 0;
-		if (ignore_packed_keep_in_core && p->pack_keep_in_core)
-			return 0;
-		if (has_object_kept_pack(p->repo, oid, flags))
-			return 0;
+		/*
+		 * If the object is in a pack that we want to ignore, *and* we
+		 * don't have any cruft packs that are being retained, we can
+		 * abort quickly.
+		 */
+		if (!ignore_packed_keep_in_core_has_cruft) {
+			if (ignore_packed_keep_on_disk && p->pack_keep)
+				return 0;
+			if (ignore_packed_keep_in_core && p->pack_keep_in_core)
+				return 0;
+			if (has_object_kept_pack(p->repo, oid, flags))
+				return 0;
+		} else {
+			/*
+			 * But if there is at least one cruft pack which
+			 * is being kept, we only want to include the
+			 * provided object if it has a strictly greater
+			 * mtime than any existing cruft copy.
+			 */
+			return !has_object_kept_pack_recent(p->repo, oid, flags,
+							    mtime);
+		}
 	}
 
 	/*
@@ -1577,7 +1595,8 @@ static int want_object_in_pack_one(struct packed_git *p,
 				   const struct object_id *oid,
 				   int exclude,
 				   struct packed_git **found_pack,
-				   off_t *found_offset)
+				   off_t *found_offset,
+				   uint32_t found_mtime)
 {
 	off_t offset;
 
@@ -1593,7 +1612,7 @@ static int want_object_in_pack_one(struct packed_git *p,
 			*found_offset = offset;
 			*found_pack = p;
 		}
-		return want_found_object(oid, exclude, p);
+		return want_found_object(oid, exclude, p, found_mtime);
 	}
 	return -1;
 }
@@ -1607,10 +1626,11 @@ static int want_object_in_pack_one(struct packed_git *p,
  * function finds if there is any pack that has the object and returns the pack
  * and its offset in these variables.
  */
-static int want_object_in_pack(const struct object_id *oid,
-			       int exclude,
-			       struct packed_git **found_pack,
-			       off_t *found_offset)
+static int want_object_in_pack_mtime(const struct object_id *oid,
+				     int exclude,
+				     struct packed_git **found_pack,
+				     off_t *found_offset,
+				     uint32_t found_mtime)
 {
 	int want;
 	struct list_head *pos;
@@ -1625,7 +1645,8 @@ static int want_object_in_pack(const struct object_id *oid,
 	 * are present we will determine the answer right now.
 	 */
 	if (*found_pack) {
-		want = want_found_object(oid, exclude, *found_pack);
+		want = want_found_object(oid, exclude, *found_pack,
+					 found_mtime);
 		if (want != -1)
 			return want;
 
@@ -1636,7 +1657,7 @@ static int want_object_in_pack(const struct object_id *oid,
 	for (m = get_multi_pack_index(the_repository); m; m = m->next) {
 		struct pack_entry e;
 		if (fill_midx_entry(the_repository, oid, &e, m)) {
-			want = want_object_in_pack_one(e.p, oid, exclude, found_pack, found_offset);
+			want = want_object_in_pack_one(e.p, oid, exclude, found_pack, found_offset, found_mtime);
 			if (want != -1)
 				return want;
 		}
@@ -1644,7 +1665,7 @@ static int want_object_in_pack(const struct object_id *oid,
 
 	list_for_each(pos, get_packed_git_mru(the_repository)) {
 		struct packed_git *p = list_entry(pos, struct packed_git, mru);
-		want = want_object_in_pack_one(p, oid, exclude, found_pack, found_offset);
+		want = want_object_in_pack_one(p, oid, exclude, found_pack, found_offset, found_mtime);
 		if (!exclude && want > 0)
 			list_move(&p->mru,
 				  get_packed_git_mru(the_repository));
@@ -1672,6 +1693,15 @@ static int want_object_in_pack(const struct object_id *oid,
 	}
 
 	return 1;
+}
+
+static inline int want_object_in_pack(const struct object_id *oid,
+				      int exclude,
+				      struct packed_git **found_pack,
+				      off_t *found_offset)
+{
+	return want_object_in_pack_mtime(oid, exclude, found_pack, found_offset,
+					 0);
 }
 
 static struct object_entry *create_object_entry(const struct object_id *oid,
@@ -3606,7 +3636,7 @@ static void add_cruft_object_entry(const struct object_id *oid, enum object_type
 			entry->no_try_delta = no_try_delta(name);
 		}
 	} else {
-		if (!want_object_in_pack(oid, 0, &pack, &offset))
+		if (!want_object_in_pack_mtime(oid, 0, &pack, &offset, mtime))
 			return;
 		if (!pack && type == OBJ_BLOB && !has_loose_object(oid)) {
 			/*
@@ -3680,6 +3710,8 @@ static void mark_pack_kept_in_core(struct string_list *packs, unsigned keep)
 		struct packed_git *p = item->util;
 		if (!p)
 			die(_("could not find pack '%s'"), item->string);
+		if (p->is_cruft && keep)
+			ignore_packed_keep_in_core_has_cruft = 1;
 		p->pack_keep_in_core = keep;
 	}
 }

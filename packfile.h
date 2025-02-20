@@ -189,13 +189,31 @@ const struct packed_git *has_packed_and_bad(struct repository *, const struct ob
 /*
  * Iff a pack file in the given repository contains the object named by sha1,
  * return true and store its location to e.
+ *
+ * The 'find_recent_kept_pack_entry' variant will only consider
+ * objects whose mtime (either from the *.mtime file in the case of
+ * cruft packs, or from the pack mtime itself otherwise) is greater
+ * than or equal to the given 'mtime'.
  */
 int find_pack_entry(struct repository *r, const struct object_id *oid, struct pack_entry *e);
 int find_kept_pack_entry(struct repository *r, const struct object_id *oid, unsigned flags, struct pack_entry *e);
+int find_recent_kept_pack_entry(struct repository *r,
+			       const struct object_id *oid,
+			       unsigned flags,
+			       struct pack_entry *e,
+			       uint32_t mtime);
 
 int has_object_pack(struct repository *r, const struct object_id *oid);
 int has_object_kept_pack(struct repository *r, const struct object_id *oid,
 			 unsigned flags);
+/*
+ * has_object_kept_pack_recent() returns 1 if the object appears in a
+ * kept pack with an mtime (see above for the precise definition of
+ * mtime in this context) greater than or equal to the one provided.
+ */
+int has_object_kept_pack_recent(struct repository *r,
+				const struct object_id *oid, unsigned flags,
+				uint32_t mtime);
 
 /*
  * Return 1 if an object in a promisor packfile is or refers to the given
