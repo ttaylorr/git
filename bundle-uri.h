@@ -148,10 +148,14 @@ int fetch_bundle_uri(struct repository *r, const char *uri,
  * It is expected that the given 'list' is initialized, including its
  * 'baseURI' value.
  *
+ * If 'filter' is non-NULL, only the bundles that match the filter will
+ * be downloaded.
+ *
  * Returns non-zero if there was an error trying to download the list
  * or any of its advertised bundles.
  */
 int fetch_bundle_list(struct repository *r,
+		      struct list_objects_filter_options *filter,
 		      struct bundle_list *list);
 
 /**

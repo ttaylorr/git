@@ -454,6 +454,7 @@ cleanup:
 
 struct bundle_list_context {
 	struct repository *r;
+	struct list_objects_filter_options *filter;
 	struct bundle_list *list;
 	enum bundle_list_mode mode;
 	int count;
@@ -479,6 +480,15 @@ static int download_bundle_to_file(struct remote_bundle_info *bundle, void *data
 
 	if (ctx->mode == BUNDLE_MODE_ANY && ctx->count)
 		return 0;
+
+	if (ctx->filter->choice != LOFC_DISABLED) {
+		if ((bundle->filter && bundle->filter->choice == LOFC_DISABLED) ||
+		    !list_objects_filter_equals(ctx->filter, bundle->filter)) {
+			return 0;
+		}
+	} else if (bundle->filter && bundle->filter != LOFC_DISABLED) {
+		return 0;
+	}
 
 	res = fetch_bundle_uri_internal(ctx->r, bundle, ctx->depth + 1, ctx->list);
 
@@ -676,12 +686,14 @@ move:
 }
 
 static int download_bundle_list(struct repository *r,
+				struct list_objects_filter_options *filter,
 				struct bundle_list *local_list,
 				struct bundle_list *global_list,
 				int depth)
 {
 	struct bundle_list_context ctx = {
 		.r = r,
+		.filter = filter,
 		.list = global_list,
 		.depth = depth + 1,
 		.mode = local_list->mode,
@@ -720,8 +732,8 @@ static int fetch_bundle_list_in_config_format(struct repository *r,
 	if (list_from_bundle.heuristic == BUNDLE_HEURISTIC_CREATIONTOKEN) {
 		result = fetch_bundles_by_token(r, &list_from_bundle);
 		global_list->heuristic = BUNDLE_HEURISTIC_CREATIONTOKEN;
-	} else if ((result = download_bundle_list(r, &list_from_bundle,
-					   global_list, depth)))
+	} else if ((result = download_bundle_list(r, NULL, &list_from_bundle,
+						  global_list, depth)))
 		goto cleanup;
 
 cleanup:
@@ -872,7 +884,9 @@ cleanup:
 	return result;
 }
 
-int fetch_bundle_list(struct repository *r, struct bundle_list *list)
+int fetch_bundle_list(struct repository *r,
+		      struct list_objects_filter_options *filter,
+		      struct bundle_list *list)
 {
 	int result;
 	struct bundle_list global_list;
@@ -890,7 +904,7 @@ int fetch_bundle_list(struct repository *r, struct bundle_list *list)
 	/* If a bundle is added to this global list, then it is required. */
 	global_list.mode = BUNDLE_MODE_ALL;
 
-	if ((result = download_bundle_list(r, list, &global_list, 0)))
+	if ((result = download_bundle_list(r, filter, list, &global_list, 0)))
 		goto cleanup;
 
 	if (list->heuristic == BUNDLE_HEURISTIC_CREATIONTOKEN)
