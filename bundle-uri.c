@@ -93,7 +93,13 @@ static int summarize_bundle(struct remote_bundle_info *info, void *data)
 	fprintf(fp, "\turi = %s\n", info->uri);
 
 	if (info->creationToken)
-		fprintf(fp, "\tcreationToken = %"PRIu64"\n", info->creationToken);
+		fprintf(fp, "\tcreationToken = %"PRIu64"\n",
+			info->creationToken);
+
+	if (info->filter)
+		fprintf(fp, "\tfilter = %s\n",
+			list_objects_filter_spec(info->filter));
+
 	return 0;
 }
 
