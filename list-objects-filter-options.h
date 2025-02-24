@@ -151,6 +151,13 @@ static inline void list_objects_filter_set_no_filter(
 	filter_options->no_filter = 1;
 }
 
+/*
+ * TODO: discuss limitation that this doesn't handle combine filters (a)
+ * efficiently, or (b) correctly in the case of nested combine filters.
+ */
+int list_objects_filter_equals(const struct list_objects_filter_options *a,
+			       const struct list_objects_filter_options *b);
+
 void partial_clone_register(
 	const char *remote,
 	struct list_objects_filter_options *filter_options);

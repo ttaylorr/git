@@ -328,6 +328,53 @@ void list_objects_filter_release(
 	list_objects_filter_init(filter_options);
 }
 
+int list_objects_filter_equals(const struct list_objects_filter_options *a,
+			       const struct list_objects_filter_options *b)
+{
+	size_t i;
+
+	if (a->choice != b->choice)
+		return 0;
+
+	switch (a->choice) {
+	case LOFC_DISABLED:
+		return 1;
+	case LOFC_BLOB_NONE:
+		return 1;
+	case LOFC_BLOB_LIMIT:
+		return a->blob_limit_value == b->blob_limit_value;
+	case LOFC_TREE_DEPTH:
+		return a->tree_exclude_depth == b->tree_exclude_depth;
+	case LOFC_SPARSE_OID:
+		return !strcmp(a->sparse_oid_name, b->sparse_oid_name);
+	case LOFC_OBJECT_TYPE:
+		return a->object_type == b->object_type;
+	case LOFC_COMBINE:
+		if (a->sub_nr != b->sub_nr)
+			return 0;
+		/*
+		 * TODO: this comparison is incorrect for both:
+		 *
+		 *  - nested filters, where the combined effect of the
+		 *    sub-filters matches, but sub-filters are
+		 *    organized uniquely on each side of the
+		 *    comparison.
+		 *
+		 *  - permuted filters, where the sub-filters are the
+		 *    same on either side of the comparison but in a
+		 *    different order.
+		 */
+		for (i = 0; i < a->sub_nr; i++) {
+			if (!list_objects_filter_equals(&a->sub[i], &b->sub[i]))
+				return 0;
+		}
+		return 1;
+	default:
+		BUG("invalid filter type");
+	}
+	return 0;
+}
+
 void partial_clone_register(
 	const char *remote,
 	struct list_objects_filter_options *filter_options)
