@@ -15,6 +15,7 @@
 #include "remote.h"
 #include "trace2.h"
 #include "object-store-ll.h"
+#include "list-objects-filter-options.h"
 
 static struct {
 	enum bundle_list_heuristic heuristic;
@@ -143,6 +144,7 @@ static int bundle_list_update(const char *key, const char *value,
 	struct strbuf id = STRBUF_INIT;
 	struct remote_bundle_info lookup = REMOTE_BUNDLE_INFO_INIT;
 	struct remote_bundle_info *bundle;
+	struct list_objects_filter_options *filter = NULL;
 	const char *subsection, *subkey;
 	size_t subsection_len;
 
@@ -192,6 +194,25 @@ static int bundle_list_update(const char *key, const char *value,
 
 	strbuf_add(&id, subsection, subsection_len);
 
+	if (!strcmp(subkey, "filter")) {
+		struct strbuf buf = STRBUF_INIT;
+		CALLOC_ARRAY(filter, 1);
+
+		list_objects_filter_init(filter);
+
+		if (gently_parse_list_objects_filter(filter, value, &buf)) {
+			warning(_("unknown filter for bundle '%s': %s"),
+				id.buf, buf.buf);
+			strbuf_release(&buf);
+			/*
+			 * Return 0 to avoid printing a redundant warning().
+			 */
+			return 0;
+		}
+
+		strbuf_release(&buf);
+	}
+
 	/*
 	 * Check for an existing bundle with this <id>, or create one
 	 * if necessary.
@@ -205,6 +226,8 @@ static int bundle_list_update(const char *key, const char *value,
 		hashmap_add(&list->bundles, &bundle->ent);
 	}
 	strbuf_release(&id);
+
+	bundle->filter = filter;
 
 	if (!strcmp(subkey, "uri")) {
 		if (bundle->uri)

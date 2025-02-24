@@ -29,3 +29,10 @@ bundle.<id>.*::
 bundle.<id>.uri::
 	This string value defines the URI by which Git can reach the contents
 	of this `<id>`. This URI may be a bundle file or another bundle list.
+
+bundle.<id>.filter::
+	This string value defines the filter specification that was used when
+	generating this bundle. Clients may optionally use this to inform which
+	bundle(s) they are interested in based on their own `--filter` setting.
+	For more details on filter specifications, see the `--filter` option in
+	linkgit:git-rev-list[1].

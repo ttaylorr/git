@@ -7,6 +7,7 @@
 struct packet_reader;
 struct repository;
 struct string_list;
+struct list_object_filter_options;
 
 /**
  * The remote_bundle_info struct contains information for a single bundle
@@ -48,6 +49,12 @@ struct remote_bundle_info {
 	 * heuristic, then we use this member for sorting the bundles.
 	 */
 	uint64_t creationToken;
+
+	/*
+	 * Stores the object filter the bundle was generated with (if
+	 * any), provided one was advertised by the server.
+	 */
+	struct list_objects_filter_options *filter;
 };
 
 #define REMOTE_BUNDLE_INFO_INIT { 0 }
