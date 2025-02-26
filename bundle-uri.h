@@ -137,7 +137,9 @@ int bundle_uri_parse_config_format(const char *uri,
  * heuristic value. Such a value indicates that the list was designed for
  * incremental fetches.
  */
-int fetch_bundle_uri(struct repository *r, const char *uri,
+int fetch_bundle_uri(struct repository *r,
+		     struct list_objects_filter_options *filter,
+		     const char *uri,
 		     int *has_heuristic);
 
 /**

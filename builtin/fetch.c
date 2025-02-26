@@ -2500,7 +2500,7 @@ int cmd_fetch(int argc,
 		max_jobs = online_cpus();
 
 	if (!git_config_get_string_tmp("fetch.bundleuri", &bundle_uri) &&
-	    fetch_bundle_uri(the_repository, bundle_uri, NULL))
+	    fetch_bundle_uri(the_repository, &filter_options, bundle_uri, NULL))
 		warning(_("failed to fetch bundles from '%s'"), bundle_uri);
 
 	if (all < 0) {

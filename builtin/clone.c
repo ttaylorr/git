@@ -1452,7 +1452,8 @@ int cmd_clone(int argc,
 		/* At this point, we need the_repository to match the cloned repo. */
 		if (repo_init(the_repository, git_dir, work_tree))
 			warning(_("failed to initialize the repo, skipping bundle URI"));
-		else if (fetch_bundle_uri(the_repository, bundle_uri, &has_heuristic))
+		else if (fetch_bundle_uri(the_repository, &filter_options,
+					  bundle_uri, &has_heuristic))
 			warning(_("failed to fetch objects from bundle URI '%s'"),
 				bundle_uri);
 		else if (has_heuristic)

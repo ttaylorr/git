@@ -469,6 +469,7 @@ struct bundle_list_context {
  * again, but with depth + 1.
  */
 static int fetch_bundle_uri_internal(struct repository *r,
+				     struct list_objects_filter_options *filter,
 				     struct remote_bundle_info *bundle,
 				     int depth,
 				     struct bundle_list *list);
@@ -478,19 +479,23 @@ static int download_bundle_to_file(struct remote_bundle_info *bundle, void *data
 	int res;
 	struct bundle_list_context *ctx = data;
 
+	warning("maybe downloading bundle '%s'?", bundle->uri);
+
 	if (ctx->mode == BUNDLE_MODE_ANY && ctx->count)
 		return 0;
 
 	if (ctx->filter->choice != LOFC_DISABLED) {
-		if ((bundle->filter && bundle->filter->choice == LOFC_DISABLED) ||
-		    !list_objects_filter_equals(ctx->filter, bundle->filter)) {
+		if (!bundle->filter)
 			return 0;
-		}
+		if (!list_objects_filter_equals(ctx->filter, bundle->filter))
+			return 0;
 	} else if (bundle->filter && bundle->filter != LOFC_DISABLED) {
 		return 0;
 	}
 
-	res = fetch_bundle_uri_internal(ctx->r, bundle, ctx->depth + 1, ctx->list);
+	warning("actually downloading bundle '%s'", bundle->uri);
+
+	res = fetch_bundle_uri_internal(ctx->r, ctx->filter, bundle, ctx->depth + 1, ctx->list);
 
 	/*
 	 * Only increment count if the download succeeded. If our mode is
@@ -615,7 +620,7 @@ static int fetch_bundles_by_token(struct repository *r,
 			 * Note that bundle->file is non-NULL if a download
 			 * was attempted, even if it failed to download.
 			 */
-			if (fetch_bundle_uri_internal(ctx.r, bundle, ctx.depth + 1, ctx.list)) {
+			if (fetch_bundle_uri_internal(ctx.r, NULL, bundle, ctx.depth + 1, ctx.list)) {
 				/* Mark as unbundled so we do not retry. */
 				bundle->unbundled = 1;
 
@@ -703,6 +708,7 @@ static int download_bundle_list(struct repository *r,
 }
 
 static int fetch_bundle_list_in_config_format(struct repository *r,
+					      struct list_objects_filter_options *filter,
 					      struct bundle_list *global_list,
 					      struct remote_bundle_info *bundle,
 					      int depth)
@@ -732,7 +738,7 @@ static int fetch_bundle_list_in_config_format(struct repository *r,
 	if (list_from_bundle.heuristic == BUNDLE_HEURISTIC_CREATIONTOKEN) {
 		result = fetch_bundles_by_token(r, &list_from_bundle);
 		global_list->heuristic = BUNDLE_HEURISTIC_CREATIONTOKEN;
-	} else if ((result = download_bundle_list(r, NULL, &list_from_bundle,
+	} else if ((result = download_bundle_list(r, filter, &list_from_bundle,
 						  global_list, depth)))
 		goto cleanup;
 
@@ -754,6 +760,7 @@ static int max_bundle_uri_depth = 4;
  * URIs in that list according to the list mode (ANY or ALL).
  */
 static int fetch_bundle_uri_internal(struct repository *r,
+				     struct list_objects_filter_options *filter,
 				     struct remote_bundle_info *bundle,
 				     int depth,
 				     struct bundle_list *list)
@@ -780,7 +787,7 @@ static int fetch_bundle_uri_internal(struct repository *r,
 
 	if ((result = !is_bundle(bundle->file, 1))) {
 		result = fetch_bundle_list_in_config_format(
-				r, list, bundle, depth);
+				r, filter, list, bundle, depth);
 		if (result)
 			warning(_("file at URI '%s' is not a bundle or bundle list"),
 				bundle->uri);
@@ -843,7 +850,9 @@ static int unlink_bundle(struct remote_bundle_info *info, void *data UNUSED)
 	return 0;
 }
 
-int fetch_bundle_uri(struct repository *r, const char *uri,
+int fetch_bundle_uri(struct repository *r,
+		     struct list_objects_filter_options *filter,
+		     const char *uri,
 		     int *has_heuristic)
 {
 	int result;
@@ -869,7 +878,7 @@ int fetch_bundle_uri(struct repository *r, const char *uri,
 	/* If a bundle is added to this global list, then it is required. */
 	list.mode = BUNDLE_MODE_ALL;
 
-	if ((result = fetch_bundle_uri_internal(r, &bundle, 0, &list)))
+	if ((result = fetch_bundle_uri_internal(r, filter, &bundle, 0, &list)))
 		goto cleanup;
 
 	result = unbundle_all_bundles(r, &list);
