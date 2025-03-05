@@ -101,7 +101,7 @@ test_expect_success 'adjacent, non-overlapping excluded regions' '
 
 test_expect_success 'overlapping excluded regions' '
 	for_each_ref__exclude refs/heads refs/heads/ba refs/heads/baz >actual 2>perf &&
-	for_each_ref refs/heads/foo refs/heads/quux >expect &&
+	for_each_ref refs/heads/bar refs/heads/foo refs/heads/quux >expect &&
 
 	test_cmp expect actual &&
 	assert_jumps 1 perf
