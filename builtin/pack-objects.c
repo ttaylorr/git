@@ -496,6 +496,7 @@ static unsigned long write_no_reuse_object(struct hashfile *f, struct object_ent
 	void *buf;
 	struct git_istream *st = NULL;
 	const unsigned hashsz = the_hash_algo->rawsz;
+	int busted = 0;
 
 	if (!usable_delta) {
 		if (oe_type(entry) == OBJ_BLOB &&
@@ -556,10 +557,9 @@ static unsigned long write_no_reuse_object(struct hashfile *f, struct object_ent
 		while (ofs >>= 7)
 			dheader[--pos] = 128 | (--ofs & 127);
 		if (limit && hdrlen + sizeof(dheader) - pos + datalen + hashsz >= limit) {
-			if (st)
-				close_istream(st);
-			free(buf);
-			return 0;
+			busted = 1;
+			if (!cruft)
+				goto cleanup;
 		}
 		hashwrite(f, header, hdrlen);
 		hashwrite(f, dheader + pos, sizeof(dheader) - pos);
@@ -570,20 +570,18 @@ static unsigned long write_no_reuse_object(struct hashfile *f, struct object_ent
 		 * additional bytes for the base object ID.
 		 */
 		if (limit && hdrlen + hashsz + datalen + hashsz >= limit) {
-			if (st)
-				close_istream(st);
-			free(buf);
-			return 0;
+			busted = 1;
+			if (!cruft)
+				goto cleanup;
 		}
 		hashwrite(f, header, hdrlen);
 		hashwrite(f, DELTA(entry)->idx.oid.hash, hashsz);
 		hdrlen += hashsz;
 	} else {
 		if (limit && hdrlen + datalen + hashsz >= limit) {
-			if (st)
-				close_istream(st);
-			free(buf);
-			return 0;
+			busted = 1;
+			if (!cruft)
+				goto cleanup;
 		}
 		hashwrite(f, header, hdrlen);
 	}
@@ -596,6 +594,12 @@ static unsigned long write_no_reuse_object(struct hashfile *f, struct object_ent
 	}
 
 	return hdrlen + datalen;
+
+cleanup:
+	if (st)
+		close_istream(st);
+	free(buf);
+	return 0;
 }
 
 /* Return 0 if we will bust the pack-size limit */
