@@ -3,6 +3,7 @@
 test_description='git repack works correctly'
 
 . ./test-lib.sh
+. "$TEST_DIRECTORY"/lib-cruft.sh
 
 objdir=.git/objects
 packdir=$objdir/pack
@@ -127,27 +128,6 @@ test_expect_success '--expire-to stores pruned objects (5.minutes.ago)' '
 		test_cmp moved.want moved.got
 	)
 '
-
-generate_random_blob() {
-	test-tool genrandom "$@" >blob &&
-	git hash-object -w -t blob blob &&
-	rm blob
-}
-
-pack_random_blob () {
-	generate_random_blob "$@" &&
-	git repack -d -q >/dev/null
-}
-
-generate_cruft_pack () {
-	pack_random_blob "$@" >/dev/null &&
-
-	ls $packdir/pack-*.pack | xargs -n 1 basename >in &&
-	pack="$(git pack-objects --cruft $packdir/pack <in)" &&
-	git prune-packed &&
-
-	echo "$packdir/pack-$pack.mtimes"
-}
 
 test_expect_success '--max-cruft-size creates new packs when above threshold' '
 	git init max-cruft-size-large &&
