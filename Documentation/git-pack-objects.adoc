@@ -161,6 +161,10 @@ depth is 4095.
 	`pack.packSizeLimit` is set. Note that this option may result in
 	a larger and slower repository; see the discussion in
 	`pack.packSizeLimit`.
++
+When used with `--cruft`, the output packfile(s) may be as large or
+larger than the configured maximum size. The pack will exceed the
+specified maximum by no more than one object.
 
 --honor-pack-keep::
 	This flag causes an object already in a local pack that

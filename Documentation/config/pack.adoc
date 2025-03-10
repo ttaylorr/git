@@ -119,6 +119,10 @@ sizes (e.g., removable media that cannot store the whole repository),
 you are likely better off creating a single large packfile and splitting
 it using a generic multi-volume archive tool (e.g., Unix `split`).
 +
+When generating cruft packs with `git pack-objects`, this option has a
+slightly different interpretation than above; see the documentation for
+`--max-pack-size` option in linkgit:git-pack-objects[1].
++
 The minimum size allowed is limited to 1 MiB. The default is unlimited.
 Common unit suffixes of 'k', 'm', or 'g' are supported.
 

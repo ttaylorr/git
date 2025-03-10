@@ -3,6 +3,7 @@
 test_description='cruft pack related pack-objects tests'
 
 . ./test-lib.sh
+. "$TEST_DIRECTORY"/lib-cruft.sh
 
 objdir=.git/objects
 packdir=$objdir/pack
@@ -691,6 +692,72 @@ test_expect_success 'additional cruft blobs via gc.recentObjectsHook' '
 		git show-index <${mtimes%.mtimes}.idx >cruft &&
 		cut -d" " -f2 cruft >actual &&
 		echo $blob >expect &&
+		test_cmp expect actual
+	)
+'
+
+test_expect_success 'cruft pack generation beyond --max-pack-size' '
+	test_when_finished "rm -fr repo" &&
+	git init repo &&
+	(
+		cd repo &&
+
+		# Disable pack compression to ensure the pack size is
+		# predictable.
+		git config pack.compression 0 &&
+
+		sz=524288 && # 0.5 MiB
+		foo="$(generate_random_blob foo $sz)" &&
+		bar="$(generate_random_blob bar $sz)" &&
+		baz="$(generate_random_blob baz $sz)" &&
+		quux="$(generate_random_blob quux $sz)" &&
+
+		printf "%s\n" "$foo" "$bar" >A.objects &&
+		printf "%s\n" "$baz" "$quux" >B.objects &&
+
+		A="$(git pack-objects $packdir/pack <A.objects)" &&
+		B="$(git pack-objects $packdir/pack <B.objects)" &&
+
+		git prune-packed &&
+
+		sz=1572864 && # 1.5 MiB
+		printf -- "-%s\n" "pack-$A.pack" "pack-$B.pack" >C.in &&
+		git pack-objects --cruft --max-pack-size=$sz $packdir/pack \
+			<C.in >C.out &&
+
+		test_line_count = 2 C.out &&
+		C_large="$(head -n 1 C.out)" &&
+		C_small="$(tail -n 1 C.out)" &&
+
+		# Swap $C_large and $C_small if necessary.
+		if test "$(test_file_size $packdir/pack-$C_large.idx)" -lt \
+			"$(test_file_size $packdir/pack-$C_small.idx)"
+		then
+			tmp="$C_large" &&
+			C_large="$C_small" &&
+			C_small="$tmp"
+		fi &&
+
+		# Ensure the large pack is no smaller than the threshold
+		# such that it does not get repacked in subsequent runs
+		# with the same --max-pack-size setting.
+		test $(test_file_size $packdir/pack-$C_large.pack) -ge $sz &&
+
+		{
+			git show-index <"$packdir/pack-$C_large.idx" &&
+			git show-index <"$packdir/pack-$C_small.idx"
+		} >actual.raw &&
+		printf "%s\n" "$foo" "$bar" "$baz" "$quux" >expect.raw &&
+
+		sort <expect.raw >expect &&
+		cut -d " " -f 2 actual.raw | sort >actual &&
+
+		# Ensure that all of the objects are present in the two
+		# cruft packs we just generated.
+		#
+		# Note that the contents of "actual" are not
+		# de-duplicated. This is intentional to ensure we avoid
+		# packing the same object twice (once in each pack).
 		test_cmp expect actual
 	)
 '

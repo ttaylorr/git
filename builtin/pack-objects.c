@@ -692,11 +692,39 @@ static off_t write_object(struct hashfile *f,
 	off_t len;
 	int usable_delta, to_reuse;
 
+	if (cruft && pack_size_limit && pack_size_limit <= write_offset) {
+		/*
+		 * When writing a cruft pack with a limited size,
+		 * perform the --max-pack-size check *before* writing
+		 * the object.
+		 *
+		 * When we have not yet reached the size limit, this
+		 * combined with the fact that we act as if there is no
+		 * limit when writing objects via write_object() allows
+		 * us to grow one object *past* the specified limit.
+		 *
+		 * This is important for generating cruft packs with a
+		 * --max-pack-size so we can generate packs that are
+		 * just over the threshold to avoid repacking them in
+		 * the future.
+		 */
+		return 0;
+	}
+
 	if (!pack_to_stdout)
 		crc32_begin(f);
 
-	/* apply size limit if limited packsize and not first object */
-	if (!pack_size_limit || !nr_written)
+	/*
+	 * Apply size limit when one is provided, with the following
+	 * exceptions:
+	 *
+	 * - We are writing the first object.
+	 *
+	 * - We are writing a cruft pack with a size limit. The check
+	 *   above covers this case while letting the pack grow at most
+	 *   one object beyond the limit.
+	 */
+	if (!pack_size_limit || !nr_written || cruft)
 		limit = 0;
 	else if (pack_size_limit <= write_offset)
 		/*
