@@ -399,7 +399,7 @@ int ewah_or_iterator_next(eword_t *next, struct ewah_or_iterator *it)
 	return ret;
 }
 
-void ewah_or_iterator_free(struct ewah_or_iterator *it)
+void ewah_or_iterator_release(struct ewah_or_iterator *it)
 {
 	free(it->its);
 }

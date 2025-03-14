@@ -1719,7 +1719,7 @@ static void show_objects_for_type(
 		}
 	}
 
-	ewah_or_iterator_free(&it);
+	ewah_or_iterator_release(&it);
 }
 
 static int in_bitmapped_pack(struct bitmap_index *bitmap_git,
@@ -1808,7 +1808,7 @@ static void filter_bitmap_exclude_type(struct bitmap_index *bitmap_git,
 			bitmap_unset(to_filter, pos);
 	}
 
-	ewah_or_iterator_free(&it);
+	ewah_or_iterator_release(&it);
 	bitmap_free(tips);
 }
 
@@ -1903,7 +1903,7 @@ static void filter_bitmap_blob_limit(struct bitmap_index *bitmap_git,
 			bitmap_unset(to_filter, pos);
 	}
 
-	ewah_or_iterator_free(&it);
+	ewah_or_iterator_release(&it);
 	bitmap_free(tips);
 }
 
@@ -2552,7 +2552,7 @@ static uint32_t count_object_type(struct bitmap_index *bitmap_git,
 			count++;
 	}
 
-	ewah_or_iterator_free(&it);
+	ewah_or_iterator_release(&it);
 
 	return count;
 }
@@ -3133,7 +3133,7 @@ static off_t get_disk_usage_for_type(struct bitmap_index *bitmap_git,
 		}
 	}
 
-	ewah_or_iterator_free(&it);
+	ewah_or_iterator_release(&it);
 
 	return total;
 }
