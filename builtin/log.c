@@ -1292,13 +1292,20 @@ static void get_patch_ids(struct rev_info *rev, struct patch_ids *ids)
 	o2->flags = flags2;
 }
 
-static void gen_message_id(struct rev_info *info, const char *base)
+static void gen_message_id_literal(struct rev_info *info, const char *str)
 {
 	struct strbuf buf = STRBUF_INIT;
-	strbuf_addf(&buf, "%s.%"PRItime".git.%s", base,
-		    (timestamp_t) time(NULL),
-		    git_committer_info(IDENT_NO_NAME|IDENT_NO_DATE|IDENT_STRICT));
+	int flags = IDENT_NO_NAME | IDENT_NO_DATE | IDENT_STRICT;
+
+	strbuf_addf(&buf, "%s.%"PRItime".git.%s", str, (timestamp_t)time(NULL),
+		    git_committer_info(flags));
+
 	info->message_id = strbuf_detach(&buf, NULL);
+}
+
+static void gen_message_id(struct rev_info *info, struct object_id *oid)
+{
+	gen_message_id_literal(info, oid_to_hex(oid));
 }
 
 static void print_signature(const char *signature, FILE *file)
@@ -2484,7 +2491,7 @@ int cmd_format_patch(int argc,
 	rev.patch_suffix = fmt_patch_suffix;
 	if (cover_letter) {
 		if (cfg.thread)
-			gen_message_id(&rev, "cover");
+			gen_message_id_literal(&rev, "cover");
 		make_cover_letter(&rev, !!output_directory,
 				  origin, nr, list, description_file, branch_name, quiet, &cfg);
 		print_bases(&bases, rev.diffopt.file);
@@ -2541,7 +2548,7 @@ int cmd_format_patch(int argc,
 					string_list_append_nodup(rev.ref_message_ids,
 								 rev.message_id);
 			}
-			gen_message_id(&rev, oid_to_hex(&commit->object.oid));
+			gen_message_id(&rev, &commit->object.oid);
 		}
 
 		if (output_directory &&
