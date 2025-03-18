@@ -1305,7 +1305,8 @@ static void gen_message_id_literal(struct rev_info *info, const char *str)
 
 static void gen_message_id(struct rev_info *info, struct object_id *oid)
 {
-	gen_message_id_literal(info, oid_to_hex(oid));
+	gen_message_id_literal(info, repo_find_unique_abbrev(info->repo, oid,
+							     DEFAULT_ABBREV));
 }
 
 static void print_signature(const char *signature, FILE *file)
