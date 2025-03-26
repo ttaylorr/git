@@ -1235,7 +1235,7 @@ static void write_reused_pack(struct bitmapped_pack *reuse_packfile,
 				 * pack-relative positions before attempting
 				 * reuse.
 				 */
-				struct multi_pack_index *m = reuse_packfile->from_midx;
+				struct multi_pack_index *m = bitmap_midx(bitmap_git);
 				uint32_t midx_pos;
 				off_t pack_ofs;
 

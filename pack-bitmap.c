@@ -2467,7 +2467,6 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 			packs[packs_nr].pack_int_id = pack_int_id;
 			packs[packs_nr].bitmap_nr = pack->num_objects;
 			packs[packs_nr].bitmap_pos = 0;
-			packs[packs_nr].from_midx = bitmap_git->midx;
 			packs_nr++;
 		}
 
@@ -3190,6 +3189,11 @@ off_t get_disk_usage_from_bitmap(struct bitmap_index *bitmap_git,
 int bitmap_is_midx(struct bitmap_index *bitmap_git)
 {
 	return !!bitmap_git->midx;
+}
+
+struct multi_pack_index *bitmap_midx(struct bitmap_index *bitmap_git)
+{
+	return bitmap_git->midx;
 }
 
 const struct string_list *bitmap_preferred_tips(struct repository *r)
