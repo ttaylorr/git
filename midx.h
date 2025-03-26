@@ -68,6 +68,8 @@ struct multi_pack_index {
 	size_t chunk_large_offsets_len;
 	const unsigned char *chunk_revindex;
 	size_t chunk_revindex_len;
+	const unsigned char *chunk_fwdindex;
+	size_t chunk_fwdindex_len;
 
 	struct multi_pack_index *base_midx;
 	uint32_t num_objects_in_base;

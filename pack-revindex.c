@@ -418,7 +418,7 @@ int load_midx_forward_index(struct multi_pack_index *m)
 {
 	uint32_t i;
 
-	if (m->forward_idx)
+	if (m->forward_idx || m->chunk_fwdindex)
 		return 0;
 
 	ALLOC_ARRAY(m->forward_idx, m->num_objects);
@@ -589,8 +589,11 @@ int midx_to_pack_pos(struct multi_pack_index *m, uint32_t at, uint32_t *pos)
 	if (m->num_objects <= at)
 		BUG("midx_to_pack_pos: out-of-bounds object at %"PRIu32, at);
 
-	if (m->forward_idx) {
-		*pos = m->forward_idx[at];
+	if (m->forward_idx || m->chunk_fwdindex) {
+		if (m->chunk_fwdindex)
+			*pos = m->chunk_fwdindex[at];
+		else
+			*pos = m->forward_idx[at];
 		return 0;
 	}
 

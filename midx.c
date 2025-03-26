@@ -185,6 +185,10 @@ static struct multi_pack_index *load_multi_pack_index_one(struct repository *r,
 		pair_chunk(cf, MIDX_CHUNKID_REVINDEX, &m->chunk_revindex,
 			   &m->chunk_revindex_len);
 
+	if (git_env_bool("GIT_TEST_MIDX_READ_FIDX", 1))
+		pair_chunk(cf, MIDX_CHUNKID_FWDINDEX, &m->chunk_fwdindex,
+			   &m->chunk_fwdindex_len);
+
 	CALLOC_ARRAY(m->pack_names, m->num_packs);
 	CALLOC_ARRAY(m->packs, m->num_packs);
 
