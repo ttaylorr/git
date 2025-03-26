@@ -601,19 +601,19 @@ static int midx_pack_order_cmp(const void *va, const void *vb)
 		return 0;
 }
 
-static uint32_t *midx_pack_order(struct write_midx_context *ctx)
+static void compute_midx_pack_order(struct write_midx_context *ctx)
 {
 	struct midx_pack_order_data *data;
-	uint32_t *pack_order, base_objects = 0;
+	uint32_t base_objects = 0;
 	uint32_t i;
 
-	trace2_region_enter("midx", "midx_pack_order", ctx->repo);
+	trace2_region_enter("midx", "compute_midx_pack_order", ctx->repo);
 
 	if (ctx->incremental && ctx->base_midx)
 		base_objects = ctx->base_midx->num_objects +
 			ctx->base_midx->num_objects_in_base;
 
-	ALLOC_ARRAY(pack_order, ctx->entries_nr);
+	ALLOC_ARRAY(ctx->pack_order, ctx->entries_nr);
 	ALLOC_ARRAY(data, ctx->entries_nr);
 
 	for (i = 0; i < ctx->entries_nr; i++) {
@@ -633,7 +633,7 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 		if (pack->bitmap_pos == BITMAP_POS_UNKNOWN)
 			pack->bitmap_pos = i + base_objects;
 		pack->bitmap_nr++;
-		pack_order[i] = data[i].nr;
+		ctx->pack_order[i] = data[i].nr;
 	}
 	for (i = 0; i < ctx->nr; i++) {
 		struct pack_info *pack = &ctx->info[ctx->pack_perm[i]];
@@ -642,9 +642,7 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 	}
 	free(data);
 
-	trace2_region_leave("midx", "midx_pack_order", ctx->repo);
-
-	return pack_order;
+	trace2_region_leave("midx", "compute_midx_pack_order", ctx->repo);
 }
 
 static void write_midx_reverse_index(struct write_midx_context *ctx,
@@ -1387,7 +1385,7 @@ static int write_midx_internal(struct repository *r, const char *object_dir,
 			write_midx_large_offsets);
 
 	if (flags & (MIDX_WRITE_REV_INDEX | MIDX_WRITE_BITMAP)) {
-		ctx.pack_order = midx_pack_order(&ctx);
+		compute_midx_pack_order(&ctx);
 		add_chunk(cf, MIDX_CHUNKID_REVINDEX,
 			  st_mult(ctx.entries_nr, sizeof(uint32_t)),
 			  write_midx_revindex);
