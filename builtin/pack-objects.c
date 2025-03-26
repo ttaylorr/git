@@ -4233,7 +4233,8 @@ static int get_object_list_from_bitmap(struct rev_info *revs)
 						   &reuse_packfiles_nr,
 						   &reuse_packfile_bitmap,
 						   &reuse_as_ref_delta_packfile_bitmap,
-						   allow_pack_reuse == MULTI_PACK_REUSE);
+						   allow_pack_reuse == MULTI_PACK_REUSE,
+						   thin);
 
 	if (reuse_packfiles) {
 		reuse_packfile_objects = bitmap_popcount(reuse_packfile_bitmap);
