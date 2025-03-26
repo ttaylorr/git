@@ -60,7 +60,6 @@ struct bitmapped_pack {
 	uint32_t bitmap_pos;
 	uint32_t bitmap_nr;
 
-	struct multi_pack_index *from_midx; /* MIDX only */
 	uint32_t pack_int_id; /* MIDX only */
 };
 
@@ -157,6 +156,7 @@ char *midx_bitmap_filename(struct multi_pack_index *midx);
 char *pack_bitmap_filename(struct packed_git *p);
 
 int bitmap_is_midx(struct bitmap_index *bitmap_git);
+struct multi_pack_index *bitmap_midx(struct bitmap_index *bitmap_git);
 
 const struct string_list *bitmap_preferred_tips(struct repository *r);
 int bitmap_is_preferred_refname(struct repository *r, const char *refname);
