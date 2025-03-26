@@ -25,6 +25,7 @@ struct git_hash_algo;
 #define MIDX_CHUNKID_OBJECTOFFSETS 0x4f4f4646 /* "OOFF" */
 #define MIDX_CHUNKID_LARGEOFFSETS 0x4c4f4646 /* "LOFF" */
 #define MIDX_CHUNKID_REVINDEX 0x52494458 /* "RIDX" */
+#define MIDX_CHUNKID_FWDINDEX 0x46494458 /* "FIDX" */
 #define MIDX_CHUNKID_BASE 0x42415345 /* "BASE" */
 #define MIDX_CHUNK_OFFSET_WIDTH (2 * sizeof(uint32_t))
 #define MIDX_LARGE_OFFSET_NEEDED 0x80000000
@@ -86,6 +87,7 @@ struct multi_pack_index {
 #define MIDX_WRITE_BITMAP_HASH_CACHE (1 << 3)
 #define MIDX_WRITE_BITMAP_LOOKUP_TABLE (1 << 4)
 #define MIDX_WRITE_INCREMENTAL (1 << 5)
+#define MIDX_WRITE_FWD_INDEX (1 << 6)
 
 #define MIDX_EXT_REV "rev"
 #define MIDX_EXT_BITMAP "bitmap"

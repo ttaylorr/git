@@ -211,3 +211,10 @@ pack.useMultiPackForwardIndex::
 	lexicographic order to pseudo-pack order. This can speed up
 	verbatim pack-reuse at the expense of additional memory
 	consumption.
+
+pack.writeMultiPackFowardIndex::
+	When true, Git will write a forward-index `FIDX` chunk to map
+	MIDX entries from lexicographic order to pseudo-pack order. Git
+	will use this when available (provided MIDX forward indexes are
+	enabled via `pack.useMultiPackForwardIndex`) instead of
+	generating them on-the-fly.

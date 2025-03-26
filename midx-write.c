@@ -580,6 +580,31 @@ static int write_midx_revindex(struct hashfile *f,
 	return 0;
 }
 
+static int write_midx_fwdindex(struct hashfile *f, void *data)
+{
+	struct write_midx_context *ctx = data;
+	uint32_t *forward_index;
+	uint32_t i, nr_base;
+
+	ALLOC_ARRAY(forward_index, ctx->entries_nr);
+
+	if (ctx->incremental && ctx->base_midx)
+		nr_base = ctx->base_midx->num_objects +
+			ctx->base_midx->num_objects_in_base;
+	else
+		nr_base = 0;
+
+	for (i = 0; i < ctx->entries_nr; i++)
+		forward_index[ctx->pack_order[i]] = i;
+
+	for (i = 0; i < ctx->entries_nr; i++)
+		hashwrite_be32(f, forward_index[i] + nr_base);
+
+	free(forward_index);
+
+	return 0;
+}
+
 struct midx_pack_order_data {
 	uint32_t nr;
 	uint32_t pack;
@@ -1365,7 +1390,7 @@ static int write_midx_internal(struct repository *r, const char *object_dir,
 				MIDX_CHUNK_LARGE_OFFSET_WIDTH),
 			write_midx_large_offsets);
 
-	if (flags & (MIDX_WRITE_REV_INDEX | MIDX_WRITE_BITMAP)) {
+	if (flags & (MIDX_WRITE_REV_INDEX | MIDX_WRITE_FWD_INDEX | MIDX_WRITE_BITMAP)) {
 		compute_midx_pack_order(&ctx);
 		add_chunk(cf, MIDX_CHUNKID_REVINDEX,
 			  st_mult(ctx.entries_nr, sizeof(uint32_t)),
@@ -1373,6 +1398,10 @@ static int write_midx_internal(struct repository *r, const char *object_dir,
 		add_chunk(cf, MIDX_CHUNKID_BITMAPPEDPACKS,
 			  bitmapped_packs_concat_len,
 			  write_midx_bitmapped_packs);
+		if (flags & MIDX_WRITE_FWD_INDEX)
+			add_chunk(cf, MIDX_CHUNKID_FWDINDEX,
+				  st_mult(ctx.entries_nr, sizeof(uint32_t)),
+				  write_midx_fwdindex);
 	}
 
 	write_midx_header(r->hash_algo, f, get_num_chunks(cf),

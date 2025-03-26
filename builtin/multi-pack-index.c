@@ -101,6 +101,13 @@ static int git_multi_pack_index_write_config(const char *var, const char *value,
 			opts.flags &= ~MIDX_WRITE_BITMAP_LOOKUP_TABLE;
 	}
 
+	if (!strcmp(var, "pack.writemultipackforwardindex")) {
+		if (git_config_bool(var, value))
+			opts.flags |= MIDX_WRITE_FWD_INDEX;
+		else
+			opts.flags &= ~MIDX_WRITE_FWD_INDEX;
+	}
+
 	/*
 	 * We should never make a fall-back call to 'git_default_config', since
 	 * this was already called in 'cmd_multi_pack_index()'.
