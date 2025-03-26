@@ -205,3 +205,9 @@ pack.writeReverseIndex::
 	for each new packfile that it writes in all places except for
 	linkgit:git-fast-import[1] and in the bulk checkin mechanism.
 	Defaults to true.
+
+pack.useMultiPackForwardIndex::
+	When true, Git will generate a forward-index from MIDX
+	lexicographic order to pseudo-pack order. This can speed up
+	verbatim pack-reuse at the expense of additional memory
+	consumption.

@@ -414,6 +414,31 @@ int close_midx_revindex(struct multi_pack_index *m)
 	return 0;
 }
 
+int load_midx_forward_index(struct multi_pack_index *m)
+{
+	uint32_t i;
+
+	if (m->forward_idx)
+		return 0;
+
+	ALLOC_ARRAY(m->forward_idx, m->num_objects);
+
+	for (i = 0; i < m->num_objects; i++)
+		m->forward_idx[pack_pos_to_midx(m, i)] = i;
+
+	return 0;
+}
+
+int close_midx_forward_index(struct multi_pack_index *m)
+{
+	if (!m || !m->forward_idx)
+		return 0;
+
+	free(m->forward_idx);
+
+	return 0;
+}
+
 int offset_to_pack_pos(struct packed_git *p, off_t ofs, uint32_t *pos)
 {
 	unsigned lo, hi;
@@ -563,6 +588,11 @@ int midx_to_pack_pos(struct multi_pack_index *m, uint32_t at, uint32_t *pos)
 		BUG("midx_to_pack_pos: reverse index not yet loaded");
 	if (m->num_objects <= at)
 		BUG("midx_to_pack_pos: out-of-bounds object at %"PRIu32, at);
+
+	if (m->forward_idx) {
+		*pos = m->forward_idx[at];
+		return 0;
+	}
 
 	key.pack = nth_midxed_pack_int_id(m, at);
 	key.offset = nth_midxed_offset(m, at);

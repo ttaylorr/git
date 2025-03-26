@@ -2277,6 +2277,12 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 
 	load_reverse_index(r, bitmap_git);
 
+	if (bitmap_is_midx(bitmap_git)) {
+		prepare_repo_settings(r);
+		if (r->settings.pack_use_multi_pack_forward_index)
+			load_midx_forward_index(bitmap_git->midx);
+	}
+
 	if (!bitmap_is_midx(bitmap_git) || !bitmap_git->midx->chunk_bitmapped_packs)
 		multi_pack_reuse = 0;
 

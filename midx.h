@@ -43,6 +43,8 @@ struct multi_pack_index {
 	const uint32_t *revindex_map;
 	size_t revindex_len;
 
+	uint32_t *forward_idx;
+
 	uint32_t signature;
 	unsigned char version;
 	unsigned char hash_len;

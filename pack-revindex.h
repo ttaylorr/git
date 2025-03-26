@@ -84,6 +84,18 @@ int load_midx_revindex(struct multi_pack_index *m);
 int close_midx_revindex(struct multi_pack_index *m);
 
 /*
+ * load_midx_forward_index generates a forward index from MIDX
+ * lexicographic order to pseudo-pack ordering.
+ */
+int load_midx_forward_index(struct multi_pack_index *m);
+
+/*
+ * close_midx_forward_index frees resources associated with a
+ * multi-pack forward index.
+ */
+int close_midx_forward_index(struct multi_pack_index *m);
+
+/*
  * offset_to_pack_pos converts an object offset to a pack position. This
  * function returns zero on success, and a negative number otherwise. The
  * parameter 'pos' is usable only on success.
@@ -138,7 +150,9 @@ uint32_t pack_pos_to_midx(struct multi_pack_index *m, uint32_t pos);
  * If the reverse index has not yet been loaded, or the position is out of
  * bounds, this function aborts.
  *
- * This function runs in time O(log N) with the number of objects in the MIDX.
+ * This function runs in time O(log N) with the number of objects in the MIDX,
+ * unless the MIDX's forward index has been loaded, in which case it runs in
+ * constant time.
  */
 int midx_to_pack_pos(struct multi_pack_index *midx, uint32_t at, uint32_t *pos);
 
