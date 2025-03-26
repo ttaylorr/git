@@ -39,6 +39,13 @@ is set to "multi", reuse parts of just the bitmapped packfile. This
 can reduce memory and CPU usage to serve fetches, but might result in
 sending a slightly larger pack. Defaults to true.
 
+pack.reuseExternalDeltas::
+	When true, converts offset deltas to reference deltas when using
+	a multi-pack reachability bitmap during reuse for
+	delta/base-pairs that are recorded from different packs in the
+	MIDX. When false, offset deltas whose base is recorded from a
+	different pack are not reused verbatim. Defaults to false.
+
 pack.island::
 	An extended regular expression configuring a set of delta
 	islands. See "DELTA ISLANDS" in linkgit:git-pack-objects[1]

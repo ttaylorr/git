@@ -76,6 +76,8 @@ void prepare_repo_settings(struct repository *r)
 	repo_cfg_bool(r, "core.usereplacerefs", &r->settings.read_replace_refs, 1);
 	repo_cfg_bool(r, "pack.usemultipackforwardindex",
 		      &r->settings.pack_use_multi_pack_forward_index, 1);
+	repo_cfg_bool(r, "pack.reuseexternaldeltas",
+		      &r->settings.pack_reuse_external_deltas, 0);
 
 	/*
 	 * The GIT_TEST_MULTI_PACK_INDEX variable is special in that

@@ -2171,8 +2171,11 @@ static int try_partial_reuse(struct bitmap_index *bitmap_git,
 			return 0;
 
 		cross_pack = base_bitmap_pos < pack->bitmap_pos;
-		if (cross_pack)
+		if (cross_pack) {
+			if (!reuse_as_ref_delta)
+				return 0;
 			bitmap_set(reuse_as_ref_delta, bitmap_pos);
+		}
 	}
 	/*
 	 * If we got here, then the object is OK to reuse. Mark it.
@@ -2302,6 +2305,8 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 
 	assert(result);
 
+	prepare_repo_settings(r);
+
 	load_reverse_index(r, bitmap_git);
 
 	if (bitmap_is_midx(bitmap_git)) {
@@ -2383,7 +2388,8 @@ void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 		word_alloc++;
 
 	reuse = bitmap_word_alloc(word_alloc);
-	reuse_as_ref_delta = bitmap_word_alloc(word_alloc);
+	if (r->settings.pack_reuse_external_deltas)
+		reuse_as_ref_delta = bitmap_word_alloc(word_alloc);
 
 	for (i = 0; i < packs_nr; i++)
 		reuse_partial_packfile_from_bitmap_1(bitmap_git, &packs[i],

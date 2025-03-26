@@ -37,6 +37,7 @@ struct repo_settings {
 	int pack_use_bitmap_boundary_traversal;
 	int pack_use_multi_pack_reuse;
 	int pack_use_multi_pack_forward_index;
+	int pack_reuse_external_deltas;
 
 	int shared_repository;
 	int shared_repository_initialized;
