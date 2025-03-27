@@ -11,6 +11,7 @@
 #include "commit-graph.h"
 #include "prio-queue.h"
 #include "commit-slab.h"
+#include "hex.h"
 
 struct blame_tree_entry {
 	struct hashmap_entry hashent;
@@ -377,9 +378,16 @@ int blame_tree_run_fast(struct blame_tree *bt, blame_tree_callback cb, void *cbd
 	 * Loop through each such commit, and place it in the appropriate queue.
 	 */
 	for (size_t i = 0; i < bt->rev.pending.nr; i++) {
-		struct commit *c = lookup_commit(bt->rev.repo,
-						 &bt->rev.pending.objects[i].item->oid);
-		repo_parse_commit(bt->rev.repo, c);
+		struct object *obj = bt->rev.pending.objects[i].item;
+		struct commit *c = lookup_commit_reference(bt->rev.repo, &obj->oid);
+
+		if (!c)
+			die("not a commit: %s", oid_to_hex(&obj->oid));
+
+		/* Propagate flags in case we dereferenced a tag. */
+		c->object.flags |= obj->flags;
+
+		parse_commit_or_die(c);
 
 		if (c->object.flags & BOTTOM) {
 			prio_queue_put(&not_queue, c);
@@ -401,12 +409,6 @@ int blame_tree_run_fast(struct blame_tree *bt, blame_tree_callback cb, void *cbd
 			active->nr = bt->all_paths_nr;
 		}
 	}
-
-	/*
-	 * Now that we have processed the pending commits, allow the revision
-	 * machinery to flush them by calling prepare_revision_walk().
-	 */
-	prepare_revision_walk(&bt->rev);
 
 	while (queue.nr) {
 		int parent_i;
