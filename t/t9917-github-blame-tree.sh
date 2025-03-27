@@ -17,17 +17,14 @@ test_expect_success 'cannot blame two trees' '
 
 check_blame() {
 	cat >expect &&
-	for arg in "" --go-faster
-	do
-		git blame-tree $arg "$@" >actual &&
-		git name-rev --stdin --name-only --tags <actual >tmp &&
-		mv tmp actual &&
-		tr '\t' ' ' <actual >tmp &&
-		mv tmp actual &&
-		sort <actual >tmp &&
-		mv tmp actual &&
-		test_cmp expect actual
-	done
+	git blame-tree "$@" >actual &&
+	git name-rev --stdin --name-only --tags <actual >tmp &&
+	mv tmp actual &&
+	tr '\t' ' ' <actual >tmp &&
+	mv tmp actual &&
+	sort <actual >tmp &&
+	mv tmp actual &&
+	test_cmp expect actual
 }
 
 test_expect_success 'blame recursive' '

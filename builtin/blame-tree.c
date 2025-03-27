@@ -48,12 +48,8 @@ int cmd_blame_tree(int argc, const char **argv, const char *prefix,
 	if (revopts) {
 		strvec_push(&new_argv, *argv++); /* "blame-tree" */
 		strvec_push(&new_argv, revopts);
-		while (*argv) {
-			if (!strcmp(*argv, "--go-faster"))
-				argv++;
-			else
-				strvec_push(&new_argv, *argv++);
-		}
+		while (*argv)
+			strvec_push(&new_argv, *argv++);
 		argv = new_argv.v;
 		argc = new_argv.nr;
 	}
