@@ -288,21 +288,23 @@ test_expect_success 'timeout creates an empty cache file' '
 '
 
 test_expect_success 'modify multiple caches, with limit' '
-	test_when_finished rm -rf .git/objects/info/blame-tree blame-tree &&
+	test_when_finished rm -rf .git/objects/info/blame-tree &&
+	test_when_finished git config --unset blameTree.limitMilliseconds &&
 
 	git blame-tree --cache --max-depth=0 &&
+	file="$(ls .git/objects/info/blame-tree/*.btc)" &&
+	test-tool chmtime =-10 "$file" &&
 
-	file=$(ls -t .git/objects/info/blame-tree/*.btc) &&
-	test-tool chmtime =-100 "$file" &&
-
+	# populate with empty cache files
+	git config blameTree.limitMilliseconds 0 &&
 	for i in $(test_seq 1 5)
 	do
 		cp -r a $i &&
 		git add $i &&
 		git commit -m "add $i" &&
-		git blame-tree --cache --max-depth=1 -- $i &&
-		file=$(ls -t .git/objects/info/blame-tree/*.btc | head -n 1) &&
-		backtime=$((i * 10)) &&
+		git blame-tree --max-depth=1 -- $i &&
+		file="$(ls -t .git/objects/info/blame-tree/*.btc | head -n 1)" &&
+		backtime=$((10 - i)) &&
 		test-tool chmtime =-$backtime "$file" || return 1
 	done &&
 
@@ -317,7 +319,21 @@ test_expect_success 'modify multiple caches, with limit' '
 	head -n 3 after-all >after-newest &&
 
 	test_cmp before-oldest after-newest &&
-	test_cmp before-newest after-oldest
+	test_cmp before-newest after-oldest &&
+
+	# Double-check which caches were hit
+	for i in $(test_seq 1 2)
+	do
+		GIT_TRACE2_PERF="$(pwd)/trace-$i" \
+			git blame-tree --max-depth=1 -- $i &&
+		grep cached-commit-true trace-$i || return 1
+	done &&
+	for i in $(test_seq 3 5)
+	do
+		GIT_TRACE2_PERF="$(pwd)/trace-$i" \
+			git blame-tree --max-depth=1 -- $i &&
+		grep cached-commit-false trace-$i || return 1
+	done
 '
 
 test_done

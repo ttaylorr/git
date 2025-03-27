@@ -247,6 +247,7 @@ static void write_placeholder_cache_file(struct blame_tree *bt)
 	memset(&writer, 0, sizeof(writer));
 
 	writer.pathspec = bt->rev.diffopt.pathspec.items[0].original;
+	writer.pathspec_len = strlen(writer.pathspec);
 	writer.max_depth = bt->rev.diffopt.max_depth;
 
 	bt->goal_end_time = 0;
@@ -523,7 +524,7 @@ void blame_tree_init(struct blame_tree *bt, int flags,
 	 * determine a maximum window of time before we
 	 * should write one of our own as a helper.
 	 */
-	if (!bt->reader &&
+	if (!bt->writer && !bt->reader &&
 	    bt->rev.diffopt.pathspec.nr == 1) {
 		repo_config_get_int(r, "blametree.limitmilliseconds", &limit_millis);
 		bt->goal_end_time = clock() + (CLOCKS_PER_SEC * limit_millis) / 1000;
