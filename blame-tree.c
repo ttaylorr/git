@@ -139,8 +139,6 @@ struct blame_tree_callback_data {
 
 	blame_tree_callback callback;
 	void *callback_data;
-
-	int go_faster;
 };
 
 static void mark_path(const char *path, const struct object_id *oid,
@@ -160,12 +158,10 @@ static void mark_path(const char *path, const struct object_id *oid,
 		return;
 
 	/* Are we inactive on the current commit? */
-	if (data->go_faster) {
-		active = active_paths_at(&active_paths, data->commit);
-		if (active && active->active &&
-		    !active->active[ent->diff_idx])
-			return;
-	}
+	active = active_paths_at(&active_paths, data->commit);
+	if (active && active->active &&
+	    !active->active[ent->diff_idx])
+		return;
 
 	/*
 	 * Is it arriving at a version of interest, or is it from a side branch
@@ -357,7 +353,7 @@ cleanup:
 	return ret;
 }
 
-int blame_tree_run_fast(struct blame_tree *bt, blame_tree_callback cb, void *cbdata)
+int blame_tree_run(struct blame_tree *bt, blame_tree_callback cb, void *cbdata)
 {
 	int max_count, queue_popped = 0;
 	struct prio_queue queue = { compare_commits_by_gen_then_commit_date };
@@ -369,7 +365,6 @@ int blame_tree_run_fast(struct blame_tree *bt, blame_tree_callback cb, void *cbd
 	data.num_interesting = hashmap_get_size(&bt->paths);
 	data.callback = cb;
 	data.callback_data = cbdata;
-	data.go_faster = 1;
 
 	bt->rev.diffopt.output_format = DIFF_FORMAT_CALLBACK;
 	bt->rev.diffopt.format_callback = blame_diff;
@@ -488,42 +483,6 @@ cleanup:
 
 	clear_active_paths(&active_paths);
 	free(scratch);
-
-	return 0;
-}
-
-int blame_tree_run(struct blame_tree *bt, blame_tree_callback cb, void *cbdata)
-{
-	struct blame_tree_callback_data data;
-
-	data.paths = &bt->paths;
-	data.num_interesting = hashmap_get_size(&bt->paths);
-	data.callback = cb;
-	data.callback_data = cbdata;
-	data.go_faster = 0;
-
-	bt->rev.diffopt.output_format = DIFF_FORMAT_CALLBACK;
-	bt->rev.diffopt.format_callback = blame_diff;
-	bt->rev.diffopt.format_callback_data = &data;
-
-	prepare_revision_walk(&bt->rev);
-
-	while (data.num_interesting > 0) {
-		data.commit = get_revision(&bt->rev);
-		if (!data.commit)
-			break;
-
-		if (!maybe_changed_path(bt, data.commit, NULL))
-			continue;
-
-		if (data.commit->object.flags & BOUNDARY) {
-			diff_tree_oid(the_hash_algo->empty_tree,
-				      &data.commit->object.oid,
-				      "", &bt->rev.diffopt);
-			diff_flush(&bt->rev.diffopt);
-		} else
-			log_tree_commit(&bt->rev, data.commit);
-	}
 
 	return 0;
 }

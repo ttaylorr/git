@@ -25,8 +25,5 @@ typedef void (*blame_tree_callback)(const char *path,
 int blame_tree_run(struct blame_tree *,
 		   blame_tree_callback cb,
 		   void *data);
-int blame_tree_run_fast(struct blame_tree *,
-			blame_tree_callback cb,
-			void *data);
 
 #endif /* BLAME_TREE_H */

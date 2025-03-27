@@ -144,10 +144,12 @@ test_expect_success 'blame-tree with merged cherry-pick' '
 	test_commit B &&
 	git switch -c mergeM branchA &&
 	git merge branchB &&
-	git blame-tree --max-depth=0 >old &&
-	git blame-tree --go-faster --max-depth=0 >new &&
-	grep "$(git rev-parse branchB)	file" old &&
-	grep "$(git rev-parse branchA)	file" new
+	check_blame --max-depth=0 <<-\EOF
+	A A.t
+	A file
+	B B.t
+	resolved conflict
+	EOF
 '
 
 test_expect_success 'blame-tree dereferences tags' '
@@ -163,12 +165,8 @@ test_expect_success 'blame-tree dereferences tags' '
 	check_blame lo..hi <want
 '
 
-test_expect_failure 'blame-tree complains about non-commits (old)' '
+test_expect_success 'blame-tree complains about non-commits' '
 	test_must_fail git blame-tree HEAD^{tree}
-'
-
-test_expect_success 'blame-tree complains about non-commits (go-faster)' '
-	test_must_fail git blame-tree --go-faster HEAD^{tree}
 '
 
 test_done
