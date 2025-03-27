@@ -25,34 +25,16 @@ static void show_entry(const char *path, const struct commit *commit, void *d)
 	fflush(stdout);
 }
 
-static int blame_tree_config(const char *var, const char *value,
-			     const struct config_context *ctx, void *data)
-{
-	char **revopts = data;
-	if (!strcmp(var, "blametree.revopts"))
-		return git_config_string(revopts, var, value);
-	return git_default_config(var, value, ctx, NULL);
-}
-
 int cmd_blame_tree(int argc, const char **argv, const char *prefix,
 		   struct repository *repo)
 {
 	struct blame_tree bt;
 	struct strvec new_argv = STRVEC_INIT;
-	char *revopts = NULL;
 
 	if (argc == 2 && !strcmp(argv[1], "-h"))
 		usage(blame_tree_usage);
 
-	repo_config(repo, blame_tree_config, NULL);
-	if (revopts) {
-		strvec_push(&new_argv, *argv++); /* "blame-tree" */
-		strvec_push(&new_argv, revopts);
-		while (*argv)
-			strvec_push(&new_argv, *argv++);
-		argv = new_argv.v;
-		argc = new_argv.nr;
-	}
+	repo_config(repo, git_default_config, NULL);
 
 	blame_tree_init(&bt, argc, argv, prefix);
 	if (blame_tree_run(&bt, show_entry, &bt) < 0)

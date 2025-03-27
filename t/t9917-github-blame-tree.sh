@@ -85,14 +85,6 @@ test_expect_success 'limit blame traversal by commit' '
 	EOF
 '
 
-test_expect_success 'limit blame traversal using config' '
-	test_config blametree.revopts -1 &&
-	check_blame --max-depth=0 <<-\EOF
-	3 a
-	^2 file
-	EOF
-'
-
 test_expect_success 'only blame files in the current tree' '
 	git rm -rf a &&
 	git commit -m "remove a" &&
