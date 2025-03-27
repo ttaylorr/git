@@ -39,23 +39,35 @@ int cmd_blame_tree(int argc, const char **argv, const char *prefix,
 {
 	struct blame_tree bt;
 	struct strvec new_argv = STRVEC_INIT;
+	int go_fast = 0;
+	int result;
 	char *revopts = NULL;
 
 	if (argc == 2 && !strcmp(argv[1], "-h"))
 		usage(blame_tree_usage);
+	if (argc >= 2 && !strcmp(argv[1], "--go-faster"))
+		go_fast = 1;
 
 	repo_config(repo, blame_tree_config, NULL);
 	if (revopts) {
 		strvec_push(&new_argv, *argv++); /* "blame-tree" */
 		strvec_push(&new_argv, revopts);
-		while (*argv)
-			strvec_push(&new_argv, *argv++);
+		while (*argv) {
+			if (!strcmp(*argv, "--go-faster"))
+				argv++;
+			else
+				strvec_push(&new_argv, *argv++);
+		}
 		argv = new_argv.v;
 		argc = new_argv.nr;
 	}
 
 	blame_tree_init(&bt, argc, argv, prefix);
-	if (blame_tree_run(&bt, show_entry, &bt) < 0)
+	if (go_fast)
+		result = blame_tree_run_fast(&bt, show_entry, &bt);
+	else
+		result = blame_tree_run(&bt, show_entry, &bt);
+	if (result < 0)
 		die("error running blame-tree traversal");
 	blame_tree_release(&bt);
 

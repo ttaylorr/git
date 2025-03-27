@@ -17,14 +17,17 @@ test_expect_success 'cannot blame two trees' '
 
 check_blame() {
 	cat >expect &&
-	git blame-tree "$@" >actual &&
-	git name-rev --stdin --name-only --tags <actual >tmp &&
-	mv tmp actual &&
-	tr '\t' ' ' <actual >tmp &&
-	mv tmp actual &&
-	sort <actual >tmp &&
-	mv tmp actual &&
-	test_cmp expect actual
+	for arg in "" --go-faster
+	do
+		git blame-tree $arg "$@" >actual &&
+		git name-rev --stdin --name-only --tags <actual >tmp &&
+		mv tmp actual &&
+		tr '\t' ' ' <actual >tmp &&
+		mv tmp actual &&
+		sort <actual >tmp &&
+		mv tmp actual &&
+		test_cmp expect actual
+	done
 }
 
 test_expect_success 'blame recursive' '
@@ -127,6 +130,24 @@ test_expect_success 'blame merge for resolved conflicts' '
 	check_blame conflict <<-\EOF
 	resolved conflict
 	EOF
+'
+
+test_expect_success 'blame-tree with merged cherry-pick' '
+	git switch -c branchA &&
+	echo stuff >file &&
+	git add file &&
+	test_commit A &&
+	git switch -c branchB branchA~1 &&
+	echo stuff >file &&
+	git add file &&
+	test_tick && # Ensure this commit is later
+	test_commit B &&
+	git switch -c mergeM branchA &&
+	git merge branchB &&
+	git blame-tree --max-depth=0 >old &&
+	git blame-tree --go-faster --max-depth=0 >new &&
+	grep "$(git rev-parse branchB)	file" old &&
+	grep "$(git rev-parse branchA)	file" new
 '
 
 test_done

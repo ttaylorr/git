@@ -10,6 +10,9 @@
 struct blame_tree {
 	struct hashmap paths;
 	struct rev_info rev;
+
+	const char **all_paths;
+	int all_paths_nr;
 };
 
 void blame_tree_init(struct blame_tree *,
@@ -22,5 +25,8 @@ typedef void (*blame_tree_callback)(const char *path,
 int blame_tree_run(struct blame_tree *,
 		   blame_tree_callback cb,
 		   void *data);
+int blame_tree_run_fast(struct blame_tree *,
+			blame_tree_callback cb,
+			void *data);
 
 #endif /* BLAME_TREE_H */
