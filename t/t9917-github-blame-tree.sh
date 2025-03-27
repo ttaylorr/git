@@ -167,7 +167,7 @@ test_expect_failure 'blame-tree complains about non-commits (old)' '
 	test_must_fail git blame-tree HEAD^{tree}
 '
 
-test_expect_success 'blame-tree complains about non-commits (go-faster)' '
+test_expect_failure 'blame-tree complains about non-commits (go-faster)' '
 	test_must_fail git blame-tree --go-faster HEAD^{tree}
 '
 

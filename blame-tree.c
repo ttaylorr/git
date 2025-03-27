@@ -357,63 +357,13 @@ cleanup:
 	return ret;
 }
 
-static void blame_tree_fast_init_bloom(struct rev_info *revs)
-{
-	const char *path, *p;
-	char *path_alloc = NULL;
-	size_t len;
-	int path_component_nr = 1;
-	struct pathspec_item *pi;
-
-	if (!revs->pruning.pathspec.nr)
-		return;
-
-	pi = &revs->pruning.pathspec.items[0];
-	/* remove single trailing slash from path, if needed */
-	if (pi->len > 0 && pi->match[pi->len - 1] == '/') {
-		path_alloc = xmemdupz(pi->match, pi->len - 1);
-		path = path_alloc;
-	} else
-		path = pi->match;
-
-	len = strlen(path);
-	if (len) {
-		p = path;
-		while (*p) {
-			/*
-			 * At this point, the path is normalized to use Unix-style
-			 * path separators. This is required due to how the
-			 * changed-path Bloom filters store the paths.
-			 */
-			if (*p == '/')
-				path_component_nr++;
-			p++;
-		}
-
-		revs->bloom_keys_nr = path_component_nr;
-		ALLOC_ARRAY(revs->bloom_keys, revs->bloom_keys_nr);
-
-		fill_bloom_key(path, len, &revs->bloom_keys[0],
-			       revs->bloom_filter_settings);
-		path_component_nr = 1;
-
-		p = path + len - 1;
-		while (p > path) {
-			if (*p == '/')
-				fill_bloom_key(path, p - path,
-					       &revs->bloom_keys[path_component_nr++],
-					       revs->bloom_filter_settings);
-			p--;
-		}
-	}
-}
-
 int blame_tree_run_fast(struct blame_tree *bt, blame_tree_callback cb, void *cbdata)
 {
 	int max_count, queue_popped = 0;
 	struct prio_queue queue = { compare_commits_by_gen_then_commit_date };
 	struct prio_queue not_queue = { compare_commits_by_gen_then_commit_date };
 	struct blame_tree_callback_data data;
+	struct commit_list *list;
 
 	data.paths = &bt->paths;
 	data.num_interesting = hashmap_get_size(&bt->paths);
@@ -421,12 +371,12 @@ int blame_tree_run_fast(struct blame_tree *bt, blame_tree_callback cb, void *cbd
 	data.callback_data = cbdata;
 	data.go_faster = 1;
 
-	if (bt->rev.bloom_filter_settings)
-		blame_tree_fast_init_bloom(&bt->rev);
-
 	bt->rev.diffopt.output_format = DIFF_FORMAT_CALLBACK;
 	bt->rev.diffopt.format_callback = blame_diff;
 	bt->rev.diffopt.format_callback_data = &data;
+	bt->rev.no_walk = 1;
+
+	prepare_revision_walk(&bt->rev);
 
 	max_count = bt->rev.max_count;
 
@@ -434,21 +384,12 @@ int blame_tree_run_fast(struct blame_tree *bt, blame_tree_callback cb, void *cbd
 	scratch = xcalloc(bt->all_paths_nr, sizeof(char));
 
 	/*
-	 * bt->rev.pending holds the set of boundary commits for our walk.
+	 * bt->rev.commits holds the set of boundary commits for our walk.
 	 *
 	 * Loop through each such commit, and place it in the appropriate queue.
 	 */
-	for (size_t i = 0; i < bt->rev.pending.nr; i++) {
-		struct object *obj = bt->rev.pending.objects[i].item;
-		struct commit *c = lookup_commit_reference(bt->rev.repo, &obj->oid);
-
-		if (!c)
-			die("not a commit: %s", oid_to_hex(&obj->oid));
-
-		/* Propagate flags in case we dereferenced a tag. */
-		c->object.flags |= obj->flags;
-
-		parse_commit_or_die(c);
+	for (list = bt->rev.commits; list; list = list->next) {
+		struct commit *c = list->item;
 
 		if (c->object.flags & BOTTOM) {
 			prio_queue_put(&not_queue, c);
