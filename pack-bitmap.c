@@ -2205,6 +2205,18 @@ static int find_base_bitmap_pos(struct bitmap_index *bitmap_git,
 		uint32_t base_midx_pos;
 
 		/*
+		 * Opportunistically try to find the base object in the
+		 * same pack as the object with delta_obj_offset. This
+		 * should hopefully represent a large percentage of the
+		 * cases. In the case where a delta/base-pair was
+		 * selected from two different packs, fall through to
+		 * the below.
+		 */
+		if (!midx_pair_to_pack_pos(bitmap_git->midx, pack->pack_int_id,
+					   base_offset, base_bitmap_pos))
+			return 0;
+
+		/*
 		 * First convert from the base object's offset
 		 * to its pack position in pack order relative
 		 * to its source pack. Use that information to
