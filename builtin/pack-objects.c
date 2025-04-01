@@ -226,6 +226,7 @@ static size_t reuse_packfiles_nr;
 static size_t reuse_packfiles_used_nr;
 static uint32_t reuse_packfile_objects;
 static struct bitmap *reuse_packfile_bitmap;
+static struct bitmap *reuse_as_ref_delta_packfile_bitmap;
 
 static int use_bitmap_index_default = 1;
 static int use_bitmap_index = -1;
@@ -1127,7 +1128,9 @@ static void write_reused_pack_one(struct bitmapped_pack *p,
 		assert(base_offset != 0);
 
 		/* Convert to REF_DELTA if we must... */
-		if (!allow_ofs_delta) {
+		if (!allow_ofs_delta ||
+		    (reuse_as_ref_delta_packfile_bitmap &&
+		     bitmap_get(reuse_as_ref_delta_packfile_bitmap, pos))) {
 			uint32_t base_pos;
 			struct object_id base_oid;
 
@@ -1219,8 +1222,24 @@ static size_t write_reused_pack_verbatim(struct bitmapped_pack *reuse_packfile,
 	if (reuse_packfile_bitmap->word_alloc < end)
 		BUG("fewer words than expected in reuse_packfile_bitmap");
 
-	while (pos < end && reuse_packfile_bitmap->words[pos] == (eword_t)~0)
+	while (pos < end) {
+		eword_t reuse = reuse_packfile_bitmap->words[pos];
+
+		if (reuse_as_ref_delta_packfile_bitmap) {
+			if (pos >= reuse_as_ref_delta_packfile_bitmap->word_alloc)
+				BUG("reuse_as_ref_delta_packfile_bitmap is too small");
+			/*
+			 * Can't reuse verbatim any objects which need
+			 * to be first rewritten as REF_DELTAs.
+			 */
+			reuse &= ~reuse_as_ref_delta_packfile_bitmap->words[pos];
+		}
+
+		if (reuse != (eword_t)~0)
+			break;
+
 		pos++;
+	}
 
 	if (pos) {
 		off_t to_write;
@@ -4213,6 +4232,7 @@ static int get_object_list_from_bitmap(struct rev_info *revs)
 						   &reuse_packfiles,
 						   &reuse_packfiles_nr,
 						   &reuse_packfile_bitmap,
+						   &reuse_as_ref_delta_packfile_bitmap,
 						   allow_pack_reuse == MULTI_PACK_REUSE);
 
 	if (reuse_packfiles) {
