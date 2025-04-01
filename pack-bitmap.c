@@ -139,6 +139,12 @@ struct bitmap_index {
 	/* "have" bitmap from the last performed walk */
 	struct bitmap *haves;
 
+	/*
+	 * Whether the last performed walk had objects removed from
+	 * 'result' due to object filtering.
+	 */
+	int filtered;
+
 	/* Version of the bitmap index */
 	unsigned int version;
 };
@@ -1823,6 +1829,8 @@ static void filter_bitmap_exclude_type(struct bitmap_index *bitmap_git,
 			bitmap_unset(to_filter, pos);
 	}
 
+	bitmap_git->filtered = 1;
+
 	ewah_or_iterator_release(&it);
 	bitmap_free(tips);
 }
@@ -1918,6 +1926,8 @@ static void filter_bitmap_blob_limit(struct bitmap_index *bitmap_git,
 		    get_size_by_pos(bitmap_git, pos) >= limit)
 			bitmap_unset(to_filter, pos);
 	}
+
+	bitmap_git->filtered = 1;
 
 	ewah_or_iterator_release(&it);
 	bitmap_free(tips);
@@ -2037,6 +2047,8 @@ static void filter_packed_objects_from_bitmap(struct bitmap_index *bitmap_git,
 				    &eindex->objects[i]->oid))
 			bitmap_unset(result, objects_nr + i);
 	}
+
+	bitmap_git->filtered = 1;
 }
 
 int for_each_bitmapped_object(struct bitmap_index *bitmap_git,
