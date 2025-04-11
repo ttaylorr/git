@@ -724,4 +724,74 @@ test_expect_success 'cruft repack respects --quiet' '
 	)
 '
 
+test_expect_success 'repack --write-midx excludes cruft where possible' '
+	git init exclude-cruft-when-possible &&
+	(
+		cd exclude-cruft-when-possible &&
+
+		test_commit one &&
+
+		test_commit --no-tag two &&
+		two="$(git rev-parse HEAD)" &&
+		test_commit --no-tag three &&
+		three="$(git rev-parse HEAD)" &&
+		git reset --hard one &&
+
+		git reflog expire --all --expire=all &&
+
+		git repack --cruft -d &&
+		ls $packdir/pack-*.idx | sort >packs.before &&
+
+		git merge $two &&
+		test_commit four &&
+		git repack -d --geometric=2 --write-midx --write-bitmap-index &&
+		ls $packdir/pack-*.idx | sort >packs.after &&
+
+		comm -13 packs.before packs.after >packs.new &&
+		test_line_count = 1 packs.new &&
+
+		git rev-list --objects --no-object-names one..four >expect.raw &&
+		sort expect.raw >expect &&
+
+		git show-index <$(cat packs.new) >actual.raw &&
+		cut -d" " -f2 actual.raw | sort >actual &&
+
+		test_cmp expect actual &&
+
+		test-tool read-midx --show-objects $objdir >actual.raw &&
+		grep "\.pack$" actual.raw | cut -d" " -f1 | sort >actual.objects &&
+		git rev-list --objects --no-object-names HEAD >expect.raw &&
+		sort expect.raw >expect.objects &&
+
+		test_cmp expect.objects actual.objects &&
+
+		cruft="$(basename $(ls $packdir/*.mtimes))" &&
+		grep "^pack-" actual.raw >actual.packs &&
+		! test_grep "${cruft%.mtimes}.idx" actual.packs
+	)
+'
+
+test_expect_success 'repack --write-midx includes cruft when necessary' '
+	(
+		cd exclude-cruft-when-possible &&
+
+		ls $packdir/pack-*.idx | sort >packs.all &&
+		grep -o "pack-.*\.idx$" packs.all >in &&
+
+		git multi-pack-index write --stdin-packs --bitmap <in &&
+
+		test_commit five &&
+		git repack -d --geometric=2 --write-midx --write-bitmap-index &&
+
+		test-tool read-midx --show-objects $objdir >actual.raw &&
+		grep "\.pack$" actual.raw | cut -d" " -f1 | sort >actual.objects &&
+		git cat-file --batch-all-objects --batch-check="%(objectname)" \
+			>expect.objects &&
+		test_cmp expect.objects actual.objects &&
+
+		grep "^pack-" actual.raw >actual.packs &&
+		test_line_count = "$(($(wc -l <packs.all) + 1))" actual.packs
+	)
+'
+
 test_done
