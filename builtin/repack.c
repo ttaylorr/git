@@ -31,6 +31,7 @@
 
 #define DELETE_PACK 1
 #define RETAIN_PACK 2
+#define PACK_IN_MIDX 4
 
 static int pack_everything;
 static int delta_base_offset = 1;
@@ -161,6 +162,11 @@ static int pack_is_retained(struct string_list_item *item)
 	return (uintptr_t)item->util & RETAIN_PACK;
 }
 
+static void pack_mark_in_midx(struct string_list_item *item)
+{
+	item->util = (void*)((uintptr_t)item->util | PACK_IN_MIDX);
+}
+
 static void mark_packs_for_deletion_1(struct string_list *names,
 				      struct string_list *list)
 {
@@ -264,6 +270,7 @@ static void collect_pack_filenames(struct existing_packs *existing,
 	for (p = get_all_packs(the_repository); p; p = p->next) {
 		int i;
 		const char *base;
+		struct string_list_item *item;
 
 		if (!p->pack_local)
 			continue;
@@ -279,11 +286,17 @@ static void collect_pack_filenames(struct existing_packs *existing,
 		strbuf_strip_suffix(&buf, ".pack");
 
 		if ((extra_keep->nr > 0 && i < extra_keep->nr) || p->pack_keep)
-			string_list_append(&existing->kept_packs, buf.buf);
+			item = string_list_append(&existing->kept_packs,
+						  buf.buf);
 		else if (p->is_cruft)
-			string_list_append(&existing->cruft_packs, buf.buf);
+			item = string_list_append(&existing->cruft_packs,
+						  buf.buf);
 		else
-			string_list_append(&existing->non_kept_packs, buf.buf);
+			item = string_list_append(&existing->non_kept_packs,
+						  buf.buf);
+
+		if (p->multi_pack_index)
+			pack_mark_in_midx(item);
 	}
 
 	string_list_sort(&existing->kept_packs);
