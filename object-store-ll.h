@@ -337,6 +337,14 @@ struct object_info {
 /*
  * Initializer for a "struct object_info" that wants no items. You may
  * also memset() the memory to all-zeroes.
+ *
+ * NOTE: callers expect the initial value of an object_info struct to
+ * be zero'd out. Designated initializers like
+ *
+ *     struct object_info oi = { .sizep = &sz };
+ *
+ * depend on this behavior, so consider strongly before adding new
+ * fields that have a non-zero default value.
  */
 #define OBJECT_INFO_INIT { 0 }
 
