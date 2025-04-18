@@ -17,14 +17,7 @@ test_expect_success 'create tags' '
 '
 
 test_expect_success "start with bitmapped pack" '
-	git repack -adb
-'
-
-test_perf "setup multi-pack index" '
-	git multi-pack-index write --bitmap
-'
-
-test_expect_success "drop pack bitmap" '
+	git repack -adb --write-midx &&
 	rm -f .git/objects/pack/pack-*.bitmap
 '
 
