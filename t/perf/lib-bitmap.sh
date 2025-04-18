@@ -69,8 +69,13 @@ test_partial_bitmap () {
 }
 
 test_pack_bitmap () {
-	test_expect_success "repack to disk" '
-		git repack -ad
+	test_expect_success "repack to disk (baseline)" '
+		git repack -ad --no-write-bitmap-index
+	'
+
+	test_perf "repack to disk (write bitmaps)" '
+		rm -f .git/objects/pack/*.bitmap &&
+		git repack -ad --write-bitmap-index
 	'
 
 	test_full_bitmap
