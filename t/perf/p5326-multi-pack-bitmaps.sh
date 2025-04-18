@@ -17,8 +17,7 @@ test_expect_success 'create tags' '
 '
 
 test_expect_success "start with bitmapped pack" '
-	git repack -adb --write-midx &&
-	rm -f .git/objects/pack/pack-*.bitmap
+	git repack -adb --write-midx
 '
 
 test_full_bitmap
