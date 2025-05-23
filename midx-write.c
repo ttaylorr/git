@@ -943,6 +943,19 @@ static int fill_packs_from_midx(struct write_midx_context *ctx,
 {
 	struct multi_pack_index *m;
 
+	if (preferred_pack_name) {
+		/*
+		 * If a preferred pack is specified, need to have
+		 * packed_git's loaded to ensure the chosen preferred
+		 * pack has a non-zero object count.
+		 *
+		 * Trick ourselves into thinking that we're writing a
+		 * reverse index in this case in order to open up the
+		 * pack index file.
+		 */
+		flags |= MIDX_WRITE_REV_INDEX;
+	}
+
 	for (m = ctx->m; m; m = m->base_midx) {
 		uint32_t i;
 
@@ -953,13 +966,8 @@ static int fill_packs_from_midx(struct write_midx_context *ctx,
 			 * If generating a reverse index, need to have
 			 * packed_git's loaded to compare their
 			 * mtimes and object count.
-			 *
-			 * If a preferred pack is specified, need to
-			 * have packed_git's loaded to ensure the chosen
-			 * preferred pack has a non-zero object count.
 			 */
-			if (flags & MIDX_WRITE_REV_INDEX ||
-			    preferred_pack_name) {
+			if (flags & MIDX_WRITE_REV_INDEX) {
 				if (prepare_midx_pack(ctx->repo, m,
 						      m->num_packs_in_base + i)) {
 					error(_("could not load pack"));
