@@ -490,7 +490,7 @@ static int open_midx_bitmap_1(struct bitmap_index *bitmap_git,
 	for (i = 0; i < bitmap_git->midx->num_packs + bitmap_git->midx->num_packs_in_base; i++) {
 		if (prepare_midx_pack(bitmap_repo(bitmap_git), bitmap_git->midx, i)) {
 			warning(_("could not open pack %s"),
-				bitmap_git->midx->pack_names[i]);
+				bitmap_git->midx->pack_names[i - bitmap_git->midx->num_packs_in_base]);
 			goto cleanup;
 		}
 	}
