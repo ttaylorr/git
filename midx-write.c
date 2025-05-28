@@ -1636,6 +1636,9 @@ static int want_included_pack(struct repository *r,
 			      uint32_t pack_int_id)
 {
 	struct packed_git *p;
+
+	ASSERT(m && !m->base_midx);
+
 	if (prepare_midx_pack(r, m, pack_int_id))
 		return 0;
 	p = m->packs[pack_int_id];
@@ -1654,6 +1657,8 @@ static void fill_included_packs_all(struct repository *r,
 {
 	uint32_t i;
 	int pack_kept_objects = 0;
+
+	ASSERT(m && !m->base_midx);
 
 	repo_config_get_bool(r, "repack.packkeptobjects", &pack_kept_objects);
 
@@ -1674,6 +1679,8 @@ static void fill_included_packs_batch(struct repository *r,
 	size_t total_size;
 	struct repack_info *pack_info;
 	int pack_kept_objects = 0;
+
+	ASSERT(m && !m->base_midx);
 
 	CALLOC_ARRAY(pack_info, m->num_packs);
 
