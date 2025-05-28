@@ -506,6 +506,13 @@ struct packed_git *nth_midxed_pack(struct multi_pack_index *m,
 	return m->packs[local_pack_int_id];
 }
 
+const char *nth_midxed_pack_name(struct multi_pack_index *m,
+				 uint32_t pack_int_id)
+{
+	uint32_t local_pack_int_id = midx_for_pack(&m, pack_int_id);
+	return m->pack_names[local_pack_int_id];
+}
+
 #define MIDX_CHUNK_BITMAPPED_PACKS_WIDTH (2 * sizeof(uint32_t))
 
 int nth_bitmapped_pack(struct repository *r, struct multi_pack_index *m,
