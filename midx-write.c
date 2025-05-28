@@ -938,44 +938,54 @@ cleanup:
 	return result;
 }
 
+static int fill_packs_from_midx_1(struct write_midx_context *ctx,
+				  struct multi_pack_index *m,
+				  int prepare_packs)
+{
+	for (uint32_t i = 0; i < m->num_packs; i++) {
+		/*
+		 * If generating a reverse index, need to have
+		 * packed_git's loaded to compare their
+		 * mtimes and object count.
+		 */
+		if (prepare_packs) {
+			if (prepare_midx_pack(ctx->repo, m,
+					      m->num_packs_in_base + i)) {
+				error(_("could not load pack"));
+				return 1;
+			}
+
+			if (open_pack_index(m->packs[i]))
+				die(_("could not open index for %s"),
+				    m->packs[i]->pack_name);
+		}
+
+		fill_pack_info(&ctx->info[ctx->nr++], m->packs[i],
+			       m->pack_names[i],
+			       m->num_packs_in_base + i);
+	}
+
+	return 0;
+}
+
 static int fill_packs_from_midx(struct write_midx_context *ctx,
 				const char *preferred_pack_name, uint32_t flags)
 {
 	struct multi_pack_index *m;
+	int prepare_packs;
+
+	/*
+	 * If generating a reverse index, need to have packed_git's
+	 * loaded to compare their mtimes and object count.
+	 */
+	prepare_packs = !!(flags & MIDX_WRITE_REV_INDEX || preferred_pack_name);
 
 	for (m = ctx->m; m; m = m->base_midx) {
-		uint32_t i;
-
-		for (i = 0; i < m->num_packs; i++) {
-			ALLOC_GROW(ctx->info, ctx->nr + 1, ctx->alloc);
-
-			/*
-			 * If generating a reverse index, need to have
-			 * packed_git's loaded to compare their
-			 * mtimes and object count.
-			 *
-			 * If a preferred pack is specified, need to
-			 * have packed_git's loaded to ensure the chosen
-			 * preferred pack has a non-zero object count.
-			 */
-			if (flags & MIDX_WRITE_REV_INDEX ||
-			    preferred_pack_name) {
-				if (prepare_midx_pack(ctx->repo, m,
-						      m->num_packs_in_base + i)) {
-					error(_("could not load pack"));
-					return 1;
-				}
-
-				if (open_pack_index(m->packs[i]))
-					die(_("could not open index for %s"),
-					    m->packs[i]->pack_name);
-			}
-
-			fill_pack_info(&ctx->info[ctx->nr++], m->packs[i],
-				       m->pack_names[i],
-				       m->num_packs_in_base + i);
-		}
+		int ret = fill_packs_from_midx_1(ctx, m, prepare_packs);
+		if (ret)
+			return ret;
 	}
+
 	return 0;
 }
 
