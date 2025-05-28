@@ -943,25 +943,23 @@ static int fill_packs_from_midx_1(struct write_midx_context *ctx,
 				  int prepare_packs)
 {
 	for (uint32_t i = 0; i < m->num_packs; i++) {
-		/*
-		 * If generating a reverse index, need to have
-		 * packed_git's loaded to compare their
-		 * mtimes and object count.
-		 */
+		struct packed_git *p = NULL;
+
+		ALLOC_GROW(ctx->info, ctx->nr + 1, ctx->alloc);
 		if (prepare_packs) {
-			if (prepare_midx_pack(ctx->repo, m,
-					      m->num_packs_in_base + i)) {
+			p = prepare_midx_pack(ctx->repo, m,
+					      m->num_packs_in_base + i);
+			if (!p) {
 				error(_("could not load pack"));
 				return 1;
 			}
 
-			if (open_pack_index(m->packs[i]))
+			if (open_pack_index(p))
 				die(_("could not open index for %s"),
-				    m->packs[i]->pack_name);
+				    p->pack_name);
 		}
 
-		fill_pack_info(&ctx->info[ctx->nr++], m->packs[i],
-			       m->pack_names[i],
+		fill_pack_info(&ctx->info[ctx->nr++], p, m->pack_names[i],
 			       m->num_packs_in_base + i);
 	}
 
@@ -1588,20 +1586,19 @@ int expire_midx_packs(struct repository *r, const char *object_dir, unsigned fla
 					  _("Finding and deleting unreferenced packfiles"),
 					  m->num_packs);
 	for (i = 0; i < m->num_packs; i++) {
+		struct packed_git *p;
 		char *pack_name;
 		display_progress(progress, i + 1);
 
 		if (count[i])
 			continue;
 
-		if (prepare_midx_pack(r, m, i))
+		p = prepare_midx_pack(r, m, i);
+		if (!p || p->pack_keep || p->is_cruft)
 			continue;
 
-		if (m->packs[i]->pack_keep || m->packs[i]->is_cruft)
-			continue;
-
-		pack_name = xstrdup(m->packs[i]->pack_name);
-		close_pack(m->packs[i]);
+		pack_name = xstrdup(p->pack_name);
+		close_pack(p);
 
 		string_list_insert(&packs_to_drop, m->pack_names[i]);
 		unlink_pack_path(pack_name, 0);
@@ -1649,9 +1646,9 @@ static int want_included_pack(struct repository *r,
 
 	ASSERT(m && !m->base_midx);
 
-	if (prepare_midx_pack(r, m, pack_int_id))
+	p = prepare_midx_pack(r, m, pack_int_id);
+	if (!p)
 		return 0;
-	p = m->packs[pack_int_id];
 	if (!pack_kept_objects && p->pack_keep)
 		return 0;
 	if (p->is_cruft)
@@ -1697,12 +1694,11 @@ static void fill_included_packs_batch(struct repository *r,
 	repo_config_get_bool(r, "repack.packkeptobjects", &pack_kept_objects);
 
 	for (i = 0; i < m->num_packs; i++) {
+		struct packed_git *p = prepare_midx_pack(r, m, i);
+
 		pack_info[i].pack_int_id = i;
-
-		if (prepare_midx_pack(r, m, i))
-			continue;
-
-		pack_info[i].mtime = m->packs[i]->mtime;
+		if (p)
+			pack_info[i].mtime = p->mtime;
 	}
 
 	for (i = 0; i < m->num_objects; i++) {
