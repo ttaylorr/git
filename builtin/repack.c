@@ -218,7 +218,8 @@ static int geometry_cmp(const void *va, const void *vb)
 
 static void init_pack_geometry(struct pack_geometry *geometry,
 			       struct existing_packs *existing,
-			       const struct pack_objects_args *args)
+			       const struct pack_objects_args *args,
+			       int pack_kept_objects)
 {
 	struct packed_git *p;
 	struct strbuf buf = STRBUF_INIT;
@@ -1132,7 +1133,8 @@ int cmd_repack(int argc,
 	if (geometry.split_factor) {
 		if (pack_everything)
 			die(_("options '%s' and '%s' cannot be used together"), "--geometric", "-A/-a");
-		init_pack_geometry(&geometry, &existing, &po_args);
+		init_pack_geometry(&geometry, &existing, &po_args,
+				   pack_kept_objects);
 		split_pack_geometry(&geometry);
 	}
 
