@@ -142,7 +142,8 @@ struct generated_pack_data {
 	struct tempfile *tempfiles[ARRAY_SIZE(exts)];
 };
 
-static struct generated_pack_data *populate_pack_exts(const char *name)
+static struct generated_pack_data *populate_pack_exts(const char *name,
+						      const char *packtmp)
 {
 	struct stat statbuf;
 	struct strbuf path = STRBUF_INIT;
@@ -173,6 +174,39 @@ static int has_pack_ext(const struct generated_pack_data *data,
 		return !!data->tempfiles[i];
 	}
 	BUG("unknown pack extension: '%s'", ext);
+}
+
+static void install_generated_pack(struct generated_pack_data *data,
+				   const char *packdir, const char *packtmp,
+				   const char *name)
+{
+	size_t ext;
+
+	for (ext = 0; ext < ARRAY_SIZE(exts); ext++) {
+		char *fname;
+
+		fname = mkpathdup("%s/pack-%s%s",
+				packdir, name, exts[ext].name);
+
+		if (data->tempfiles[ext]) {
+			const char *fname_old = get_tempfile_path(data->tempfiles[ext]);
+			struct stat statbuffer;
+
+			if (!stat(fname_old, &statbuffer)) {
+				statbuffer.st_mode &= ~(S_IWUSR | S_IWGRP | S_IWOTH);
+				chmod(fname_old, statbuffer.st_mode);
+			}
+
+			if (rename_tempfile(&data->tempfiles[ext], fname))
+				die_errno(_("renaming pack to '%s' failed"), fname);
+		} else if (!exts[ext].optional)
+			die(_("pack-objects did not write a '%s' file for pack %s-%s"),
+			    exts[ext].name, packtmp, name);
+		else if (unlink(fname) < 0 && errno != ENOENT)
+			die_errno(_("could not unlink: %s"), fname);
+
+		free(fname);
+	}
 }
 
 static void repack_promisor_objects(const struct pack_objects_args *args,
@@ -227,7 +261,7 @@ static void repack_promisor_objects(const struct pack_objects_args *args,
 					  line.buf);
 		write_promisor_file(promisor_name, NULL, 0);
 
-		item->util = populate_pack_exts(item->string);
+		item->util = populate_pack_exts(item->string, packtmp);
 
 		free(promisor_name);
 	}
@@ -846,7 +880,7 @@ static int finish_pack_objects_cmd(struct child_process *cmd,
 		 */
 		if (local) {
 			item = string_list_append(names, line.buf);
-			item->util = populate_pack_exts(line.buf);
+			item->util = populate_pack_exts(line.buf, packtmp);
 		}
 	}
 	fclose(out);
@@ -1024,7 +1058,7 @@ int cmd_repack(int argc,
 	struct existing_packs existing = EXISTING_PACKS_INIT;
 	struct pack_geometry geometry = { 0 };
 	struct tempfile *refs_snapshot = NULL;
-	int i, ext, ret;
+	int i, ret;
 	int show_progress;
 	char **midx_pack_names = NULL;
 	size_t midx_pack_names_nr = 0;
@@ -1411,31 +1445,7 @@ int cmd_repack(int argc,
 	for_each_string_list_item(item, &names) {
 		struct generated_pack_data *data = item->util;
 
-		for (ext = 0; ext < ARRAY_SIZE(exts); ext++) {
-			char *fname;
-
-			fname = mkpathdup("%s/pack-%s%s",
-					packdir, item->string, exts[ext].name);
-
-			if (data->tempfiles[ext]) {
-				const char *fname_old = get_tempfile_path(data->tempfiles[ext]);
-				struct stat statbuffer;
-
-				if (!stat(fname_old, &statbuffer)) {
-					statbuffer.st_mode &= ~(S_IWUSR | S_IWGRP | S_IWOTH);
-					chmod(fname_old, statbuffer.st_mode);
-				}
-
-				if (rename_tempfile(&data->tempfiles[ext], fname))
-					die_errno(_("renaming pack to '%s' failed"), fname);
-			} else if (!exts[ext].optional)
-				die(_("pack-objects did not write a '%s' file for pack %s-%s"),
-				    exts[ext].name, packtmp, item->string);
-			else if (unlink(fname) < 0 && errno != ENOENT)
-				die_errno(_("could not unlink: %s"), fname);
-
-			free(fname);
-		}
+		install_generated_pack(data, packdir, packtmp, item->string);
 	}
 	/* End of pack replacement. */
 
