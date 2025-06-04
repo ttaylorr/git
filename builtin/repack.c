@@ -388,7 +388,8 @@ static struct packed_git *geometry_preferred_pack(struct pack_geometry *geometry
 
 static void geometry_remove_redundant_packs(struct pack_geometry *geometry,
 					    struct string_list *names,
-					    struct existing_packs *existing)
+					    struct existing_packs *existing,
+					    const char *packdir)
 {
 	struct strbuf buf = STRBUF_INIT;
 	uint32_t i;
@@ -1397,7 +1398,7 @@ int cmd_repack(int argc,
 
 		if (geometry.split_factor)
 			geometry_remove_redundant_packs(&geometry, &names,
-							&existing);
+							&existing, packdir);
 		if (show_progress)
 			opts |= PRUNE_PACKED_VERBOSE;
 		prune_packed_objects(opts);
