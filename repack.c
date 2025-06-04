@@ -5,8 +5,10 @@
 #include "dir.h"
 #include "midx.h"
 #include "packfile.h"
+#include "path.h"
 #include "repack.h"
 #include "run-command.h"
+#include "tempfile.h"
 
 #define DELETE_PACK 1
 #define RETAIN_PACK 2
@@ -209,4 +211,86 @@ void collect_pack_filenames(struct existing_packs *existing,
 	string_list_sort(&existing->non_kept_packs);
 	string_list_sort(&existing->cruft_packs);
 	strbuf_release(&buf);
+}
+
+static struct {
+	const char *name;
+	unsigned optional:1;
+} exts[] = {
+	{".pack"},
+	{".rev", 1},
+	{".mtimes", 1},
+	{".bitmap", 1},
+	{".promisor", 1},
+	{".idx"},
+};
+
+struct generated_pack_data {
+	struct tempfile *tempfiles[ARRAY_SIZE(exts)];
+};
+
+struct generated_pack_data *populate_pack_exts(const char *name,
+					       const char *packtmp)
+{
+	struct stat statbuf;
+	struct strbuf path = STRBUF_INIT;
+	struct generated_pack_data *data = xcalloc(1, sizeof(*data));
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(exts); i++) {
+		strbuf_reset(&path);
+		strbuf_addf(&path, "%s-%s%s", packtmp, name, exts[i].name);
+
+		if (stat(path.buf, &statbuf))
+			continue;
+
+		data->tempfiles[i] = register_tempfile(path.buf);
+	}
+
+	strbuf_release(&path);
+	return data;
+}
+
+int has_pack_ext(const struct generated_pack_data *data, const char *ext)
+{
+	int i;
+	for (i = 0; i < ARRAY_SIZE(exts); i++) {
+		if (strcmp(exts[i].name, ext))
+			continue;
+		return !!data->tempfiles[i];
+	}
+	BUG("unknown pack extension: '%s'", ext);
+}
+
+void install_generated_pack(struct generated_pack_data *data,
+			    const char *packdir, const char *packtmp,
+			    const char *name)
+{
+	size_t ext;
+
+	for (ext = 0; ext < ARRAY_SIZE(exts); ext++) {
+		char *fname;
+
+		fname = mkpathdup("%s/pack-%s%s",
+				packdir, name, exts[ext].name);
+
+		if (data->tempfiles[ext]) {
+			const char *fname_old = get_tempfile_path(data->tempfiles[ext]);
+			struct stat statbuffer;
+
+			if (!stat(fname_old, &statbuffer)) {
+				statbuffer.st_mode &= ~(S_IWUSR | S_IWGRP | S_IWOTH);
+				chmod(fname_old, statbuffer.st_mode);
+			}
+
+			if (rename_tempfile(&data->tempfiles[ext], fname))
+				die_errno(_("renaming pack to '%s' failed"), fname);
+		} else if (!exts[ext].optional)
+			die(_("pack-objects did not write a '%s' file for pack %s-%s"),
+			    exts[ext].name, packtmp, name);
+		else if (unlink(fname) < 0 && errno != ENOENT)
+			die_errno(_("could not unlink: %s"), fname);
+
+		free(fname);
+	}
 }
