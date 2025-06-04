@@ -351,7 +351,7 @@ static void split_pack_geometry(struct pack_geometry *geometry)
 	geometry->split = split;
 }
 
-static struct packed_git *get_preferred_pack(struct pack_geometry *geometry)
+static struct packed_git *geometry_preferred_pack(struct pack_geometry *geometry)
 {
 	uint32_t i;
 
@@ -677,7 +677,7 @@ static int write_midx_included_packs(struct string_list *include,
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	struct string_list_item *item;
-	struct packed_git *preferred = get_preferred_pack(geometry);
+	struct packed_git *preferred = geometry_preferred_pack(geometry);
 	FILE *in;
 	int ret;
 
