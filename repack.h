@@ -2,7 +2,9 @@
 #define REPACK_H
 
 #include "list-objects-filter-options.h"
+#include "string-list.h"
 
+struct packed_git;
 struct child_process;
 
 struct pack_objects_args {
@@ -28,5 +30,46 @@ void prepare_pack_objects(struct child_process *cmd,
 			  const char *out);
 
 void pack_objects_args_release(struct pack_objects_args *args);
+
+struct existing_packs {
+	struct string_list kept_packs;
+	struct string_list non_kept_packs;
+	struct string_list cruft_packs;
+};
+
+#define EXISTING_PACKS_INIT { \
+	.kept_packs = STRING_LIST_INIT_DUP, \
+	.non_kept_packs = STRING_LIST_INIT_DUP, \
+	.cruft_packs = STRING_LIST_INIT_DUP, \
+}
+
+int has_existing_non_kept_packs(const struct existing_packs *existing);
+
+void pack_mark_for_deletion(struct string_list_item *item);
+void pack_unmark_for_deletion(struct string_list_item *item);
+int pack_is_marked_for_deletion(struct string_list_item *item);
+
+void pack_mark_retained(struct string_list_item *item);
+int pack_is_retained(struct string_list_item *item);
+void retain_cruft_pack(struct existing_packs *existing,
+		       struct packed_git *cruft);
+
+void mark_packs_for_deletion(struct existing_packs *existing,
+			     struct string_list *names);
+
+void remove_redundant_pack(const char *dir_name, const char *base_name);
+void remove_redundant_existing_packs(struct existing_packs *existing,
+				     const char *packdir);
+
+/*
+ * Adds all packs hex strings (pack-$HASH) to either packs->non_kept
+ * or packs->kept based on whether each pack has a corresponding
+ * .keep file or not.  Packs without a .keep file are not to be kept
+ * if we are going to pack everything into one file.
+ */
+void collect_pack_filenames(struct existing_packs *existing,
+			    const struct string_list *extra_keep);
+
+void existing_packs_release(struct existing_packs *existing);
 
 #endif /* REPACK_H */
