@@ -779,37 +779,6 @@ static void remove_redundant_bitmaps(struct string_list *include,
 	strbuf_release(&path);
 }
 
-static int finish_pack_objects_cmd(struct child_process *cmd,
-				   struct string_list *names,
-				   const char *packtmp,
-				   int local)
-{
-	FILE *out;
-	struct strbuf line = STRBUF_INIT;
-
-	out = xfdopen(cmd->out, "r");
-	while (strbuf_getline_lf(&line, out) != EOF) {
-		struct string_list_item *item;
-
-		if (line.len != the_hash_algo->hexsz)
-			die(_("repack: Expecting full hex object ID lines only "
-			      "from pack-objects."));
-		/*
-		 * Avoid putting packs written outside of the repository in the
-		 * list of names.
-		 */
-		if (local) {
-			item = string_list_append(names, line.buf);
-			item->util = populate_pack_exts(line.buf, packtmp);
-		}
-	}
-	fclose(out);
-
-	strbuf_release(&line);
-
-	return finish_command(cmd);
-}
-
 static int write_filtered_pack(const struct pack_objects_args *args,
 			       const char *destination,
 			       const char *pack_prefix,

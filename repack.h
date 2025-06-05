@@ -29,6 +29,10 @@ void prepare_pack_objects(struct child_process *cmd,
 			  const struct pack_objects_args *args,
 			  const char *out);
 
+int finish_pack_objects_cmd(struct child_process *cmd,
+			    struct string_list *names,
+			    const char *packtmp, int local);
+
 void pack_objects_args_release(struct pack_objects_args *args);
 
 struct existing_packs {

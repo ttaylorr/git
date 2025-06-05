@@ -47,6 +47,36 @@ void prepare_pack_objects(struct child_process *cmd,
 	cmd->out = -1;
 }
 
+int finish_pack_objects_cmd(struct child_process *cmd,
+			    struct string_list *names,
+			    const char *packtmp, int local)
+{
+	FILE *out;
+	struct strbuf line = STRBUF_INIT;
+
+	out = xfdopen(cmd->out, "r");
+	while (strbuf_getline_lf(&line, out) != EOF) {
+		struct string_list_item *item;
+
+		if (line.len != the_hash_algo->hexsz)
+			die(_("repack: Expecting full hex object ID lines only "
+			      "from pack-objects."));
+		/*
+		 * Avoid putting packs written outside of the repository in the
+		 * list of names.
+		 */
+		if (local) {
+			item = string_list_append(names, line.buf);
+			item->util = populate_pack_exts(line.buf, packtmp);
+		}
+	}
+	fclose(out);
+
+	strbuf_release(&line);
+
+	return finish_command(cmd);
+}
+
 void pack_objects_args_release(struct pack_objects_args *args)
 {
 	free(args->window);
