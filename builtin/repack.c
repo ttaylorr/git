@@ -781,6 +781,7 @@ static void remove_redundant_bitmaps(struct string_list *include,
 
 static int finish_pack_objects_cmd(struct child_process *cmd,
 				   struct string_list *names,
+				   const char *packtmp,
 				   int local)
 {
 	FILE *out;
@@ -856,7 +857,7 @@ static int write_filtered_pack(const struct pack_objects_args *args,
 		fprintf(in, "%s%s.pack\n", caret, item->string);
 	fclose(in);
 
-	return finish_pack_objects_cmd(&cmd, names, local);
+	return finish_pack_objects_cmd(&cmd, names, packtmp, local);
 }
 
 static void combine_small_cruft_packs(FILE *in, size_t combine_cruft_below_size,
@@ -952,7 +953,7 @@ static int write_cruft_pack(const struct pack_objects_args *args,
 		fprintf(in, "%s.pack\n", item->string);
 	fclose(in);
 
-	return finish_pack_objects_cmd(&cmd, names, local);
+	return finish_pack_objects_cmd(&cmd, names, packtmp, local);
 }
 
 static const char *find_pack_prefix(const char *packdir, const char *packtmp)
@@ -1241,7 +1242,7 @@ int cmd_repack(int argc,
 		fclose(in);
 	}
 
-	ret = finish_pack_objects_cmd(&cmd, &names, 1);
+	ret = finish_pack_objects_cmd(&cmd, &names, packtmp, 1);
 	if (ret)
 		goto cleanup;
 
