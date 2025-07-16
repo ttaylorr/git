@@ -48,6 +48,28 @@ test_expect_success 'last-modified non-recursive' '
 	EOF
 '
 
+test_expect_success 'last-modified extended output' '
+	check_last_modified --extended <<-\EOF
+	path a
+	commit 3
+	tree e9a947598482012e54c9c5d3635d5b526b43a6a4
+	parent 2
+	author A U Thor <author@example.com> 1112912113 -0700
+	committer C O Mitter <committer@example.com> 1112912113 -0700
+
+	    3
+
+	path file
+	commit 1
+	tree f27c6ae26adb8396d3861976ba268f87ad8afa0b
+	author A U Thor <author@example.com> 1112911993 -0700
+	committer C O Mitter <committer@example.com> 1112911993 -0700
+
+	    1
+
+	EOF
+'
+
 test_expect_success 'last-modified recursive' '
 	check_last_modified -r <<-\EOF
 	3 a/b/file

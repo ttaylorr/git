@@ -12,6 +12,7 @@
 #include "object-name.h"
 #include "object.h"
 #include "parse-options.h"
+#include "pretty.h"
 #include "quote.h"
 #include "repository.h"
 #include "revision.h"
@@ -39,6 +40,7 @@ struct last_modified {
 	struct hashmap paths;
 	struct rev_info rev;
 	int recursive, tree_in_recursive;
+	int extended;
 };
 
 static void last_modified_release(struct last_modified *lm)
@@ -244,14 +246,42 @@ static void show_entry(const char *path, const struct commit *commit, void *d)
 {
 	struct last_modified *lm = d;
 
-	if (commit->object.flags & BOUNDARY)
-		putchar('^');
-	printf("%s\t", oid_to_hex(&commit->object.oid));
+	if (lm->extended) {
+		struct strbuf buf = STRBUF_INIT;
+		struct pretty_print_context pp = { 0 };
 
-	if (lm->rev.diffopt.line_termination)
-		write_name_quoted(path, stdout, '\n');
-	else
-		printf("%s%c", path, '\0');
+		pp.abbrev = lm->rev.abbrev;
+		pp.date_mode = lm->rev.date_mode;
+		pp.date_mode_explicit = lm->rev.date_mode_explicit;
+		pp.fmt = CMIT_FMT_RAW;
+		pp.color = lm->rev.diffopt.use_color;
+		pp.rev = &lm->rev;
+		pp.no_indent = !lm->rev.diffopt.line_termination;
+
+		pretty_print_commit(&pp, commit, &buf);
+
+		printf("path ");
+		if (lm->rev.diffopt.line_termination)
+			write_name_quoted(path, stdout, '\n');
+		else
+			printf("%s%c", path, '\0');
+
+		printf("commit %s%s\n",
+		       (commit->object.flags & BOUNDARY) ? "^" : "",
+		       oid_to_hex(&commit->object.oid));
+		printf("%s%c", buf.buf, lm->rev.diffopt.line_termination);
+
+		strbuf_release(&buf);
+	} else {
+		printf("%s%s\t",
+		       (commit->object.flags & BOUNDARY) ? "^" : "",
+		       oid_to_hex(&commit->object.oid));
+
+		if (lm->rev.diffopt.line_termination)
+			write_name_quoted(path, stdout, '\n');
+		else
+			printf("%s%c", path, '\0');
+	}
 
 	fflush(stdout);
 }
@@ -306,6 +336,8 @@ int cmd_last_modified(int argc, const char **argv, const char *prefix,
 			 N_("recurse into subtrees")),
 		OPT_BOOL('t', "tree-in-recursive", &lm.tree_in_recursive,
 			 N_("recurse into subtrees and include the tree entries too")),
+		OPT_BOOL(0, "extended", &lm.extended,
+			 N_("extended format will include the commit message in the output")),
 		OPT_END()
 	};
 
