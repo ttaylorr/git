@@ -6,6 +6,8 @@
 
 struct packed_git;
 struct child_process;
+struct tempfile;
+struct pack_geometry;
 
 struct pack_objects_args {
 	char *window;
@@ -84,5 +86,17 @@ int has_pack_ext(const struct generated_pack_data *data, const char *ext);
 void install_generated_pack(struct generated_pack_data *data,
 			    const char *packdir, const char *packtmp,
 			    const char *name);
+
+void midx_snapshot_refs(struct tempfile *f);
+int midx_has_unknown_packs(char **midx_pack_names,
+			   size_t midx_pack_names_nr,
+			   struct string_list *include,
+			   struct pack_geometry *geometry,
+			   struct existing_packs *existing);
+int write_midx_included_packs(struct string_list *include,
+			      struct pack_geometry *geometry,
+			      struct string_list *names,
+			      const char *refs_snapshot,
+			      int show_progress, int write_bitmaps);
 
 #endif /* REPACK_H */
