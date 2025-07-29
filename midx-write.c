@@ -1572,6 +1572,14 @@ int write_midx_file_only(struct repository *r, const char *object_dir,
 	return write_midx_internal(&opts);
 }
 
+int write_midx_file_compact(struct repository *r, const char *object_dir,
+			    struct multi_pack_index *from,
+			    struct multi_pack_index *to,
+			    unsigned flags)
+{
+	BUG("not yet implemented!");
+}
+
 int expire_midx_packs(struct repository *r, const char *object_dir, unsigned flags)
 {
 	uint32_t i, *count, result = 0;
