@@ -3,6 +3,7 @@
 #include "abspath.h"
 #include "config.h"
 #include "gettext.h"
+#include "hex.h"
 #include "parse-options.h"
 #include "midx.h"
 #include "strbuf.h"
@@ -15,6 +16,10 @@
 	N_("git multi-pack-index [<options>] write [--preferred-pack=<pack>]" \
 	   "[--refs-snapshot=<path>]")
 
+#define BUILTIN_MIDX_COMPACT_USAGE \
+	N_("git multi-pack-index [<options>] compact [--bitmap] [--progress] " \
+	   "[--incremental] <from> <to>")
+
 #define BUILTIN_MIDX_VERIFY_USAGE \
 	N_("git multi-pack-index [<options>] verify")
 
@@ -26,6 +31,10 @@
 
 static char const * const builtin_multi_pack_index_write_usage[] = {
 	BUILTIN_MIDX_WRITE_USAGE,
+	NULL
+};
+static char const * const builtin_multi_pack_index_compact_usage[] = {
+	BUILTIN_MIDX_COMPACT_USAGE,
 	NULL
 };
 static char const * const builtin_multi_pack_index_verify_usage[] = {
@@ -42,6 +51,7 @@ static char const * const builtin_multi_pack_index_repack_usage[] = {
 };
 static char const * const builtin_multi_pack_index_usage[] = {
 	BUILTIN_MIDX_WRITE_USAGE,
+	BUILTIN_MIDX_COMPACT_USAGE,
 	BUILTIN_MIDX_VERIFY_USAGE,
 	BUILTIN_MIDX_EXPIRE_USAGE,
 	BUILTIN_MIDX_REPACK_USAGE,
@@ -183,6 +193,62 @@ static int cmd_multi_pack_index_write(int argc, const char **argv,
 	return ret;
 }
 
+static int cmd_multi_pack_index_compact(int argc, const char **argv,
+					const char *prefix,
+					struct repository *repo)
+{
+	struct multi_pack_index *m;
+	struct multi_pack_index *from_midx = NULL;
+	struct multi_pack_index *to_midx = NULL;
+	struct object_id from, to;
+
+	struct option *options;
+	static struct option builtin_multi_pack_index_compact_options[] = {
+		OPT_BIT(0, "bitmap", &opts.flags, N_("write multi-pack bitmap"),
+			MIDX_WRITE_BITMAP | MIDX_WRITE_REV_INDEX),
+		OPT_BIT(0, "progress", &opts.flags,
+			N_("force progress reporting"), MIDX_PROGRESS),
+		OPT_BIT(0, "incremental", &opts.flags,
+			N_("write a new incremental MIDX"), MIDX_WRITE_INCREMENTAL),
+		OPT_END(),
+	};
+
+	git_config(git_multi_pack_index_write_config, NULL);
+
+	options = add_common_options(builtin_multi_pack_index_compact_options);
+
+	trace2_cmd_mode(argv[0]);
+
+	if (isatty(2))
+		opts.flags |= MIDX_PROGRESS;
+	argc = parse_options(argc, argv, prefix,
+			     options, builtin_multi_pack_index_compact_usage,
+			     0);
+	if (argc != 2)
+		usage_with_options(builtin_multi_pack_index_compact_usage,
+				   options);
+
+	FREE_AND_NULL(options);
+
+	if (get_oid_hex_algop(argv[0], &from, repo->hash_algo))
+		die(_("could not parse MIDX 'from': %s"), argv[0]);
+	if (get_oid_hex_algop(argv[1], &to, repo->hash_algo))
+		die(_("could not parse MIDX 'to': %s"), argv[1]);
+
+	m = load_multi_pack_index(repo, opts.object_dir, 1);
+	for (; m && !(from_midx && to_midx); m = m->base_midx) {
+		const unsigned char *csum = get_midx_checksum(m);
+
+		if (!from_midx && hasheq(csum, from.hash, repo->hash_algo))
+			from_midx = m;
+		if (!to_midx && hasheq(csum, to.hash, repo->hash_algo))
+			to_midx = m;
+	}
+
+	return write_midx_file_compact(repo, opts.object_dir, from_midx,
+				       to_midx, opts.flags);
+}
+
 static int cmd_multi_pack_index_verify(int argc, const char **argv,
 				       const char *prefix,
 				       struct repository *repo UNUSED)
@@ -282,6 +348,7 @@ int cmd_multi_pack_index(int argc,
 	struct option builtin_multi_pack_index_options[] = {
 		OPT_SUBCOMMAND("repack", &fn, cmd_multi_pack_index_repack),
 		OPT_SUBCOMMAND("write", &fn, cmd_multi_pack_index_write),
+		OPT_SUBCOMMAND("compact", &fn, cmd_multi_pack_index_compact),
 		OPT_SUBCOMMAND("verify", &fn, cmd_multi_pack_index_verify),
 		OPT_SUBCOMMAND("expire", &fn, cmd_multi_pack_index_expire),
 		OPT_END(),

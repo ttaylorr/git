@@ -202,6 +202,15 @@ static struct multi_pack_index *load_multi_pack_index_one(struct repository *r,
 			die(_("multi-pack-index pack-name chunk is too short"));
 		cur_pack_name = end + 1;
 
+		/*
+		 * For MIDX compaction, relax this condition to allow for
+		 * storing the pack names in non-lexicographic order, and:
+		 *
+		 *  - sort the pack_names array so we can binary search it
+		 *    efficiently in midx_contains_pack_1() below
+		 *
+		 *  - ???
+		 */
 		if (i && strcmp(m->pack_names[i], m->pack_names[i - 1]) <= 0)
 			die(_("multi-pack-index pack names out of order: '%s' before '%s'"),
 			      m->pack_names[i - 1],

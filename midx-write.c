@@ -109,6 +109,10 @@ struct write_midx_context {
 	int incremental;
 	uint32_t num_multi_pack_indexes_before;
 
+	struct multi_pack_index *compact_from;
+	struct multi_pack_index *compact_to;
+	int compact;
+
 	struct string_list *to_include;
 
 	struct repository *repo;
@@ -173,6 +177,79 @@ static void add_pack_to_midx(const char *full_path, size_t full_path_len,
 
 		fill_pack_info(&ctx->info[ctx->nr], p, file_name, ctx->nr);
 		ctx->nr++;
+	}
+}
+
+static uint32_t compactible_packs_between(const struct multi_pack_index *from,
+					  const struct multi_pack_index *to)
+{
+	uint32_t nr;
+
+	if (!from)
+		BUG("cannot compact MIDXs without lower bound");
+	if (!to)
+		BUG("cannot compact MIDXs without upper bound");
+
+	nr = u32_add(to->num_packs, to->num_packs_in_base);
+	if (nr < from->num_packs_in_base)
+		BUG("unexpected number of packs in base for compacting: %u < %u",
+		    nr, from->num_packs_in_base);
+
+	return nr - from->num_packs_in_base;
+}
+
+static void compact_midx_pack_range(struct write_midx_context *ctx)
+{
+	struct multi_pack_index *m;
+	uint32_t compacted_packs_nr;
+
+	if (!ctx->compact)
+		BUG("cannot call compact_midx_pack_range without compacting");
+
+	ASSERT(!ctx->nr);
+
+	compacted_packs_nr = compactible_packs_between(ctx->compact_from,
+						       ctx->compact_to);
+
+	ALLOC_GROW(ctx->info, compacted_packs_nr, ctx->alloc);
+
+	/*
+	 * add packs from compacted range to the new midx, preserving their pack
+	 * IDs
+	 */
+	for (m = ctx->compact_to; m != ctx->compact_from->base_midx;
+	     m = m->base_midx) {
+		uint32_t i;
+		uint32_t pack_int_id;
+
+		for (i = 0; i < m->num_packs; i++) {
+			struct packed_git *p;
+			uint32_t pos = compacted_packs_nr - ctx->nr - 1;
+
+			pack_int_id = i + m->num_packs_in_base;
+
+			if (prepare_midx_pack(ctx->repo, m, pack_int_id))
+				die(_("cannot load pack %"PRIu32" from MIDX"),
+				    pack_int_id);
+
+			p = nth_midxed_pack(m, pack_int_id);
+			if (!p)
+				BUG("failed to get pack %u from MIDX",
+				    pack_int_id);
+
+			if (open_pack_index(p)) {
+				warning(_("failed to open pack-index '%s'"),
+					p->pack_name);
+				close_pack(p);
+				free(p);
+				continue;
+			}
+
+			fill_pack_info(&ctx->info[pos], p, p->pack_name,
+				       pack_int_id);
+
+			ctx->nr++;
+		}
 	}
 }
 
@@ -331,6 +408,11 @@ static void midx_fanout_add_pack_fanout(struct midx_fanout *fanout,
 static void compute_sorted_entries(struct write_midx_context *ctx,
 				   uint32_t start_pack)
 {
+	/*
+	 * When compacting, for any given object in the compacted range, keep
+	 * its pack_int_id the same in the final MIDX as it was for whichever
+	 * pack represents that object in the range [from, to].
+	 */
 	uint32_t cur_fanout, cur_pack, cur_object;
 	size_t alloc_objects, total_objects = 0;
 	struct midx_fanout fanout = { 0 };
@@ -346,9 +428,48 @@ static void compute_sorted_entries(struct write_midx_context *ctx,
 	 */
 	alloc_objects = fanout.alloc = total_objects > 3200 ? total_objects / 200 : 16;
 
-	ALLOC_ARRAY(fanout.entries, fanout.alloc);
 	ALLOC_ARRAY(ctx->entries, alloc_objects);
 	ctx->entries_nr = 0;
+
+	if (ctx->compact) {
+		uint32_t from = ctx->compact_from->num_objects_in_base;
+		uint32_t to = ctx->compact_to->num_objects +
+			      ctx->compact_to->num_objects_in_base;
+
+		for (uint32_t i = from; i < to; i++) {
+			struct pack_midx_entry *entry;
+
+			ALLOC_GROW(ctx->entries, st_add(ctx->entries_nr, 1),
+				   alloc_objects);
+
+			entry = &ctx->entries[ctx->entries_nr++];
+			if (nth_midxed_pack_midx_entry(ctx->compact_to, entry,
+						       i))
+				die(_("failed to get MIDX entry %"PRIu32), i);
+		}
+
+		/*
+		 * At this point, ctx->entries contains the set of
+		 * objects to write into the compacted MIDX. This is
+		 * equivalent to the union of objects in the MIDX
+		 * layer(s) between 'from' and 'to'.
+		 *
+		 * Since we added these entries in the order they appear
+		 * in via the original MIDX chain, there are groups
+		 * (corresponding one-to-one with the original MIDX
+		 * layers) within ctx->entries which are within lexical
+		 * order.
+		 *
+		 * As a result, if 'from' and 'to' aren't the same
+		 * layer, then we must sort ctx->entries to ensure that
+		 * the entire array is in lexical order.
+		 */
+		QSORT(ctx->entries, ctx->entries_nr, midx_oid_compare);
+
+		return;
+	}
+
+	ALLOC_ARRAY(fanout.entries, fanout.alloc);
 
 	for (cur_fanout = 0; cur_fanout < 256; cur_fanout++) {
 		fanout.nr = 0;
@@ -409,10 +530,12 @@ static int write_midx_pack_names(struct hashfile *f, void *data)
 		if (ctx->info[i].expired)
 			continue;
 
+#if 0
 		if (i && strcmp(ctx->info[i].pack_name, ctx->info[i - 1].pack_name) <= 0)
 			BUG("incorrect pack-file order: %s before %s",
 			    ctx->info[i - 1].pack_name,
 			    ctx->info[i].pack_name);
+#endif
 
 		writelen = strlen(ctx->info[i].pack_name) + 1;
 		hashwrite(f, ctx->info[i].pack_name, writelen);
@@ -619,6 +742,10 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 	for (i = 0; i < ctx->entries_nr; i++) {
 		struct pack_midx_entry *e = &ctx->entries[i];
 		data[i].nr = i;
+		/*
+		 * When compacting, any given object's pack_int_id MUST remain
+		 * the same before/after compaction.
+		 */
 		data[i].pack = ctx->pack_perm[e->pack_int_id];
 		if (!e->preferred)
 			data[i].pack |= (1U << 31);
@@ -1071,12 +1198,24 @@ struct write_midx_opts {
 	struct string_list *packs_to_include;
 	struct string_list *packs_to_drop;
 
+	struct {
+		struct multi_pack_index *from;
+		struct multi_pack_index *to;
+	} compact;
+
 	const char *object_dir;
 	const char *preferred_pack_name;
 	const char *refs_snapshot;
 	unsigned flags;
 
 };
+
+static int midx_hashcmp(const struct multi_pack_index *a,
+			const struct multi_pack_index *b,
+			const struct git_hash_algo *algop)
+{
+	return hashcmp(get_midx_checksum(a), get_midx_checksum(b), algop);
+}
 
 static int write_midx_internal(struct write_midx_opts *opts)
 {
@@ -1092,6 +1231,7 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	int dropped_packs = 0;
 	int result = 0;
 	const char **keep_hashes = NULL;
+	size_t keep_hashes_nr = 0;
 	struct chunkfile *cf;
 
 	trace2_region_enter("midx", "write_midx_internal", opts->r);
@@ -1099,6 +1239,19 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	ctx.repo = opts->r;
 
 	ctx.incremental = !!(opts->flags & MIDX_WRITE_INCREMENTAL);
+	ctx.compact = !!(opts->flags & MIDX_WRITE_COMPACT);
+
+	if (ctx.compact) {
+		if (!opts->compact.from)
+			BUG("expected non-NULL 'from' MIDX for compacting");
+		if (!opts->compact.to)
+			BUG("expected non-NULL 'to' MIDX for compacting");
+		if (opts->preferred_pack_name)
+			BUG("cannot specify a preferred pack during compaction");
+
+		ctx.compact_from = opts->compact.from;
+		ctx.compact_to = opts->compact.to;
+	}
 
 	if (ctx.incremental)
 		strbuf_addf(&midx_name,
@@ -1126,10 +1279,17 @@ static int write_midx_internal(struct write_midx_opts *opts)
 			 */
 			if (ctx.incremental)
 				ctx.base_midx = m;
-			else if (!opts->packs_to_include)
+			if (!opts->packs_to_include)
 				ctx.m = m;
 		}
 	}
+
+	/*
+	 * If compacting MIDX layer(s) in range ['from', 'to'], then the
+	 * compacted MIDX will share the same base as 'from'.
+	 */
+	if (ctx.compact)
+		ctx.base_midx = opts->compact.from->base_midx;
 
 	ctx.nr = 0;
 	ctx.alloc = ctx.m ? ctx.m->num_packs + ctx.m->num_packs_in_base : 16;
@@ -1149,9 +1309,9 @@ static int write_midx_internal(struct write_midx_opts *opts)
 			ctx.num_multi_pack_indexes_before++;
 			m = m->base_midx;
 		}
-	} else if (ctx.m && fill_packs_from_midx(&ctx,
-						 opts->preferred_pack_name,
-						 opts->flags) < 0) {
+	} else if (ctx.m && !ctx.compact &&
+		   fill_packs_from_midx(&ctx, opts->preferred_pack_name,
+					opts->flags) < 0) {
 		goto cleanup;
 	}
 
@@ -1164,10 +1324,16 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	else
 		ctx.progress = NULL;
 
-	ctx.to_include = opts->packs_to_include;
-
-	for_each_file_in_pack_dir(opts->object_dir, add_pack_to_midx, &ctx);
+	if (ctx.compact) {
+		compact_midx_pack_range(&ctx);
+	} else {
+		ctx.to_include = opts->packs_to_include;
+		for_each_file_in_pack_dir(opts->object_dir, add_pack_to_midx,
+					  &ctx);
+	}
 	stop_progress(&ctx.progress);
+
+	/* 2025-07-29: stopped here for the day */
 
 	if ((ctx.m && ctx.nr == ctx.m->num_packs + ctx.m->num_packs_in_base) &&
 	    !ctx.incremental &&
@@ -1269,11 +1435,14 @@ static int write_midx_internal(struct write_midx_opts *opts)
 			ctx.large_offsets_needed = 1;
 	}
 
-	QSORT(ctx.info, ctx.nr, pack_info_compare);
+	if (!ctx.compact)
+		QSORT(ctx.info, ctx.nr, pack_info_compare);
 
 	if (opts->packs_to_drop && opts->packs_to_drop->nr) {
 		int drop_index = 0;
 		int missing_drops = 0;
+
+		ASSERT(!ctx.compact);
 
 		for (i = 0; i < ctx.nr && drop_index < opts->packs_to_drop->nr; i++) {
 			int cmp = strcmp(ctx.info[i].pack_name,
@@ -1310,10 +1479,18 @@ static int write_midx_internal(struct write_midx_opts *opts)
 		if (ctx.info[i].expired) {
 			dropped_packs++;
 			ctx.pack_perm[ctx.info[i].orig_pack_int_id] = PACK_EXPIRED;
+			BUG("shouldn't be here");
+		} else if (ctx.compact) {
+			ctx.pack_perm[i] = ctx.info[i].orig_pack_int_id;
 		} else {
 			ctx.pack_perm[ctx.info[i].orig_pack_int_id] = i - dropped_packs;
 		}
 	}
+
+#if 0
+	if (ctx.compact)
+		abort();
+#endif
 
 	for (i = 0; i < ctx.nr; i++) {
 		if (ctx.info[i].expired)
@@ -1324,10 +1501,12 @@ static int write_midx_internal(struct write_midx_opts *opts)
 
 	/* Check that the preferred pack wasn't expired (if given). */
 	if (opts->preferred_pack_name) {
-		struct pack_info *preferred = bsearch(opts->preferred_pack_name,
-						      ctx.info, ctx.nr,
-						      sizeof(*ctx.info),
-						      idx_or_pack_name_cmp);
+		struct pack_info *preferred;
+
+		ASSERT(!ctx.compact);
+
+		preferred = bsearch(opts->preferred_pack_name, ctx.info, ctx.nr,
+				    sizeof(*ctx.info), idx_or_pack_name_cmp);
 		if (preferred) {
 			uint32_t perm = ctx.pack_perm[preferred->orig_pack_int_id];
 			if (perm == PACK_EXPIRED)
@@ -1430,6 +1609,10 @@ static int write_midx_internal(struct write_midx_opts *opts)
 
 		prepare_midx_packing_data(&pdata, &ctx);
 
+		/*
+		 * TODO(@ttaylorr): do we want to keep the same bitmaps when
+		 * compacting?
+		 */
 		commits = find_commits_for_midx_bitmap(&commits_nr,
 						       opts->refs_snapshot,
 						       &ctx);
@@ -1461,7 +1644,24 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	 * have been freed in the previous if block.
 	 */
 
-	CALLOC_ARRAY(keep_hashes, ctx.num_multi_pack_indexes_before + 1);
+	if (ctx.compact) {
+		struct multi_pack_index *m;
+
+		/*
+		 * Keep all MIDX layers excluding those in the range [from, to].
+		 */
+		for (m = ctx.compact_from->base_midx; m; m = m->base_midx)
+			keep_hashes_nr++;
+		for (m = ctx.m;
+		     m && midx_hashcmp(m, ctx.compact_to, opts->r->hash_algo);
+		     m = m->base_midx)
+			keep_hashes_nr++;
+
+		keep_hashes_nr++; /* include the compacted layer */
+	} else {
+		keep_hashes_nr = ctx.num_multi_pack_indexes_before + 1;
+	}
+	CALLOC_ARRAY(keep_hashes, keep_hashes_nr);
 
 	if (ctx.incremental) {
 		FILE *chainf = fdopen_lock_file(&lk, "w");
@@ -1487,22 +1687,53 @@ static int write_midx_internal(struct write_midx_opts *opts)
 
 		strbuf_release(&final_midx_name);
 
-		keep_hashes[ctx.num_multi_pack_indexes_before] =
-			xstrdup(hash_to_hex_algop(midx_hash, opts->r->hash_algo));
+		if (ctx.compact) {
+			struct multi_pack_index *m;
+			uint32_t num_layers_before_from = 0;
 
-		for (i = 0; i < ctx.num_multi_pack_indexes_before; i++) {
-			uint32_t j = ctx.num_multi_pack_indexes_before - i - 1;
+			for (m = ctx.compact_from->base_midx; m; m = m->base_midx)
+				num_layers_before_from++;
 
-			keep_hashes[j] = xstrdup(hash_to_hex_algop(get_midx_checksum(m),
+			m = ctx.compact_from->base_midx;
+			for (i = 0; i < num_layers_before_from; i++) {
+				uint32_t j = num_layers_before_from - i - 1;
+
+				keep_hashes[j] = xstrdup(hash_to_hex_algop(get_midx_checksum(m),
+									   opts->r->hash_algo));
+
+				m = m->base_midx;
+			}
+
+			keep_hashes[i] = xstrdup(hash_to_hex_algop(midx_hash,
 								   opts->r->hash_algo));
-			m = m->base_midx;
+			i = 0;
+			for (m = ctx.m;
+			     m && midx_hashcmp(m, ctx.compact_to, opts->r->hash_algo);
+			     m = m->base_midx)
+				keep_hashes[keep_hashes_nr - 1 - i] =
+					xstrdup(hash_to_hex_algop(get_midx_checksum(m),
+								  opts->r->hash_algo));
+		} else {
+			for (i = 0; i < ctx.num_multi_pack_indexes_before; i++) {
+				uint32_t j = ctx.num_multi_pack_indexes_before - i - 1;
+
+				keep_hashes[j] = xstrdup(hash_to_hex_algop(get_midx_checksum(m),
+									   opts->r->hash_algo));
+				m = m->base_midx;
+			}
+
+			keep_hashes[keep_hashes_nr - 1] =
+				xstrdup(hash_to_hex_algop(midx_hash, opts->r->hash_algo));
 		}
 
-		for (i = 0; i < ctx.num_multi_pack_indexes_before + 1; i++)
+		for (i = 0; i < keep_hashes_nr; i++)
 			fprintf(get_lock_file_fp(&lk), "%s\n", keep_hashes[i]);
 	} else {
-		keep_hashes[ctx.num_multi_pack_indexes_before] =
-			xstrdup(hash_to_hex_algop(midx_hash, opts->r->hash_algo));
+		ASSERT(!ctx.num_multi_pack_indexes_before);
+		ASSERT(keep_hashes_nr == 1);
+
+		keep_hashes[0] = xstrdup(hash_to_hex_algop(midx_hash,
+							   opts->r->hash_algo));
 	}
 
 	if (ctx.m || ctx.base_midx)
@@ -1511,8 +1742,7 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	if (commit_lock_file(&lk) < 0)
 		die_errno(_("could not write multi-pack-index"));
 
-	clear_midx_files(opts->r, opts->object_dir, keep_hashes,
-			 ctx.num_multi_pack_indexes_before + 1,
+	clear_midx_files(opts->r, opts->object_dir, keep_hashes, keep_hashes_nr,
 			 ctx.incremental);
 
 cleanup:
@@ -1529,7 +1759,7 @@ cleanup:
 	free(ctx.pack_perm);
 	free(ctx.pack_order);
 	if (keep_hashes) {
-		for (i = 0; i < ctx.num_multi_pack_indexes_before + 1; i++)
+		for (i = 0; i < keep_hashes_nr; i++)
 			free((char *)keep_hashes[i]);
 		free(keep_hashes);
 	}
@@ -1577,7 +1807,20 @@ int write_midx_file_compact(struct repository *r, const char *object_dir,
 			    struct multi_pack_index *to,
 			    unsigned flags)
 {
-	BUG("not yet implemented!");
+	struct write_midx_opts opts = {
+		.r = r,
+		.compact.from = from,
+		.compact.to = to,
+		.object_dir = object_dir,
+		.flags = flags | MIDX_WRITE_COMPACT,
+	};
+
+	if (!from)
+		return error("missing required 'from' MIDX for compacting");
+	if (!to)
+		return error("missing required 'to' MIDX for compacting");
+
+	return write_midx_internal(&opts);
 }
 
 int expire_midx_packs(struct repository *r, const char *object_dir, unsigned flags)
