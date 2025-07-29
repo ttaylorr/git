@@ -190,35 +190,6 @@ static void repack_promisor_objects(const struct pack_objects_args *args,
 	strbuf_release(&line);
 }
 
-static void remove_redundant_bitmaps(struct string_list *include,
-				     const char *packdir)
-{
-	struct strbuf path = STRBUF_INIT;
-	struct string_list_item *item;
-	size_t packdir_len;
-
-	strbuf_addstr(&path, packdir);
-	strbuf_addch(&path, '/');
-	packdir_len = path.len;
-
-	/*
-	 * Remove any pack bitmaps corresponding to packs which are now
-	 * included in the MIDX.
-	 */
-	for_each_string_list_item(item, include) {
-		strbuf_addstr(&path, item->string);
-		strbuf_strip_suffix(&path, ".idx");
-		strbuf_addstr(&path, ".bitmap");
-
-		if (unlink(path.buf) && errno != ENOENT)
-			warning_errno(_("could not remove stale bitmap: %s"),
-				      path.buf);
-
-		strbuf_setlen(&path, packdir_len);
-	}
-	strbuf_release(&path);
-}
-
 static int write_filtered_pack(const struct pack_objects_args *args,
 			       const char *destination,
 			       const char *pack_prefix,
@@ -781,20 +752,13 @@ int cmd_repack(int argc,
 		mark_packs_for_deletion(&existing, &names);
 
 	if (write_midx) {
-		struct string_list included = STRING_LIST_INIT_DUP;
-
-		ret = write_midx_included_packs(&included, &existing, &geometry,
+		ret = write_midx_included_packs(&existing, &geometry,
 						&names, &midx_pack_names,
 						refs_snapshot ? get_tempfile_path(refs_snapshot) : NULL,
+						packdir,
 						show_progress,
-						write_bitmaps > 0,
+						write_bitmaps,
 						midx_must_contain_cruft);
-
-		if (!ret && write_bitmaps)
-			remove_redundant_bitmaps(&included, packdir);
-
-		string_list_clear(&included, 0);
-
 		if (ret)
 			goto cleanup;
 	}

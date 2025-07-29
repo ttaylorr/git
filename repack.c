@@ -577,26 +577,56 @@ static void midx_included_packs(struct string_list *include,
 	strbuf_release(&buf);
 }
 
-int write_midx_included_packs(struct string_list *included,
-			      struct existing_packs *existing,
+static void remove_redundant_bitmaps(struct string_list *include,
+				     const char *packdir)
+{
+	struct strbuf path = STRBUF_INIT;
+	struct string_list_item *item;
+	size_t packdir_len;
+
+	strbuf_addstr(&path, packdir);
+	strbuf_addch(&path, '/');
+	packdir_len = path.len;
+
+	/*
+	 * Remove any pack bitmaps corresponding to packs which are now
+	 * included in the MIDX.
+	 */
+	for_each_string_list_item(item, include) {
+		strbuf_addstr(&path, item->string);
+		strbuf_strip_suffix(&path, ".idx");
+		strbuf_addstr(&path, ".bitmap");
+
+		if (unlink(path.buf) && errno != ENOENT)
+			warning_errno(_("could not remove stale bitmap: %s"),
+				      path.buf);
+
+		strbuf_setlen(&path, packdir_len);
+	}
+	strbuf_release(&path);
+}
+
+int write_midx_included_packs(struct existing_packs *existing,
 			      struct pack_geometry *geometry,
 			      struct string_list *names,
 			      struct string_list *midx_pack_names,
 			      const char *refs_snapshot,
+			      const char *packdir,
 			      int show_progress, int write_bitmaps,
 			      int midx_must_contain_cruft)
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	struct string_list_item *item;
 	struct packed_git *preferred = geometry_preferred_pack(geometry);
+	struct string_list include = STRING_LIST_INIT_DUP;
 	FILE *in;
-	int ret;
+	int ret = 0;
 
-	midx_included_packs(included, existing, midx_pack_names, names,
+	midx_included_packs(&include, existing, midx_pack_names, names,
 			    geometry, midx_must_contain_cruft);
 
-	if (!included->nr)
-		return 0;
+	if (!include.nr)
+		goto out;
 
 	cmd.in = -1;
 	cmd.git_cmd = 1;
@@ -609,7 +639,7 @@ int write_midx_included_packs(struct string_list *included,
 	else
 		strvec_push(&cmd.args, "--no-progress");
 
-	if (write_bitmaps)
+	if (write_bitmaps > 0)
 		strvec_push(&cmd.args, "--bitmap");
 
 	if (preferred)
@@ -653,12 +683,19 @@ int write_midx_included_packs(struct string_list *included,
 
 	ret = start_command(&cmd);
 	if (ret)
-		return ret;
+		goto out;
 
 	in = xfdopen(cmd.in, "w");
-	for_each_string_list_item(item, included)
+	for_each_string_list_item(item, &include)
 		fprintf(in, "%s\n", item->string);
 	fclose(in);
 
-	return finish_command(&cmd);
+	ret = finish_command(&cmd);
+out:
+	if (!ret && write_bitmaps)
+		remove_redundant_bitmaps(&include, packdir);
+
+	string_list_clear(&include, 0);
+
+	return ret;
 }
