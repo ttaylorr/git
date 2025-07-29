@@ -192,8 +192,7 @@ static void repack_promisor_objects(const struct pack_objects_args *args,
 
 static void midx_included_packs(struct string_list *include,
 				struct existing_packs *existing,
-				char **midx_pack_names,
-				size_t midx_pack_names_nr,
+				struct string_list *midx_pack_names,
 				struct string_list *names,
 				struct pack_geometry *geometry)
 {
@@ -248,8 +247,8 @@ static void midx_included_packs(struct string_list *include,
 	}
 
 	if (midx_must_contain_cruft ||
-	    midx_has_unknown_packs(midx_pack_names, midx_pack_names_nr,
-				   include, geometry, existing)) {
+	    midx_has_unknown_packs(midx_pack_names, include, geometry,
+				   existing)) {
 		/*
 		 * If there are one or more unknown pack(s) present (see
 		 * midx_has_unknown_packs() for what makes a pack
@@ -499,10 +498,9 @@ int cmd_repack(int argc,
 	struct existing_packs existing = EXISTING_PACKS_INIT;
 	struct pack_geometry geometry = { 0 };
 	struct tempfile *refs_snapshot = NULL;
+	struct string_list midx_pack_names = STRING_LIST_INIT_DUP;
 	int i, ret;
 	int show_progress;
-	char **midx_pack_names = NULL;
-	size_t midx_pack_names_nr = 0;
 
 	/* variables to be filled by option parsing */
 	int delete_redundant = 0;
@@ -870,13 +868,12 @@ int cmd_repack(int argc,
 		struct multi_pack_index *m =
 			get_local_multi_pack_index(the_repository);
 
-		ALLOC_ARRAY(midx_pack_names,
-			    m->num_packs + m->num_packs_in_base);
-
 		for (; m; m = m->base_midx)
 			for (uint32_t i = 0; i < m->num_packs; i++)
-				midx_pack_names[midx_pack_names_nr++] =
-					xstrdup(m->pack_names[i]);
+				string_list_insert(&midx_pack_names,
+						   m->pack_names[i]);
+
+		string_list_sort(&midx_pack_names);
 	}
 
 	close_object_store(the_repository->objects);
@@ -896,8 +893,8 @@ int cmd_repack(int argc,
 
 	if (write_midx) {
 		struct string_list include = STRING_LIST_INIT_DUP;
-		midx_included_packs(&include, &existing, midx_pack_names,
-				    midx_pack_names_nr, &names, &geometry);
+		midx_included_packs(&include, &existing, &midx_pack_names,
+				    &names, &geometry);
 
 		ret = write_midx_included_packs(&include, &geometry, &names,
 						refs_snapshot ? get_tempfile_path(refs_snapshot) : NULL,
@@ -948,9 +945,7 @@ cleanup:
 	string_list_clear(&names, 1);
 	existing_packs_release(&existing);
 	free_pack_geometry(&geometry);
-	for (size_t i = 0; i < midx_pack_names_nr; i++)
-		free(midx_pack_names[i]);
-	free(midx_pack_names);
+	string_list_clear(&midx_pack_names, 0);
 	pack_objects_args_release(&po_args);
 	pack_objects_args_release(&cruft_po_args);
 

@@ -395,8 +395,7 @@ void midx_snapshot_refs(struct tempfile *f)
 	oidset_clear(&data.seen);
 }
 
-int midx_has_unknown_packs(char **midx_pack_names,
-			   size_t midx_pack_names_nr,
+int midx_has_unknown_packs(struct string_list *midx_pack_names,
 			   struct string_list *include,
 			   struct pack_geometry *geometry,
 			   struct existing_packs *existing)
@@ -405,8 +404,8 @@ int midx_has_unknown_packs(char **midx_pack_names,
 
 	string_list_sort(include);
 
-	for (i = 0; i < midx_pack_names_nr; i++) {
-		const char *pack_name = midx_pack_names[i];
+	for (i = 0; i < midx_pack_names->nr; i++) {
+		const char *pack_name = midx_pack_names->items[i].string;
 
 		/*
 		 * Determine whether or not each MIDX'd pack from the existing

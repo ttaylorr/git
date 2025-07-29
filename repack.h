@@ -88,8 +88,7 @@ void install_generated_pack(struct generated_pack_data *data,
 			    const char *name);
 
 void midx_snapshot_refs(struct tempfile *f);
-int midx_has_unknown_packs(char **midx_pack_names,
-			   size_t midx_pack_names_nr,
+int midx_has_unknown_packs(struct string_list *midx_pack_names,
 			   struct string_list *include,
 			   struct pack_geometry *geometry,
 			   struct existing_packs *existing);
