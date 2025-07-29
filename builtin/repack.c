@@ -34,7 +34,6 @@
 #define RETAIN_PACK 2
 
 static int pack_everything;
-static int delta_base_offset = 1;
 static int pack_kept_objects = -1;
 static int write_bitmaps = -1;
 static int use_delta_islands;
@@ -54,12 +53,19 @@ static const char incremental_bitmap_conflict_error[] = N_(
 "--no-write-bitmap-index or disable the pack.writeBitmaps configuration."
 );
 
+struct repack_config_cb {
+	struct pack_objects_args *po_args;
+	struct pack_objects_args *cruft_po_args;
+};
+
 static int repack_config(const char *var, const char *value,
-			 const struct config_context *ctx, void *cb)
+			 const struct config_context *ctx, void *_cb)
 {
-	struct pack_objects_args *cruft_po_args = cb;
+	struct repack_config_cb *cb = _cb;
 	if (!strcmp(var, "repack.usedeltabaseoffset")) {
-		delta_base_offset = git_config_bool(var, value);
+		int delta_base_offset = git_config_bool(var, value);
+		cb->po_args->delta_base_offset = delta_base_offset;
+		cb->cruft_po_args->delta_base_offset = delta_base_offset;
 		return 0;
 	}
 	if (!strcmp(var, "repack.packkeptobjects")) {
@@ -80,20 +86,20 @@ static int repack_config(const char *var, const char *value,
 		return 0;
 	}
 	if (!strcmp(var, "repack.cruftwindow")) {
-		free(cruft_po_args->window);
-		return git_config_string(&cruft_po_args->window, var, value);
+		free(cb->cruft_po_args->window);
+		return git_config_string(&cb->cruft_po_args->window, var, value);
 	}
 	if (!strcmp(var, "repack.cruftwindowmemory")) {
-		free(cruft_po_args->window_memory);
-		return git_config_string(&cruft_po_args->window_memory, var, value);
+		free(cb->cruft_po_args->window_memory);
+		return git_config_string(&cb->cruft_po_args->window_memory, var, value);
 	}
 	if (!strcmp(var, "repack.cruftdepth")) {
-		free(cruft_po_args->depth);
-		return git_config_string(&cruft_po_args->depth, var, value);
+		free(cb->cruft_po_args->depth);
+		return git_config_string(&cb->cruft_po_args->depth, var, value);
 	}
 	if (!strcmp(var, "repack.cruftthreads")) {
-		free(cruft_po_args->threads);
-		return git_config_string(&cruft_po_args->threads, var, value);
+		free(cb->cruft_po_args->threads);
+		return git_config_string(&cb->cruft_po_args->threads, var, value);
 	}
 	if (!strcmp(var, "repack.midxmustcontaincruft")) {
 		midx_must_contain_cruft = git_config_bool(var, value);
@@ -302,7 +308,7 @@ static void prepare_pack_objects(struct child_process *cmd,
 		strvec_push(&cmd->args,  "--local");
 	if (args->quiet)
 		strvec_push(&cmd->args,  "--quiet");
-	if (delta_base_offset)
+	if (args->delta_base_offset)
 		strvec_push(&cmd->args,  "--delta-base-offset");
 	strvec_push(&cmd->args, out);
 	cmd->git_cmd = 1;
@@ -1238,8 +1244,9 @@ int cmd_repack(int argc,
 	const char *unpack_unreachable = NULL;
 	int keep_unreachable = 0;
 	struct string_list keep_pack_list = STRING_LIST_INIT_NODUP;
-	struct pack_objects_args po_args = { 0 };
-	struct pack_objects_args cruft_po_args = { 0 };
+	struct pack_objects_args po_args = PACK_OBJECTS_ARGS_INIT;
+	struct pack_objects_args cruft_po_args = PACK_OBJECTS_ARGS_INIT;
+	struct repack_config_cb config_cb;
 	int write_midx = 0;
 	const char *cruft_expiration = NULL;
 	const char *expire_to = NULL;
@@ -1317,7 +1324,9 @@ int cmd_repack(int argc,
 
 	list_objects_filter_init(&po_args.filter_options);
 
-	git_config(repack_config, &cruft_po_args);
+	config_cb.po_args = &po_args;
+	config_cb.cruft_po_args = &cruft_po_args;
+	git_config(repack_config, &config_cb);
 
 	argc = parse_options(argc, argv, prefix, builtin_repack_options,
 				git_repack_usage, 0);
