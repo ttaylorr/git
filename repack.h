@@ -92,10 +92,13 @@ int midx_has_unknown_packs(struct string_list *midx_pack_names,
 			   struct string_list *include,
 			   struct pack_geometry *geometry,
 			   struct existing_packs *existing);
-int write_midx_included_packs(struct string_list *include,
+int write_midx_included_packs(struct string_list *included,
+			      struct existing_packs *existing,
 			      struct pack_geometry *geometry,
 			      struct string_list *names,
+			      struct string_list *midx_pack_names,
 			      const char *refs_snapshot,
-			      int show_progress, int write_bitmaps);
+			      int show_progress, int write_bitmaps,
+			      int midx_must_contain_cruft);
 
 #endif /* REPACK_H */

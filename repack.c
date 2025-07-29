@@ -465,11 +465,126 @@ int midx_has_unknown_packs(struct string_list *midx_pack_names,
 	return 0;
 }
 
-int write_midx_included_packs(struct string_list *include,
+static void midx_included_packs(struct string_list *include,
+				struct existing_packs *existing,
+				struct string_list *midx_pack_names,
+				struct string_list *names,
+				struct pack_geometry *geometry,
+				int midx_must_contain_cruft)
+{
+	struct string_list_item *item;
+	struct strbuf buf = STRBUF_INIT;
+
+	for_each_string_list_item(item, &existing->kept_packs) {
+		strbuf_reset(&buf);
+		strbuf_addf(&buf, "%s.idx", item->string);
+		string_list_insert(include, buf.buf);
+	}
+
+	for_each_string_list_item(item, names) {
+		strbuf_reset(&buf);
+		strbuf_addf(&buf, "pack-%s.idx", item->string);
+		string_list_insert(include, buf.buf);
+	}
+
+	if (geometry->split_factor) {
+		uint32_t i;
+
+		for (i = geometry->split; i < geometry->pack_nr; i++) {
+			struct packed_git *p = geometry->pack[i];
+
+			/*
+			 * The multi-pack index never refers to packfiles part
+			 * of an alternate object database, so we skip these.
+			 * While git-multi-pack-index(1) would silently ignore
+			 * them anyway, this allows us to skip executing the
+			 * command completely when we have only non-local
+			 * packfiles.
+			 */
+			if (!p->pack_local)
+				continue;
+
+			strbuf_reset(&buf);
+			strbuf_addstr(&buf, pack_basename(p));
+			strbuf_strip_suffix(&buf, ".pack");
+			strbuf_addstr(&buf, ".idx");
+
+			string_list_insert(include, buf.buf);
+		}
+	} else {
+		for_each_string_list_item(item, &existing->non_kept_packs) {
+			if (pack_is_marked_for_deletion(item))
+				continue;
+
+			strbuf_reset(&buf);
+			strbuf_addf(&buf, "%s.idx", item->string);
+			string_list_insert(include, buf.buf);
+		}
+	}
+
+	if (midx_must_contain_cruft ||
+	    midx_has_unknown_packs(midx_pack_names, include, geometry,
+				   existing)) {
+		/*
+		 * If there are one or more unknown pack(s) present (see
+		 * midx_has_unknown_packs() for what makes a pack
+		 * "unknown") in the MIDX before the repack, keep them
+		 * as they may be required to form a reachability
+		 * closure if the MIDX is bitmapped.
+		 *
+		 * For example, a cruft pack can be required to form a
+		 * reachability closure if the MIDX is bitmapped and one
+		 * or more of the bitmap's selected commits reaches a
+		 * once-cruft object that was later made reachable.
+		 */
+		for_each_string_list_item(item, &existing->cruft_packs) {
+			/*
+			 * When doing a --geometric repack, there is no
+			 * need to check for deleted packs, since we're
+			 * by definition not doing an ALL_INTO_ONE
+			 * repack (hence no packs will be deleted).
+			 * Otherwise we must check for and exclude any
+			 * packs which are enqueued for deletion.
+			 *
+			 * So we could omit the conditional below in the
+			 * --geometric case, but doing so is unnecessary
+			 *  since no packs are marked as pending
+			 *  deletion (since we only call
+			 *  `mark_packs_for_deletion()` when doing an
+			 *  all-into-one repack).
+			 */
+			if (pack_is_marked_for_deletion(item))
+				continue;
+
+			strbuf_reset(&buf);
+			strbuf_addf(&buf, "%s.idx", item->string);
+			string_list_insert(include, buf.buf);
+		}
+	} else {
+		/*
+		 * Modern versions of Git (with the appropriate
+		 * configuration setting) will write new copies of
+		 * once-cruft objects when doing a --geometric repack.
+		 *
+		 * If the MIDX has no cruft pack, new packs written
+		 * during a --geometric repack will not rely on the
+		 * cruft pack to form a reachability closure, so we can
+		 * avoid including them in the MIDX in that case.
+		 */
+		;
+	}
+
+	strbuf_release(&buf);
+}
+
+int write_midx_included_packs(struct string_list *included,
+			      struct existing_packs *existing,
 			      struct pack_geometry *geometry,
 			      struct string_list *names,
+			      struct string_list *midx_pack_names,
 			      const char *refs_snapshot,
-			      int show_progress, int write_bitmaps)
+			      int show_progress, int write_bitmaps,
+			      int midx_must_contain_cruft)
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	struct string_list_item *item;
@@ -477,7 +592,10 @@ int write_midx_included_packs(struct string_list *include,
 	FILE *in;
 	int ret;
 
-	if (!include->nr)
+	midx_included_packs(included, existing, midx_pack_names, names,
+			    geometry, midx_must_contain_cruft);
+
+	if (!included->nr)
 		return 0;
 
 	cmd.in = -1;
@@ -538,7 +656,7 @@ int write_midx_included_packs(struct string_list *include,
 		return ret;
 
 	in = xfdopen(cmd.in, "w");
-	for_each_string_list_item(item, include)
+	for_each_string_list_item(item, included)
 		fprintf(in, "%s\n", item->string);
 	fclose(in);
 
