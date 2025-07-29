@@ -3,6 +3,8 @@
 
 #include "list-objects-filter-options.h"
 
+struct child_process;
+
 struct pack_objects_args {
 	char *window;
 	char *window_memory;
@@ -20,6 +22,10 @@ struct pack_objects_args {
 };
 
 #define PACK_OBJECTS_ARGS_INIT { .delta_base_offset = 1 }
+
+void prepare_pack_objects(struct child_process *cmd,
+			  const struct pack_objects_args *args,
+			  const char *out);
 
 void pack_objects_args_release(struct pack_objects_args *args);
 
