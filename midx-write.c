@@ -538,13 +538,6 @@ static int write_midx_pack_names(struct hashfile *f, void *data)
 		if (ctx->info[i].expired)
 			continue;
 
-#if 0
-		if (i && strcmp(ctx->info[i].pack_name, ctx->info[i - 1].pack_name) <= 0)
-			BUG("incorrect pack-file order: %s before %s",
-			    ctx->info[i - 1].pack_name,
-			    ctx->info[i].pack_name);
-#endif
-
 		writelen = strlen(ctx->info[i].pack_name) + 1;
 		hashwrite(f, ctx->info[i].pack_name, writelen);
 		written += writelen;
@@ -1484,7 +1477,14 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	 * pack_perm stores a permutation between pack-int-ids from the
 	 * previous multi-pack-index to the new one we are writing:
 	 *
-	 * pack_perm[old_id] = new_id
+	 *   pack_perm[old_id] = new_id
+	 *
+	 * When performing MIDX compaction, the pack-int-ids are
+	 * preserved from the compaction range in the new MIDX, so we
+	 * can avoid allocating a separate pack_perm array entirely.
+	 *
+	 * ctx.pack_perm must be accessed through the midx_pack_perm()
+	 * function, or guarded behind "if (!ctx.compact)".
 	 */
 	if (!ctx.compact) {
 		ALLOC_ARRAY(ctx.pack_perm, ctx.nr);
