@@ -253,6 +253,14 @@ static void compact_midx_pack_range(struct write_midx_context *ctx)
 	}
 }
 
+static int midx_pack_perm(struct write_midx_context *ctx,
+			  uint32_t orig_pack_int_id)
+{
+	if (ctx->compact)
+		return orig_pack_int_id;
+	return ctx->pack_perm[orig_pack_int_id];
+}
+
 struct pack_midx_entry {
 	struct object_id oid;
 	uint32_t pack_int_id;
@@ -636,12 +644,12 @@ static int write_midx_object_offsets(struct hashfile *f,
 	for (i = 0; i < ctx->entries_nr; i++) {
 		struct pack_midx_entry *obj = list++;
 
-		if (ctx->pack_perm[obj->pack_int_id] == PACK_EXPIRED)
+		if (midx_pack_perm(ctx, obj->pack_int_id) == PACK_EXPIRED)
 			BUG("object %s is in an expired pack with int-id %d",
 			    oid_to_hex(&obj->oid),
 			    obj->pack_int_id);
 
-		hashwrite_be32(f, ctx->pack_perm[obj->pack_int_id]);
+		hashwrite_be32(f, midx_pack_perm(ctx, obj->pack_int_id));
 
 		if (ctx->large_offsets_needed && obj->offset >> 31)
 			hashwrite_be32(f, MIDX_LARGE_OFFSET_NEEDED | nr_large_offset++);
@@ -742,11 +750,7 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 	for (i = 0; i < ctx->entries_nr; i++) {
 		struct pack_midx_entry *e = &ctx->entries[i];
 		data[i].nr = i;
-		/*
-		 * When compacting, any given object's pack_int_id MUST remain
-		 * the same before/after compaction.
-		 */
-		data[i].pack = ctx->pack_perm[e->pack_int_id];
+		data[i].pack = midx_pack_perm(ctx, e->pack_int_id);
 		if (!e->preferred)
 			data[i].pack |= (1U << 31);
 		data[i].offset = e->offset;
@@ -758,19 +762,10 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 		struct pack_midx_entry *e = &ctx->entries[data[i].nr];
 		struct pack_info *pack;
 
-		if (ctx->compact) {
-			/*
-			 * TODO(@ttaylorr): ctx->pack_perm[] maps from
-			 * pack index to its original pack_int_id, but
-			 * we need to map the other direction.
-			 */
-			for (uint32_t j = 0; j < ctx->nr; j++) {
-				pack = &ctx->info[j];
-				if (pack->orig_pack_int_id == e->pack_int_id)
-					break;
-			}
-		} else
-			pack = &ctx->info[ctx->pack_perm[e->pack_int_id]];
+		if (ctx->compact)
+			pack = &ctx->info[e->pack_int_id - ctx->compact_from->num_packs_in_base];
+		else
+			pack = &ctx->info[midx_pack_perm(ctx, e->pack_int_id)];
 
 		if (pack->bitmap_pos == BITMAP_POS_UNKNOWN)
 			pack->bitmap_pos = i + base_objects;
@@ -778,7 +773,7 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 		pack_order[i] = data[i].nr;
 	}
 	for (i = 0; i < ctx->nr; i++) {
-		struct pack_info *pack = &ctx->info[ctx->pack_perm[i]];
+		struct pack_info *pack = &ctx->info[midx_pack_perm(ctx, i)];
 		if (pack->bitmap_pos == BITMAP_POS_UNKNOWN)
 			pack->bitmap_pos = 0;
 	}
@@ -1491,23 +1486,17 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	 *
 	 * pack_perm[old_id] = new_id
 	 */
-	ALLOC_ARRAY(ctx.pack_perm, ctx.nr);
-	for (i = 0; i < ctx.nr; i++) {
-		if (ctx.info[i].expired) {
-			dropped_packs++;
-			ctx.pack_perm[ctx.info[i].orig_pack_int_id] = PACK_EXPIRED;
-			BUG("shouldn't be here");
-		} else if (ctx.compact) {
-			ctx.pack_perm[i] = ctx.info[i].orig_pack_int_id;
-		} else {
-			ctx.pack_perm[ctx.info[i].orig_pack_int_id] = i - dropped_packs;
+	if (!ctx.compact) {
+		ALLOC_ARRAY(ctx.pack_perm, ctx.nr);
+		for (i = 0; i < ctx.nr; i++) {
+			if (ctx.info[i].expired) {
+				dropped_packs++;
+				ctx.pack_perm[ctx.info[i].orig_pack_int_id] = PACK_EXPIRED;
+			} else {
+				ctx.pack_perm[ctx.info[i].orig_pack_int_id] = i - dropped_packs;
+			}
 		}
 	}
-
-#if 0
-	if (ctx.compact)
-		abort();
-#endif
 
 	for (i = 0; i < ctx.nr; i++) {
 		if (ctx.info[i].expired)
@@ -1525,7 +1514,7 @@ static int write_midx_internal(struct write_midx_opts *opts)
 		preferred = bsearch(opts->preferred_pack_name, ctx.info, ctx.nr,
 				    sizeof(*ctx.info), idx_or_pack_name_cmp);
 		if (preferred) {
-			uint32_t perm = ctx.pack_perm[preferred->orig_pack_int_id];
+			uint32_t perm = midx_pack_perm(&ctx, preferred->orig_pack_int_id);
 			if (perm == PACK_EXPIRED)
 				warning(_("preferred pack '%s' is expired"),
 					opts->preferred_pack_name);
