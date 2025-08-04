@@ -1228,8 +1228,7 @@ struct write_midx_opts {
 
 };
 
-static int midx_hashcmp(const struct multi_pack_index *a,
-			const struct multi_pack_index *b,
+static int midx_hashcmp(struct multi_pack_index *a, struct multi_pack_index *b,
 			const struct git_hash_algo *algop)
 {
 	return hashcmp(get_midx_checksum(a), get_midx_checksum(b), algop);
