@@ -201,20 +201,6 @@ static struct multi_pack_index *load_multi_pack_index_one(struct repository *r,
 		if (!end)
 			die(_("multi-pack-index pack-name chunk is too short"));
 		cur_pack_name = end + 1;
-
-		/*
-		 * For MIDX compaction, relax this condition to allow for
-		 * storing the pack names in non-lexicographic order, and:
-		 *
-		 *  - sort the pack_names array so we can binary search it
-		 *    efficiently in midx_contains_pack_1() below
-		 *
-		 *  - ???
-		 */
-		if (i && strcmp(m->pack_names[i], m->pack_names[i - 1]) <= 0)
-			die(_("multi-pack-index pack names out of order: '%s' before '%s'"),
-			      m->pack_names[i - 1],
-			      m->pack_names[i]);
 	}
 
 	trace2_data_intmax("midx", r, "load/num_packs", m->num_packs);
@@ -421,6 +407,7 @@ void close_midx(struct multi_pack_index *m)
 	}
 	FREE_AND_NULL(m->packs);
 	FREE_AND_NULL(m->pack_names);
+	FREE_AND_NULL(m->pack_names_sorted);
 	free(m);
 }
 
@@ -681,17 +668,31 @@ int cmp_idx_or_pack_name(const char *idx_or_pack_name,
 	return strcmp(idx_or_pack_name, idx_name);
 }
 
+static int midx_pack_name_cmp(const void *va, const void *vb)
+{
+	return strcmp(*(const char **)va, *(const char **)vb);
+}
+
 static int midx_contains_pack_1(struct multi_pack_index *m,
 				const char *idx_or_pack_name)
 {
 	uint32_t first = 0, last = m->num_packs;
+
+	if (!m->pack_names_sorted) {
+		ALLOC_ARRAY(m->pack_names_sorted, m->num_packs);
+
+		for (uint32_t i = 0; i < m->num_packs; i++)
+			m->pack_names_sorted[i] = m->pack_names[i];
+
+		QSORT(m->pack_names_sorted, m->num_packs, midx_pack_name_cmp);
+	}
 
 	while (first < last) {
 		uint32_t mid = first + (last - first) / 2;
 		const char *current;
 		int cmp;
 
-		current = m->pack_names[mid];
+		current = m->pack_names_sorted[mid];
 		cmp = cmp_idx_or_pack_name(idx_or_pack_name, current);
 		if (!cmp)
 			return 1;

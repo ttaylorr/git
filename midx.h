@@ -71,6 +71,7 @@ struct multi_pack_index {
 	uint32_t num_packs_in_base;
 
 	const char **pack_names;
+	const char **pack_names_sorted;
 	struct packed_git **packs;
 
 	struct repository *repo;
