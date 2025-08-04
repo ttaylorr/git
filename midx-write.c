@@ -245,7 +245,7 @@ static void compact_midx_pack_range(struct write_midx_context *ctx)
 				continue;
 			}
 
-			fill_pack_info(&ctx->info[pos], p, p->pack_name,
+			fill_pack_info(&ctx->info[pos], p, m->pack_names[i],
 				       pack_int_id);
 
 			ctx->nr++;
@@ -756,7 +756,22 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 
 	for (i = 0; i < ctx->entries_nr; i++) {
 		struct pack_midx_entry *e = &ctx->entries[data[i].nr];
-		struct pack_info *pack = &ctx->info[ctx->pack_perm[e->pack_int_id]];
+		struct pack_info *pack;
+
+		if (ctx->compact) {
+			/*
+			 * TODO(@ttaylorr): ctx->pack_perm[] maps from
+			 * pack index to its original pack_int_id, but
+			 * we need to map the other direction.
+			 */
+			for (uint32_t j = 0; j < ctx->nr; j++) {
+				pack = &ctx->info[j];
+				if (pack->orig_pack_int_id == e->pack_int_id)
+					break;
+			}
+		} else
+			pack = &ctx->info[ctx->pack_perm[e->pack_int_id]];
+
 		if (pack->bitmap_pos == BITMAP_POS_UNKNOWN)
 			pack->bitmap_pos = i + base_objects;
 		pack->bitmap_nr++;
@@ -817,9 +832,12 @@ static void prepare_midx_packing_data(struct packing_data *pdata,
 		uint32_t pos = ctx->pack_order[i];
 		struct pack_midx_entry *from = &ctx->entries[pos];
 		struct object_entry *to = packlist_alloc(pdata, &from->oid);
+		uint32_t pack_int_id = from->pack_int_id;
 
-		oe_set_in_pack(pdata, to,
-			       ctx->info[ctx->pack_perm[from->pack_int_id]].p);
+		if (ctx->compact)
+			pack_int_id -= ctx->compact_from->num_packs_in_base;
+
+		oe_set_in_pack(pdata, to, ctx->info[pack_int_id].p);
 	}
 
 	trace2_region_leave("midx", "prepare_midx_packing_data", ctx->repo);
