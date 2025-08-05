@@ -251,6 +251,8 @@ static void compact_midx_pack_range(struct write_midx_context *ctx)
 			ctx->nr++;
 		}
 	}
+
+	ASSERT(ctx->nr == compacted_packs_nr);
 }
 
 static int midx_pack_perm(struct write_midx_context *ctx,
@@ -422,21 +424,13 @@ static void compute_sorted_entries(struct write_midx_context *ctx,
 	 * pack represents that object in the range [from, to].
 	 */
 	uint32_t cur_fanout, cur_pack, cur_object;
-	size_t alloc_objects, total_objects = 0;
+	size_t alloc_objects = 0, total_objects = 0;
 	struct midx_fanout fanout = { 0 };
 
 	for (cur_pack = start_pack; cur_pack < ctx->nr; cur_pack++)
 		total_objects = st_add(total_objects,
 				       ctx->info[cur_pack].p->num_objects);
 
-	/*
-	 * As we de-duplicate by fanout value, we expect the fanout
-	 * slices to be evenly distributed, with some noise. Hence,
-	 * allocate slightly more than one 256th.
-	 */
-	alloc_objects = fanout.alloc = total_objects > 3200 ? total_objects / 200 : 16;
-
-	ALLOC_ARRAY(ctx->entries, alloc_objects);
 	ctx->entries_nr = 0;
 
 	if (ctx->compact) {
@@ -450,10 +444,13 @@ static void compute_sorted_entries(struct write_midx_context *ctx,
 			ALLOC_GROW(ctx->entries, st_add(ctx->entries_nr, 1),
 				   alloc_objects);
 
-			entry = &ctx->entries[ctx->entries_nr++];
+			entry = &ctx->entries[i - from];
 			if (nth_midxed_pack_midx_entry(ctx->compact_to, entry,
 						       i))
 				die(_("failed to get MIDX entry %"PRIu32), i);
+
+			entry->pack_int_id -= ctx->compact_from->num_packs_in_base;
+			ctx->entries_nr++;
 		}
 
 		/*
@@ -477,6 +474,14 @@ static void compute_sorted_entries(struct write_midx_context *ctx,
 		return;
 	}
 
+	/*
+	 * As we de-duplicate by fanout value, we expect the fanout
+	 * slices to be evenly distributed, with some noise. Hence,
+	 * allocate slightly more than one 256th.
+	 */
+	alloc_objects = fanout.alloc = total_objects > 3200 ? total_objects / 200 : 16;
+
+	ALLOC_ARRAY(ctx->entries, alloc_objects);
 	ALLOC_ARRAY(fanout.entries, fanout.alloc);
 
 	for (cur_fanout = 0; cur_fanout < 256; cur_fanout++) {
@@ -753,12 +758,7 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 
 	for (i = 0; i < ctx->entries_nr; i++) {
 		struct pack_midx_entry *e = &ctx->entries[data[i].nr];
-		struct pack_info *pack;
-
-		if (ctx->compact)
-			pack = &ctx->info[e->pack_int_id - ctx->compact_from->num_packs_in_base];
-		else
-			pack = &ctx->info[midx_pack_perm(ctx, e->pack_int_id)];
+		struct pack_info *pack = &ctx->info[midx_pack_perm(ctx, e->pack_int_id)];
 
 		if (pack->bitmap_pos == BITMAP_POS_UNKNOWN)
 			pack->bitmap_pos = i + base_objects;
@@ -820,12 +820,8 @@ static void prepare_midx_packing_data(struct packing_data *pdata,
 		uint32_t pos = ctx->pack_order[i];
 		struct pack_midx_entry *from = &ctx->entries[pos];
 		struct object_entry *to = packlist_alloc(pdata, &from->oid);
-		uint32_t pack_int_id = from->pack_int_id;
 
-		if (ctx->compact)
-			pack_int_id -= ctx->compact_from->num_packs_in_base;
-
-		oe_set_in_pack(pdata, to, ctx->info[pack_int_id].p);
+		oe_set_in_pack(pdata, to, ctx->info[midx_pack_perm(ctx, from->pack_int_id)].p);
 	}
 
 	trace2_region_leave("midx", "prepare_midx_packing_data", ctx->repo);
@@ -1712,13 +1708,16 @@ static int write_midx_internal(struct write_midx_opts *opts)
 
 			keep_hashes[i] = xstrdup(hash_to_hex_algop(midx_hash,
 								   opts->r->hash_algo));
+
 			i = 0;
 			for (m = ctx.m;
 			     m && midx_hashcmp(m, ctx.compact_to, opts->r->hash_algo);
-			     m = m->base_midx)
+			     m = m->base_midx) {
 				keep_hashes[keep_hashes_nr - 1 - i] =
 					xstrdup(hash_to_hex_algop(get_midx_checksum(m),
 								  opts->r->hash_algo));
+				i++;
+			}
 		} else {
 			for (i = 0; i < ctx.num_multi_pack_indexes_before; i++) {
 				uint32_t j = ctx.num_multi_pack_indexes_before - i - 1;
