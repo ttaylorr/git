@@ -2722,7 +2722,7 @@ sub git_get_hash {
 	my $retval = undef;
 	$git_dir = "$projectroot/$project";
 	if (open my $fd, '-|', git_cmd(), 'rev-parse',
-	    '--verify', '-q', @options, $hash) {
+	    '--verify', '-q', @options, '--end-of-options', $hash) {
 		$retval = <$fd>;
 		chomp $retval if defined $retval;
 		close $fd;
@@ -2737,7 +2737,9 @@ sub git_get_hash {
 sub git_get_type {
 	my $hash = shift;
 
-	open my $fd, "-|", git_cmd(), "cat-file", '-t', $hash or return;
+	open my $fd, "-|", git_cmd(), "cat-file", '-t', '--end-of-options',
+		$hash
+		or return;
 	my $type = <$fd>;
 	close $fd or return;
 	chomp $type;
@@ -2885,7 +2887,8 @@ sub git_get_hash_by_path {
 
 	$path =~ s,/+$,,;
 
-	open my $fd, "-|", git_cmd(), "ls-tree", $base, "--", $path
+	open my $fd, "-|", git_cmd(), "ls-tree", "--end-of-options", $base,
+		"--", $path
 		or die_error(500, "Open git-ls-tree failed");
 	my $line = <$fd>;
 	close $fd or return undef;
@@ -2912,7 +2915,8 @@ sub git_get_path_by_hash {
 
 	local $/ = "\0";
 
-	open my $fd, "-|", git_cmd(), "ls-tree", '-r', '-t', '-z', $base
+	open my $fd, "-|", git_cmd(), "ls-tree", '-r', '-t', '-z',
+		'--end-of-options', $base
 		or return undef;
 	while (my $line = <$fd>) {
 		chomp $line;
@@ -3334,6 +3338,7 @@ sub git_get_last_activity {
 	     '--format=%(committer)',
 	     '--sort=-committerdate',
 	     '--count=1',
+	     '--end-of-options',
 	     map { "refs/$_" } get_branch_refs ()) or return;
 	my $most_recent = <$fd>;
 	close $fd or return;
@@ -3390,6 +3395,7 @@ sub git_get_references {
 	# 5dc01c595e6c6ec9ccda4f6f69c131c0dd945f8c refs/tags/v2.6.11
 	# c39ae07f393806ccf406ef966e9a15afc43cc36a refs/tags/v2.6.11^{}
 	open my $fd, "-|", git_cmd(), "show-ref", "--dereference",
+		"--end-of-options",
 		($type ? ("--", "refs/$type") : ()) # use -- <pattern> if $type
 		or return;
 
@@ -3410,7 +3416,8 @@ sub git_get_references {
 sub git_get_rev_name_tags {
 	my $hash = shift || return undef;
 
-	open my $fd, "-|", git_cmd(), "name-rev", "--tags", $hash
+	open my $fd, "-|", git_cmd(), "name-rev", "--tags", "--end-of-options",
+		$hash
 		or return;
 	my $name_rev = <$fd>;
 	close $fd;
@@ -3472,7 +3479,9 @@ sub parse_tag {
 	my %tag;
 	my @comment;
 
-	open my $fd, "-|", git_cmd(), "cat-file", "tag", $tag_id or return;
+	open my $fd, "-|", git_cmd(), "cat-file", "tag", "--end-of-options",
+		$tag_id
+		or return;
 	$tag{'id'} = $tag_id;
 	while (my $line = <$fd>) {
 		chomp $line;
@@ -3600,6 +3609,7 @@ sub parse_commit {
 		"--parents",
 		"--header",
 		"--max-count=1",
+		"--end-of-options",
 		$commit_id,
 		"--",
 		or die_error(500, "Open git-rev-list failed");
@@ -3624,6 +3634,7 @@ sub parse_commits {
 		("--max-count=" . $maxcount),
 		("--skip=" . $skip),
 		@extra_options,
+		"--end-of-options",
 		$commit_id,
 		"--",
 		($filename ? ($filename) : ())
@@ -3784,6 +3795,7 @@ sub git_get_heads_list {
 		($limit ? '--count='.($limit+1) : ()),
 		'--sort=-HEAD', '--sort=-committerdate',
 		'--format=%(objectname) %(refname) %(subject)%00%(committer)',
+		'--end-of-options',
 		@patterns
 		or return;
 	while (my $line = <$fd>) {
@@ -3998,7 +4010,8 @@ sub run_highlighter {
 
 	close $fd;
 	my $syntax_arg = (defined $syntax) ? "--syntax $syntax" : "--force";
-	open $fd, quote_command(git_cmd(), "cat-file", "blob", $hash)." | ".
+	open $fd, quote_command(git_cmd(), "cat-file", "blob",
+		    "--end-of-options", $hash)." | ".
 	          quote_command($^X, '-CO', '-MEncode=decode,FB_DEFAULT', '-pse',
 	            '$_ = decode($fe, $_, FB_DEFAULT) if !utf8::decode($_);',
 	            '--', "-fe=$fallback_encoding")." | ".
@@ -4687,7 +4700,8 @@ sub git_get_link_target {
 	my $link_target;
 
 	# read link
-	open my $fd, "-|", git_cmd(), "cat-file", "blob", $hash
+	open my $fd, "-|", git_cmd(), "cat-file", "blob", "--end-of-options",
+		$hash
 		or return;
 	{
 		local $/ = undef;
@@ -6377,7 +6391,7 @@ sub git_search_files {
 
 	local $/ = "\n";
 	open my $fd, "-|", git_cmd(), 'grep', '-n', '-z',
-		$search_use_regexp ? ('-E', '-i') : '-F',
+		$search_use_regexp ? ('-E', '-i') : '-F', '--end-of-options',
 		$searchtext, $co{'tree'}
 			or die_error(500, "Open git-grep failed");
 
@@ -6768,17 +6782,18 @@ sub git_blame_common {
 	my $fd;
 	if ($format eq 'incremental') {
 		# get file contents (as base)
-		open $fd, "-|", git_cmd(), 'cat-file', 'blob', $hash
+		open $fd, "-|", git_cmd(), 'cat-file', 'blob',
+			'--end-of-options', $hash
 			or die_error(500, "Open git-cat-file failed");
 	} elsif ($format eq 'data') {
 		# run git-blame --incremental
 		open $fd, "-|", git_cmd(), "blame", "--incremental",
-			$hash_base, "--", $file_name
+			"--end-of-options", $hash_base, "--", $file_name
 			or die_error(500, "Open git-blame --incremental failed");
 	} else {
 		# run git-blame --porcelain
 		open $fd, "-|", git_cmd(), "blame", '-p',
-			$hash_base, '--', $file_name
+			"--end-of-options", $hash_base, '--', $file_name
 			or die_error(500, "Open git-blame --porcelain failed");
 	}
 	binmode $fd, ':utf8';
@@ -7058,7 +7073,8 @@ sub git_blob_plain {
 		$expires = "+1d";
 	}
 
-	open my $fd, "-|", git_cmd(), "cat-file", "blob", $hash
+	open my $fd, "-|", git_cmd(), "cat-file", "blob", "--end-of-options",
+		$hash
 		or die_error(500, "Open git-cat-file blob '$hash' failed");
 
 	# content-type (can include charset)
@@ -7121,7 +7137,8 @@ sub git_blob {
 	}
 
 	my $have_blame = gitweb_check_feature('blame');
-	open my $fd, "-|", git_cmd(), "cat-file", "blob", $hash
+	open my $fd, "-|", git_cmd(), "cat-file", "blob", "--end-of-options",
+		$hash
 		or die_error(500, "Couldn't cat $file_name, $hash");
 	my $mimetype = blob_mimetype($fd, $file_name);
 	# use 'blob_plain' (aka 'raw') view for files that cannot be displayed
@@ -7216,7 +7233,8 @@ sub git_tree {
 	{
 		local $/ = "\0";
 		open my $fd, "-|", git_cmd(), "ls-tree", '-z',
-			($show_sizes ? '-l' : ()), @extra_options, $hash
+			($show_sizes ? '-l' : ()), @extra_options,
+			"--end-of-options", $hash
 			or die_error(500, "Open git-ls-tree failed");
 		@entries = map { chomp; $_ } <$fd>;
 		close $fd
@@ -7417,7 +7435,7 @@ sub git_snapshot {
 	my $cmd = quote_command(
 		git_cmd(), 'archive',
 		"--format=$known_snapshot_formats{$format}{'format'}",
-		"--prefix=$prefix/", $hash);
+		"--prefix=$prefix/", "--end-of-options", $hash);
 	if (exists $known_snapshot_formats{$format}{'compressor'}) {
 		$cmd .= ' | ' . quote_command(@{$known_snapshot_formats{$format}{'compressor'}});
 	}
@@ -7569,6 +7587,7 @@ sub git_commit {
 	open my $fd, "-|", git_cmd(), "diff-tree", '-r', "--no-commit-id",
 		@diff_opts,
 		(@$parents <= 1 ? $parent : '-c'),
+		"--end-of-options",
 		$hash, "--"
 		or die_error(500, "Open git-diff-tree failed");
 	@difftree = map { chomp; $_ } <$fd>;
@@ -7649,7 +7668,8 @@ sub git_object {
 		my $object_id = $hash || $hash_base;
 
 		open my $fd, "-|", quote_command(
-			git_cmd(), 'cat-file', '-t', $object_id) . ' 2> /dev/null'
+			git_cmd(), 'cat-file', '-t', '--end-of-options',
+			$object_id) . ' 2> /dev/null'
 			or die_error(404, "Object does not exist");
 		$type = <$fd>;
 		defined $type && chomp $type;
@@ -7660,11 +7680,13 @@ sub git_object {
 	} elsif ($hash_base && defined $file_name) {
 		$file_name =~ s,/+$,,;
 
-		system(git_cmd(), "cat-file", '-e', $hash_base) == 0
+		system(git_cmd(), "cat-file", '-e', '--end-of-options',
+			$hash_base) == 0
 			or die_error(404, "Base object does not exist");
 
 		# here errors should not happen
-		open my $fd, "-|", git_cmd(), "ls-tree", $hash_base, "--", $file_name
+		open my $fd, "-|", git_cmd(), "ls-tree", "--end-of-options",
+			$hash_base, "--", $file_name
 			or die_error(500, "Open git-ls-tree failed");
 		my $line = <$fd>;
 		close $fd;
@@ -7700,7 +7722,7 @@ sub git_blobdiff {
 		if (defined $file_name) {
 			# read raw output
 			open $fd, "-|", git_cmd(), "diff-tree", '-r', @diff_opts,
-				$hash_parent_base, $hash_base,
+				"--end-of-options", $hash_parent_base, $hash_base,
 				"--", (defined $file_parent ? $file_parent : ()), $file_name
 				or die_error(500, "Open git-diff-tree failed");
 			@difftree = map { chomp; $_ } <$fd>;
@@ -7715,7 +7737,8 @@ sub git_blobdiff {
 
 			# read filtered raw output
 			open $fd, "-|", git_cmd(), "diff-tree", '-r', @diff_opts,
-				$hash_parent_base, $hash_base, "--"
+				"--end-of-options", $hash_parent_base, $hash_base,
+				"--"
 				or die_error(500, "Open git-diff-tree failed");
 			@difftree =
 				# ':100644 100644 03b21826... 3b93d5e7... M	ls-files.c'
@@ -7751,6 +7774,7 @@ sub git_blobdiff {
 		# open patch output
 		open $fd, "-|", git_cmd(), "diff-tree", '-r', @diff_opts,
 			'-p', ($format eq 'html' ? "--full-index" : ()),
+			"--end-of-options",
 			$hash_parent_base, $hash_base,
 			"--", (defined $file_parent ? $file_parent : ()), $file_name
 			or die_error(500, "Open git-diff-tree failed");
@@ -7945,7 +7969,7 @@ sub git_commitdiff {
 	if ($format eq 'html') {
 		open $fd, "-|", git_cmd(), "diff-tree", '-r', @diff_opts,
 			"--no-commit-id", "--patch-with-raw", "--full-index",
-			$hash_parent_param, $hash, "--"
+			"--end-of-options", $hash_parent_param, $hash, "--",
 			or die_error(500, "Open git-diff-tree failed");
 
 		while (my $line = <$fd>) {
@@ -7957,7 +7981,8 @@ sub git_commitdiff {
 
 	} elsif ($format eq 'plain') {
 		open $fd, "-|", git_cmd(), "diff-tree", '-r', @diff_opts,
-			'-p', $hash_parent_param, $hash, "--"
+			'-p', '--end-of-options', $hash_parent_param, $hash,
+			"--"
 			or die_error(500, "Open git-diff-tree failed");
 	} elsif ($format eq 'patch') {
 		# For commit ranges, we limit the output to the number of
@@ -7982,7 +8007,8 @@ sub git_commitdiff {
 			push @commit_spec, '--root', $hash;
 		}
 		open $fd, "-|", git_cmd(), "format-patch", @diff_opts,
-			'--encoding=utf8', '--stdout', @commit_spec
+			'--encoding=utf8', '--stdout', '--end-of-options',
+			@commit_spec
 			or die_error(500, "Open git-format-patch failed");
 	} else {
 		die_error(400, "Unknown commitdiff format");
@@ -8334,7 +8360,8 @@ XML
 		# get list of changed files
 		open my $fd, "-|", git_cmd(), "diff-tree", '-r', @diff_opts,
 			$co{'parent'} || "--root",
-			$co{'id'}, "--", (defined $file_name ? $file_name : ())
+			$co{'id'}, "--end-of-options", "--",
+			(defined $file_name ? $file_name : ())
 			or next;
 		my @difftree = map { chomp; $_ } <$fd>;
 		close $fd
