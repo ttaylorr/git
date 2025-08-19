@@ -109,17 +109,19 @@ void install_generated_packs(struct string_list *names, const char *packdir,
 			     const char *packtmp);
 
 void midx_snapshot_refs(struct tempfile *f);
-int midx_has_unknown_packs(struct string_list *midx_pack_names,
-			   struct string_list *include,
-			   struct pack_geometry *geometry,
-			   struct existing_packs *existing);
-int write_midx_included_packs(struct existing_packs *existing,
-			      struct pack_geometry *geometry,
-			      struct string_list *names,
-			      struct string_list *midx_pack_names,
-			      const char *refs_snapshot,
-			      const char *packdir,
-			      int show_progress, int write_bitmaps,
-			      int midx_must_contain_cruft);
+
+struct repack_midx_opts {
+	struct existing_packs *existing;
+	struct pack_geometry *geometry;
+	struct string_list *names;
+	struct string_list *midx_pack_names;
+	struct tempfile *refs_snapshot;
+	const char *packdir;
+	int show_progress;
+	int write_bitmaps;
+	int midx_must_contain_cruft;
+};
+
+int write_midx_included_packs(struct repack_midx_opts *opts);
 
 #endif /* REPACK_H */

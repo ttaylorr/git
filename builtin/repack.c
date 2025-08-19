@@ -642,13 +642,20 @@ int cmd_repack(int argc,
 		mark_packs_for_deletion(&existing, &names);
 
 	if (cfg.write_midx) {
-		ret = write_midx_included_packs(&existing, &geometry,
-						&names, &midx_pack_names,
-						refs_snapshot ? get_tempfile_path(refs_snapshot) : NULL,
-						packdir,
-						show_progress,
-						write_bitmaps,
-						midx_must_contain_cruft);
+		struct repack_midx_opts opts = {
+			.existing = &existing,
+			.geometry = &geometry,
+			.names = &names,
+			.midx_pack_names = &midx_pack_names,
+			.refs_snapshot = refs_snapshot,
+			.packdir = packdir,
+			.show_progress = show_progress,
+			.write_bitmaps = write_bitmaps,
+			.midx_must_contain_cruft = midx_must_contain_cruft,
+		};
+
+		ret = write_midx_included_packs(&opts);
+
 		if (ret)
 			goto cleanup;
 	}
