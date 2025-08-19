@@ -51,19 +51,14 @@ static const char incremental_bitmap_conflict_error[] = N_(
 "--no-write-bitmap-index or disable the pack.writeBitmaps configuration."
 );
 
-struct repack_config_cb {
-	struct pack_objects_args *po_args;
-	struct pack_objects_args *cruft_po_args;
-};
-
 static int repack_config(const char *var, const char *value,
 			 const struct config_context *ctx, void *_cb)
 {
-	struct repack_config_cb *cb = _cb;
+	struct repack_config *cb = _cb;
 	if (!strcmp(var, "repack.usedeltabaseoffset")) {
 		int delta_base_offset = git_config_bool(var, value);
-		cb->po_args->delta_base_offset = delta_base_offset;
-		cb->cruft_po_args->delta_base_offset = delta_base_offset;
+		cb->po_args.delta_base_offset = delta_base_offset;
+		cb->cruft_po_args.delta_base_offset = delta_base_offset;
 		return 0;
 	}
 	if (!strcmp(var, "repack.packkeptobjects")) {
@@ -84,20 +79,20 @@ static int repack_config(const char *var, const char *value,
 		return 0;
 	}
 	if (!strcmp(var, "repack.cruftwindow")) {
-		free(cb->cruft_po_args->window);
-		return git_config_string(&cb->cruft_po_args->window, var, value);
+		free(cb->cruft_po_args.window);
+		return git_config_string(&cb->cruft_po_args.window, var, value);
 	}
 	if (!strcmp(var, "repack.cruftwindowmemory")) {
-		free(cb->cruft_po_args->window_memory);
-		return git_config_string(&cb->cruft_po_args->window_memory, var, value);
+		free(cb->cruft_po_args.window_memory);
+		return git_config_string(&cb->cruft_po_args.window_memory, var, value);
 	}
 	if (!strcmp(var, "repack.cruftdepth")) {
-		free(cb->cruft_po_args->depth);
-		return git_config_string(&cb->cruft_po_args->depth, var, value);
+		free(cb->cruft_po_args.depth);
+		return git_config_string(&cb->cruft_po_args.depth, var, value);
 	}
 	if (!strcmp(var, "repack.cruftthreads")) {
-		free(cb->cruft_po_args->threads);
-		return git_config_string(&cb->cruft_po_args->threads, var, value);
+		free(cb->cruft_po_args.threads);
+		return git_config_string(&cb->cruft_po_args.threads, var, value);
 	}
 	if (!strcmp(var, "repack.midxmustcontaincruft")) {
 		midx_must_contain_cruft = git_config_bool(var, value);
@@ -139,7 +134,7 @@ static int write_filtered_pack(const struct pack_objects_args *args,
 	 * Here 'names' contains only the pack(s) that were just
 	 * written, which is exactly the packs we want to keep. Also
 	 * 'existing_kept_packs' already contains the packs in
-	 * 'keep_pack_list'.
+	 * 'cfg.keep_pack_list'.
 	 */
 	in = xfdopen(cmd.in, "w");
 	for_each_string_list_item(item, names)
@@ -279,22 +274,7 @@ int cmd_repack(int argc,
 	int show_progress;
 
 	/* variables to be filled by option parsing */
-	int delete_redundant = 0;
-	const char *unpack_unreachable = NULL;
-	int keep_unreachable = 0;
-	struct string_list keep_pack_list = STRING_LIST_INIT_NODUP;
-	struct pack_objects_args po_args = PACK_OBJECTS_ARGS_INIT;
-	struct pack_objects_args cruft_po_args = PACK_OBJECTS_ARGS_INIT;
-	struct repack_config_cb config_cb;
-	int write_midx = 0;
-	const char *cruft_expiration = NULL;
-	const char *expire_to = NULL;
-	const char *filter_to = NULL;
-	const char *opt_window = NULL;
-	const char *opt_window_memory = NULL;
-	const char *opt_depth = NULL;
-	const char *opt_threads = NULL;
-	unsigned long combine_cruft_below_size = 0ul;
+	struct repack_config cfg;
 
 	struct option builtin_repack_options[] = {
 		OPT_BIT('a', NULL, &pack_everything,
@@ -305,98 +285,96 @@ int cmd_repack(int argc,
 		OPT_BIT(0, "cruft", &pack_everything,
 				N_("same as -a, pack unreachable cruft objects separately"),
 				   PACK_CRUFT),
-		OPT_STRING(0, "cruft-expiration", &cruft_expiration, N_("approxidate"),
+		OPT_STRING(0, "cruft-expiration", &cfg.cruft_expiration, N_("approxidate"),
 				N_("with --cruft, expire objects older than this")),
 		OPT_UNSIGNED(0, "combine-cruft-below-size",
-			     &combine_cruft_below_size,
+			     &cfg.combine_cruft_below_size,
 			     N_("with --cruft, only repack cruft packs smaller than this")),
-		OPT_UNSIGNED(0, "max-cruft-size", &cruft_po_args.max_pack_size,
+		OPT_UNSIGNED(0, "max-cruft-size", &cfg.cruft_po_args.max_pack_size,
 			     N_("with --cruft, limit the size of new cruft packs")),
-		OPT_BOOL('d', NULL, &delete_redundant,
+		OPT_BOOL('d', NULL, &cfg.delete_redundant,
 				N_("remove redundant packs, and run git-prune-packed")),
-		OPT_BOOL('f', NULL, &po_args.no_reuse_delta,
+		OPT_BOOL('f', NULL, &cfg.po_args.no_reuse_delta,
 				N_("pass --no-reuse-delta to git-pack-objects")),
-		OPT_BOOL('F', NULL, &po_args.no_reuse_object,
+		OPT_BOOL('F', NULL, &cfg.po_args.no_reuse_object,
 				N_("pass --no-reuse-object to git-pack-objects")),
-		OPT_INTEGER(0, "name-hash-version", &po_args.name_hash_version,
+		OPT_INTEGER(0, "name-hash-version", &cfg.po_args.name_hash_version,
 				N_("specify the name hash version to use for grouping similar objects by path")),
-		OPT_BOOL(0, "path-walk", &po_args.path_walk,
+		OPT_BOOL(0, "path-walk", &cfg.po_args.path_walk,
 				N_("pass --path-walk to git-pack-objects")),
 		OPT_NEGBIT('n', NULL, &run_update_server_info,
 				N_("do not run git-update-server-info"), 1),
-		OPT__QUIET(&po_args.quiet, N_("be quiet")),
-		OPT_BOOL('l', "local", &po_args.local,
+		OPT__QUIET(&cfg.po_args.quiet, N_("be quiet")),
+		OPT_BOOL('l', "local", &cfg.po_args.local,
 				N_("pass --local to git-pack-objects")),
 		OPT_BOOL('b', "write-bitmap-index", &write_bitmaps,
 				N_("write bitmap index")),
 		OPT_BOOL('i', "delta-islands", &use_delta_islands,
 				N_("pass --delta-islands to git-pack-objects")),
-		OPT_STRING(0, "unpack-unreachable", &unpack_unreachable, N_("approxidate"),
+		OPT_STRING(0, "unpack-unreachable", &cfg.unpack_unreachable, N_("approxidate"),
 				N_("with -A, do not loosen objects older than this")),
-		OPT_BOOL('k', "keep-unreachable", &keep_unreachable,
+		OPT_BOOL('k', "keep-unreachable", &cfg.keep_unreachable,
 				N_("with -a, repack unreachable objects")),
-		OPT_STRING(0, "window", &opt_window, N_("n"),
+		OPT_STRING(0, "window", &cfg.opt_window, N_("n"),
 				N_("size of the window used for delta compression")),
-		OPT_STRING(0, "window-memory", &opt_window_memory, N_("bytes"),
+		OPT_STRING(0, "window-memory", &cfg.opt_window_memory, N_("bytes"),
 				N_("same as the above, but limit memory size instead of entries count")),
-		OPT_STRING(0, "depth", &opt_depth, N_("n"),
+		OPT_STRING(0, "depth", &cfg.opt_depth, N_("n"),
 				N_("limits the maximum delta depth")),
-		OPT_STRING(0, "threads", &opt_threads, N_("n"),
+		OPT_STRING(0, "threads", &cfg.opt_threads, N_("n"),
 				N_("limits the maximum number of threads")),
-		OPT_UNSIGNED(0, "max-pack-size", &po_args.max_pack_size,
+		OPT_UNSIGNED(0, "max-pack-size", &cfg.po_args.max_pack_size,
 			     N_("maximum size of each packfile")),
-		OPT_PARSE_LIST_OBJECTS_FILTER(&po_args.filter_options),
+		OPT_PARSE_LIST_OBJECTS_FILTER(&cfg.po_args.filter_options),
 		OPT_BOOL(0, "pack-kept-objects", &pack_kept_objects,
 				N_("repack objects in packs marked with .keep")),
-		OPT_STRING_LIST(0, "keep-pack", &keep_pack_list, N_("name"),
+		OPT_STRING_LIST(0, "keep-pack", &cfg.keep_pack_list, N_("name"),
 				N_("do not repack this pack")),
 		OPT_INTEGER('g', "geometric", &geometry.split_factor,
 			    N_("find a geometric progression with factor <N>")),
-		OPT_BOOL('m', "write-midx", &write_midx,
+		OPT_BOOL('m', "write-midx", &cfg.write_midx,
 			   N_("write a multi-pack index of the resulting packs")),
-		OPT_STRING(0, "expire-to", &expire_to, N_("dir"),
+		OPT_STRING(0, "expire-to", &cfg.expire_to, N_("dir"),
 			   N_("pack prefix to store a pack containing pruned objects")),
-		OPT_STRING(0, "filter-to", &filter_to, N_("dir"),
+		OPT_STRING(0, "filter-to", &cfg.filter_to, N_("dir"),
 			   N_("pack prefix to store a pack containing filtered out objects")),
 		OPT_END()
 	};
 
-	list_objects_filter_init(&po_args.filter_options);
+	list_objects_filter_init(&cfg.po_args.filter_options);
 
-	config_cb.po_args = &po_args;
-	config_cb.cruft_po_args = &cruft_po_args;
-	git_config(repack_config, &config_cb);
+	git_config(repack_config, &cfg);
 
 	argc = parse_options(argc, argv, prefix, builtin_repack_options,
 				git_repack_usage, 0);
 
-	po_args.window = xstrdup_or_null(opt_window);
-	po_args.window_memory = xstrdup_or_null(opt_window_memory);
-	po_args.depth = xstrdup_or_null(opt_depth);
-	po_args.threads = xstrdup_or_null(opt_threads);
+	cfg.po_args.window = xstrdup_or_null(cfg.opt_window);
+	cfg.po_args.window_memory = xstrdup_or_null(cfg.opt_window_memory);
+	cfg.po_args.depth = xstrdup_or_null(cfg.opt_depth);
+	cfg.po_args.threads = xstrdup_or_null(cfg.opt_threads);
 
-	if (delete_redundant && the_repository->repository_format_precious_objects)
+	if (cfg.delete_redundant && the_repository->repository_format_precious_objects)
 		die(_("cannot delete packs in a precious-objects repo"));
 
-	die_for_incompatible_opt3(unpack_unreachable || (pack_everything & LOOSEN_UNREACHABLE), "-A",
-				  keep_unreachable, "-k/--keep-unreachable",
+	die_for_incompatible_opt3(cfg.unpack_unreachable || (pack_everything & LOOSEN_UNREACHABLE), "-A",
+				  cfg.keep_unreachable, "-k/--keep-unreachable",
 				  pack_everything & PACK_CRUFT, "--cruft");
 
 	if (pack_everything & PACK_CRUFT)
 		pack_everything |= ALL_INTO_ONE;
 
 	if (write_bitmaps < 0) {
-		if (!write_midx &&
+		if (!cfg.write_midx &&
 		    (!(pack_everything & ALL_INTO_ONE) || !is_bare_repository()))
 			write_bitmaps = 0;
 	}
 	if (pack_kept_objects < 0)
-		pack_kept_objects = write_bitmaps > 0 && !write_midx;
+		pack_kept_objects = write_bitmaps > 0 && !cfg.write_midx;
 
-	if (write_bitmaps && !(pack_everything & ALL_INTO_ONE) && !write_midx)
+	if (write_bitmaps && !(pack_everything & ALL_INTO_ONE) && !cfg.write_midx)
 		die(_(incremental_bitmap_conflict_error));
 
-	if (write_bitmaps && po_args.local &&
+	if (write_bitmaps && cfg.po_args.local &&
 	    odb_has_alternates(the_repository->objects)) {
 		/*
 		 * When asked to do a local repack, but we have
@@ -409,7 +387,7 @@ int cmd_repack(int argc,
 		write_bitmaps = 0;
 	}
 
-	if (write_midx && write_bitmaps) {
+	if (cfg.write_midx && write_bitmaps) {
 		struct strbuf path = STRBUF_INIT;
 
 		strbuf_addf(&path, "%s/%s_XXXXXX", repo_get_object_directory(the_repository),
@@ -425,26 +403,26 @@ int cmd_repack(int argc,
 	packtmp_name = xstrfmt(".tmp-%d-pack", (int)getpid());
 	packtmp = mkpathdup("%s/%s", packdir, packtmp_name);
 
-	collect_pack_filenames(&existing, &keep_pack_list);
+	collect_pack_filenames(&existing, &cfg.keep_pack_list);
 
 	if (geometry.split_factor) {
 		if (pack_everything)
 			die(_("options '%s' and '%s' cannot be used together"), "--geometric", "-A/-a");
-		init_pack_geometry(&geometry, &existing, &po_args,
+		init_pack_geometry(&geometry, &existing, &cfg.po_args,
 				   pack_kept_objects);
 		split_pack_geometry(&geometry);
 	}
 
-	prepare_pack_objects(&cmd, &po_args, packtmp);
+	prepare_pack_objects(&cmd, &cfg.po_args, packtmp);
 
-	show_progress = !po_args.quiet && isatty(2);
+	show_progress = !cfg.po_args.quiet && isatty(2);
 
 	strvec_push(&cmd.args, "--keep-true-parents");
 	if (!pack_kept_objects)
 		strvec_push(&cmd.args, "--honor-pack-keep");
-	for (i = 0; i < keep_pack_list.nr; i++)
+	for (i = 0; i < cfg.keep_pack_list.nr; i++)
 		strvec_pushf(&cmd.args, "--keep-pack=%s",
-			     keep_pack_list.items[i].string);
+			     cfg.keep_pack_list.items[i].string);
 	strvec_push(&cmd.args, "--non-empty");
 	if (!geometry.split_factor) {
 		/*
@@ -463,7 +441,7 @@ int cmd_repack(int argc,
 	}
 	if (repo_has_promisor_remote(the_repository))
 		strvec_push(&cmd.args, "--exclude-promisor-objects");
-	if (!write_midx) {
+	if (!cfg.write_midx) {
 		if (write_bitmaps > 0)
 			strvec_push(&cmd.args, "--write-bitmap-index");
 		else if (write_bitmaps < 0)
@@ -473,28 +451,28 @@ int cmd_repack(int argc,
 		strvec_push(&cmd.args, "--delta-islands");
 
 	if (pack_everything & ALL_INTO_ONE) {
-		repack_promisor_objects(&po_args, &names, packtmp);
+		repack_promisor_objects(&cfg.po_args, &names, packtmp);
 
 		if (has_existing_non_kept_packs(&existing) &&
-		    delete_redundant &&
+		    cfg.delete_redundant &&
 		    !(pack_everything & PACK_CRUFT)) {
 			for_each_string_list_item(item, &names) {
 				strvec_pushf(&cmd.args, "--keep-pack=%s-%s.pack",
 					     packtmp_name, item->string);
 			}
-			if (unpack_unreachable) {
+			if (cfg.unpack_unreachable) {
 				strvec_pushf(&cmd.args,
 					     "--unpack-unreachable=%s",
-					     unpack_unreachable);
+					     cfg.unpack_unreachable);
 			} else if (pack_everything & LOOSEN_UNREACHABLE) {
 				strvec_push(&cmd.args,
 					    "--unpack-unreachable");
-			} else if (keep_unreachable) {
+			} else if (cfg.keep_unreachable) {
 				strvec_push(&cmd.args, "--keep-unreachable");
 			}
 		}
 
-		if (keep_unreachable && delete_redundant &&
+		if (cfg.keep_unreachable && cfg.delete_redundant &&
 		    !(pack_everything & PACK_CRUFT))
 			strvec_push(&cmd.args, "--pack-loose-unreachable");
 	} else if (geometry.split_factor) {
@@ -508,10 +486,10 @@ int cmd_repack(int argc,
 		strvec_push(&cmd.args, "--incremental");
 	}
 
-	if (po_args.filter_options.choice)
+	if (cfg.po_args.filter_options.choice)
 		strvec_pushf(&cmd.args, "--filter=%s",
-			     expand_list_objects_filter_spec(&po_args.filter_options));
-	else if (filter_to)
+			     expand_list_objects_filter_spec(&cfg.po_args.filter_options));
+	else if (cfg.filter_to)
 		die(_("option '%s' can only be used along with '%s'"), "--filter-to", "--filter");
 
 	if (geometry.split_factor)
@@ -542,7 +520,7 @@ int cmd_repack(int argc,
 		goto cleanup;
 
 	if (!names.nr) {
-		if (!po_args.quiet)
+		if (!cfg.po_args.quiet)
 			printf_ln(_("Nothing new to pack."));
 		/*
 		 * If we didn't write any new packs, the non-cruft packs
@@ -564,28 +542,28 @@ int cmd_repack(int argc,
 	if (pack_everything & PACK_CRUFT) {
 		const char *pack_prefix = find_pack_prefix(packdir, packtmp);
 
-		if (!cruft_po_args.window)
-			cruft_po_args.window = xstrdup_or_null(po_args.window);
-		if (!cruft_po_args.window_memory)
-			cruft_po_args.window_memory = xstrdup_or_null(po_args.window_memory);
-		if (!cruft_po_args.depth)
-			cruft_po_args.depth = xstrdup_or_null(po_args.depth);
-		if (!cruft_po_args.threads)
-			cruft_po_args.threads = xstrdup_or_null(po_args.threads);
-		if (!cruft_po_args.max_pack_size)
-			cruft_po_args.max_pack_size = po_args.max_pack_size;
+		if (!cfg.cruft_po_args.window)
+			cfg.cruft_po_args.window = xstrdup_or_null(cfg.po_args.window);
+		if (!cfg.cruft_po_args.window_memory)
+			cfg.cruft_po_args.window_memory = xstrdup_or_null(cfg.po_args.window_memory);
+		if (!cfg.cruft_po_args.depth)
+			cfg.cruft_po_args.depth = xstrdup_or_null(cfg.po_args.depth);
+		if (!cfg.cruft_po_args.threads)
+			cfg.cruft_po_args.threads = xstrdup_or_null(cfg.po_args.threads);
+		if (!cfg.cruft_po_args.max_pack_size)
+			cfg.cruft_po_args.max_pack_size = cfg.po_args.max_pack_size;
 
-		cruft_po_args.local = po_args.local;
-		cruft_po_args.quiet = po_args.quiet;
+		cfg.cruft_po_args.local = cfg.po_args.local;
+		cfg.cruft_po_args.quiet = cfg.po_args.quiet;
 
-		ret = write_cruft_pack(&cruft_po_args, packtmp, pack_prefix,
-				       cruft_expiration,
-				       combine_cruft_below_size, &names,
+		ret = write_cruft_pack(&cfg.cruft_po_args, packtmp, pack_prefix,
+				       cfg.cruft_expiration,
+				       cfg.combine_cruft_below_size, &names,
 				       &existing);
 		if (ret)
 			goto cleanup;
 
-		if (delete_redundant && expire_to) {
+		if (cfg.delete_redundant && cfg.expire_to) {
 			/*
 			 * If `--expire-to` is given with `-d`, it's possible
 			 * that we're about to prune some objects. With cruft
@@ -601,7 +579,7 @@ int cmd_repack(int argc,
 			 * objects which are no older than
 			 * `--cruft-expiration`).
 			 *
-			 * To make this work, cruft_expiration must become NULL
+			 * To make this work, cfg.cruft_expiration must become NULL
 			 * so that this cruft pack doesn't actually prune any
 			 * objects. If it were non-NULL, this call would always
 			 * generate an empty pack (since every object not in the
@@ -614,7 +592,7 @@ int cmd_repack(int argc,
 			 * pack, but rather removing all cruft packs from the
 			 * main repository regardless of size.
 			 */
-			ret = write_cruft_pack(&cruft_po_args, expire_to,
+			ret = write_cruft_pack(&cfg.cruft_po_args, cfg.expire_to,
 					       pack_prefix,
 					       NULL,
 					       0ul,
@@ -625,12 +603,12 @@ int cmd_repack(int argc,
 		}
 	}
 
-	if (po_args.filter_options.choice) {
-		if (!filter_to)
-			filter_to = packtmp;
+	if (cfg.po_args.filter_options.choice) {
+		if (!cfg.filter_to)
+			cfg.filter_to = packtmp;
 
-		ret = write_filtered_pack(&po_args,
-					  filter_to,
+		ret = write_filtered_pack(&cfg.po_args,
+					  cfg.filter_to,
 					  find_pack_prefix(packdir, packtmp),
 					  &existing,
 					  &names);
@@ -660,10 +638,10 @@ int cmd_repack(int argc,
 	install_generated_packs(&names, packdir, packtmp);
 	/* End of pack replacement. */
 
-	if (delete_redundant && pack_everything & ALL_INTO_ONE)
+	if (cfg.delete_redundant && pack_everything & ALL_INTO_ONE)
 		mark_packs_for_deletion(&existing, &names);
 
-	if (write_midx) {
+	if (cfg.write_midx) {
 		ret = write_midx_included_packs(&existing, &geometry,
 						&names, &midx_pack_names,
 						refs_snapshot ? get_tempfile_path(refs_snapshot) : NULL,
@@ -677,7 +655,7 @@ int cmd_repack(int argc,
 
 	reprepare_packed_git(the_repository);
 
-	if (delete_redundant) {
+	if (cfg.delete_redundant) {
 		int opts = 0;
 		remove_redundant_existing_packs(&existing, packdir);
 
@@ -688,9 +666,9 @@ int cmd_repack(int argc,
 			opts |= PRUNE_PACKED_VERBOSE;
 		prune_packed_objects(opts);
 
-		if (!keep_unreachable &&
+		if (!cfg.keep_unreachable &&
 		    (!(pack_everything & LOOSEN_UNREACHABLE) ||
-		     unpack_unreachable) &&
+		     cfg.unpack_unreachable) &&
 		    is_repository_shallow(the_repository))
 			prune_shallow(PRUNE_QUICK);
 	}
@@ -707,13 +685,13 @@ int cmd_repack(int argc,
 	}
 
 cleanup:
-	string_list_clear(&keep_pack_list, 0);
+	string_list_clear(&cfg.keep_pack_list, 0);
 	string_list_clear(&names, 1);
 	existing_packs_release(&existing);
 	free_pack_geometry(&geometry);
 	string_list_clear(&midx_pack_names, 0);
-	pack_objects_args_release(&po_args);
-	pack_objects_args_release(&cruft_po_args);
+	pack_objects_args_release(&cfg.po_args);
+	pack_objects_args_release(&cfg.cruft_po_args);
 
 	return ret;
 }

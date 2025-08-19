@@ -40,6 +40,29 @@ void pack_objects_args_release(struct pack_objects_args *args);
 void repack_promisor_objects(const struct pack_objects_args *args,
 			     struct string_list *names,
 			     char *packtmp);
+struct repack_config {
+	int delete_redundant;
+	const char *unpack_unreachable;
+	int keep_unreachable;
+	struct string_list keep_pack_list;
+	struct pack_objects_args po_args;
+	struct pack_objects_args cruft_po_args;
+	int write_midx;
+	const char *cruft_expiration;
+	const char *expire_to;
+	const char *filter_to;
+	const char *opt_window;
+	const char *opt_window_memory;
+	const char *opt_depth;
+	const char *opt_threads;
+	unsigned long combine_cruft_below_size;
+};
+
+#define REPACK_CONFIG_INIT { \
+	.keep_pack_list = STRING_LIST_INIT_NODUP, \
+	.po_args = PACK_OBJECTS_ARGS_INIT, \
+	.cruft_po_args = PACK_OBJECTS_ARGS_INIT \
+}
 
 struct existing_packs {
 	struct string_list kept_packs;
