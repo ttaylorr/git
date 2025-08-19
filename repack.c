@@ -51,6 +51,9 @@ void prepare_pack_objects(struct child_process *cmd,
 	cmd->out = -1;
 }
 
+static struct generated_pack_data *populate_pack_exts(const char *name,
+						      const char *packtmp);
+
 int finish_pack_objects_cmd(struct child_process *cmd,
 			    struct string_list *names,
 			    const char *packtmp, int local)
@@ -348,8 +351,8 @@ struct generated_pack_data {
 	struct tempfile *tempfiles[ARRAY_SIZE(exts)];
 };
 
-struct generated_pack_data *populate_pack_exts(const char *name,
-					       const char *packtmp)
+static struct generated_pack_data *populate_pack_exts(const char *name,
+						      const char *packtmp)
 {
 	struct stat statbuf;
 	struct strbuf path = STRBUF_INIT;
@@ -382,9 +385,9 @@ static int generated_pack_has_ext(const struct generated_pack_data *data,
 	BUG("unknown pack extension: '%s'", ext);
 }
 
-void install_generated_pack(struct generated_pack_data *data,
-			    const char *packdir, const char *packtmp,
-			    const char *name)
+static void install_generated_pack(struct generated_pack_data *data,
+				   const char *packdir, const char *packtmp,
+				   const char *name)
 {
 	size_t ext;
 
@@ -412,6 +415,18 @@ void install_generated_pack(struct generated_pack_data *data,
 			die_errno(_("could not unlink: %s"), fname);
 
 		free(fname);
+	}
+}
+
+void install_generated_packs(struct string_list *names, const char *packdir,
+			     const char *packtmp)
+{
+	struct string_list_item *item;
+
+	for_each_string_list_item(item, names) {
+		struct generated_pack_data *data = item->util;
+
+		install_generated_pack(data, packdir, packtmp, item->string);
 	}
 }
 

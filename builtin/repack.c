@@ -106,27 +106,6 @@ static int repack_config(const char *var, const char *value,
 	return git_default_config(var, value, ctx, cb);
 }
 
-/*
- * Write oid to the given struct child_process's stdin, starting it first if
- * necessary.
- */
-static int write_oid(const struct object_id *oid,
-		     struct packed_git *pack UNUSED,
-		     uint32_t pos UNUSED, void *data)
-{
-	struct child_process *cmd = data;
-
-	if (cmd->in == -1) {
-		if (start_command(cmd))
-			die(_("could not start pack-objects to repack promisor objects"));
-	}
-
-	if (write_in_full(cmd->in, oid_to_hex(oid), the_hash_algo->hexsz) < 0 ||
-	    write_in_full(cmd->in, "\n", 1) < 0)
-		die(_("failed to feed promisor objects to pack-objects"));
-	return 0;
-}
-
 static int write_filtered_pack(const struct pack_objects_args *args,
 			       const char *destination,
 			       const char *pack_prefix,
@@ -678,11 +657,7 @@ int cmd_repack(int argc,
 	/*
 	 * Ok we have prepared all new packfiles.
 	 */
-	for_each_string_list_item(item, &names) {
-		struct generated_pack_data *data = item->util;
-
-		install_generated_pack(data, packdir, packtmp, item->string);
-	}
+	install_generated_packs(&names, packdir, packtmp);
 	/* End of pack replacement. */
 
 	if (delete_redundant && pack_everything & ALL_INTO_ONE)

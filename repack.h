@@ -82,13 +82,8 @@ void collect_pack_filenames(struct existing_packs *existing,
 
 void existing_packs_release(struct existing_packs *existing);
 
-struct generated_pack_data;
-
-struct generated_pack_data *populate_pack_exts(const char *name,
-					       const char *packtmp);
-void install_generated_pack(struct generated_pack_data *data,
-			    const char *packdir, const char *packtmp,
-			    const char *name);
+void install_generated_packs(struct string_list *names, const char *packdir,
+			     const char *packtmp);
 
 void midx_snapshot_refs(struct tempfile *f);
 int midx_has_unknown_packs(struct string_list *midx_pack_names,
