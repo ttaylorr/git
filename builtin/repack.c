@@ -127,69 +127,6 @@ static int write_oid(const struct object_id *oid,
 	return 0;
 }
 
-static void repack_promisor_objects(const struct pack_objects_args *args,
-				    struct string_list *names)
-{
-	struct child_process cmd = CHILD_PROCESS_INIT;
-	FILE *out;
-	struct strbuf line = STRBUF_INIT;
-
-	prepare_pack_objects(&cmd, args, packtmp);
-	cmd.in = -1;
-
-	/*
-	 * NEEDSWORK: Giving pack-objects only the OIDs without any ordering
-	 * hints may result in suboptimal deltas in the resulting pack. See if
-	 * the OIDs can be sent with fake paths such that pack-objects can use a
-	 * {type -> existing pack order} ordering when computing deltas instead
-	 * of a {type -> size} ordering, which may produce better deltas.
-	 */
-	for_each_packed_object(the_repository, write_oid, &cmd,
-			       FOR_EACH_OBJECT_PROMISOR_ONLY);
-
-	if (cmd.in == -1) {
-		/* No packed objects; cmd was never started */
-		child_process_clear(&cmd);
-		return;
-	}
-
-	close(cmd.in);
-
-	out = xfdopen(cmd.out, "r");
-	while (strbuf_getline_lf(&line, out) != EOF) {
-		struct string_list_item *item;
-		char *promisor_name;
-
-		if (line.len != the_hash_algo->hexsz)
-			die(_("repack: Expecting full hex object ID lines only from pack-objects."));
-		item = string_list_append(names, line.buf);
-
-		/*
-		 * pack-objects creates the .pack and .idx files, but not the
-		 * .promisor file. Create the .promisor file, which is empty.
-		 *
-		 * NEEDSWORK: fetch-pack sometimes generates non-empty
-		 * .promisor files containing the ref names and associated
-		 * hashes at the point of generation of the corresponding
-		 * packfile, but this would not preserve their contents. Maybe
-		 * concatenate the contents of all .promisor files instead of
-		 * just creating a new empty file.
-		 */
-		promisor_name = mkpathdup("%s-%s.promisor", packtmp,
-					  line.buf);
-		write_promisor_file(promisor_name, NULL, 0);
-
-		item->util = populate_pack_exts(item->string, packtmp);
-
-		free(promisor_name);
-	}
-
-	fclose(out);
-	if (finish_command(&cmd))
-		die(_("could not finish pack-objects to repack promisor objects"));
-	strbuf_release(&line);
-}
-
 static int write_filtered_pack(const struct pack_objects_args *args,
 			       const char *destination,
 			       const char *pack_prefix,
@@ -557,7 +494,7 @@ int cmd_repack(int argc,
 		strvec_push(&cmd.args, "--delta-islands");
 
 	if (pack_everything & ALL_INTO_ONE) {
-		repack_promisor_objects(&po_args, &names);
+		repack_promisor_objects(&po_args, &names, packtmp);
 
 		if (has_existing_non_kept_packs(&existing) &&
 		    delete_redundant &&

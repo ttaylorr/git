@@ -37,6 +37,10 @@ int finish_pack_objects_cmd(struct child_process *cmd,
 
 void pack_objects_args_release(struct pack_objects_args *args);
 
+void repack_promisor_objects(const struct pack_objects_args *args,
+			     struct string_list *names,
+			     char *packtmp);
+
 struct existing_packs {
 	struct string_list kept_packs;
 	struct string_list non_kept_packs;
