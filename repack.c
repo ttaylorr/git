@@ -285,7 +285,8 @@ struct generated_pack_data *populate_pack_exts(const char *name,
 	return data;
 }
 
-int has_pack_ext(const struct generated_pack_data *data, const char *ext)
+static int generated_pack_has_ext(const struct generated_pack_data *data,
+				  const char *ext)
 {
 	int i;
 	for (i = 0; i < ARRAY_SIZE(exts); i++) {
@@ -660,7 +661,7 @@ int write_midx_included_packs(struct existing_packs *existing,
 		 */
 		for_each_string_list_item(item, names) {
 			struct generated_pack_data *data = item->util;
-			if (has_pack_ext(data, ".mtimes"))
+			if (generated_pack_has_ext(data, ".mtimes"))
 				continue;
 
 			strvec_pushf(&cmd.args, "--preferred-pack=pack-%s.pack",

@@ -82,7 +82,6 @@ struct generated_pack_data;
 
 struct generated_pack_data *populate_pack_exts(const char *name,
 					       const char *packtmp);
-int has_pack_ext(const struct generated_pack_data *data, const char *ext);
 void install_generated_pack(struct generated_pack_data *data,
 			    const char *packdir, const char *packtmp,
 			    const char *name);
