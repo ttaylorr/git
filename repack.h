@@ -41,6 +41,7 @@ void repack_promisor_objects(const struct pack_objects_args *args,
 			     struct string_list *names,
 			     char *packtmp);
 struct repack_config {
+	int pack_kept_objects;
 	int delete_redundant;
 	const char *unpack_unreachable;
 	int keep_unreachable;
