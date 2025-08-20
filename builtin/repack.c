@@ -406,8 +406,7 @@ int cmd_repack(int argc,
 	if (geometry.split_factor) {
 		if (pack_everything)
 			die(_("options '%s' and '%s' cannot be used together"), "--geometric", "-A/-a");
-		init_pack_geometry(&geometry, &existing, &cfg.po_args,
-				   cfg.pack_kept_objects);
+		init_pack_geometry(&geometry, &cfg, &existing);
 		split_pack_geometry(&geometry);
 	}
 

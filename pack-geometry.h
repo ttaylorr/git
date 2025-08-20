@@ -5,6 +5,7 @@ struct packed_git;
 struct existing_packs;
 struct pack_objects_args;
 struct string_list;
+struct repack_config;
 
 struct pack_geometry {
 	struct packed_git **pack;
@@ -15,9 +16,8 @@ struct pack_geometry {
 };
 
 void init_pack_geometry(struct pack_geometry *geometry,
-			struct existing_packs *existing,
-			const struct pack_objects_args *args,
-			int pack_kept_objects);
+			struct repack_config *cfg,
+			struct existing_packs *existing);
 
 void split_pack_geometry(struct pack_geometry *geometry);
 

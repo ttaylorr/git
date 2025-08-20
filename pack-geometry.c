@@ -27,15 +27,14 @@ static int geometry_cmp(const void *va, const void *vb)
 }
 
 void init_pack_geometry(struct pack_geometry *geometry,
-			struct existing_packs *existing,
-			const struct pack_objects_args *args,
-			int pack_kept_objects)
+			struct repack_config *cfg,
+			struct existing_packs *existing)
 {
 	struct packed_git *p;
 	struct strbuf buf = STRBUF_INIT;
 
 	for (p = get_all_packs(the_repository); p; p = p->next) {
-		if (args->local && !p->pack_local)
+		if (cfg->po_args.local && !p->pack_local)
 			/*
 			 * When asked to only repack local packfiles we skip
 			 * over any packfiles that are borrowed from alternate
@@ -43,7 +42,7 @@ void init_pack_geometry(struct pack_geometry *geometry,
 			 */
 			continue;
 
-		if (!pack_kept_objects) {
+		if (!cfg->pack_kept_objects) {
 			/*
 			 * Any pack that has its pack_keep bit set will
 			 * appear in existing->kept_packs below, but
