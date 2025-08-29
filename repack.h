@@ -48,7 +48,13 @@ struct repack_config {
 	struct string_list keep_pack_list;
 	struct pack_objects_args po_args;
 	struct pack_objects_args cruft_po_args;
-	int write_midx;
+	enum {
+		WRITE_MIDX_NONE,
+		WRITE_MIDX_DEFAULT,
+		WRITE_MIDX_GEOMETRIC,
+	} write_midx;
+	int midx_split_factor;
+	int midx_new_layer_threshold;
 	const char *cruft_expiration;
 	const char *expire_to;
 	const char *filter_to;
@@ -124,5 +130,6 @@ struct repack_midx_opts {
 };
 
 int write_midx_included_packs(struct repack_midx_opts *opts);
+int write_midx_incremental(struct repack_midx_opts *opts);
 
 #endif /* REPACK_H */

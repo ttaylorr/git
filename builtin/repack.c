@@ -97,6 +97,15 @@ static int repack_config(const char *var, const char *value,
 		midx_must_contain_cruft = git_config_bool(var, value);
 		return 0;
 	}
+	if (!strcmp(var, "repack.midxsplitfactor")) {
+		cb->midx_split_factor = git_config_int(var, value, ctx->kvi);
+		return 0;
+	}
+	if (!strcmp(var, "repack.midxnewlayerthreshold")) {
+		cb->midx_new_layer_threshold = git_config_int(var, value,
+							      ctx->kvi);
+		return 0;
+	}
 	return git_default_config(var, value, ctx, cb);
 }
 
@@ -256,6 +265,28 @@ static const char *find_pack_prefix(const char *packdir, const char *packtmp)
 	return pack_prefix;
 }
 
+static int option_parse_write_midx(const struct option *opt, const char *arg,
+				   int unset)
+{
+	struct repack_config *cfg = opt->value;
+
+	if (unset) {
+		cfg->write_midx = WRITE_MIDX_NONE;
+		return 0;
+	}
+
+	if (!arg || !*arg)
+		cfg->write_midx = WRITE_MIDX_DEFAULT;
+	else if (!strcmp(arg, "default"))
+		cfg->write_midx = WRITE_MIDX_DEFAULT;
+	else if (!strcmp(arg, "geometric"))
+		cfg->write_midx = WRITE_MIDX_GEOMETRIC;
+	else
+		return error(_("unknown value for %s: %s"), opt->long_name, arg);
+
+	return 0;
+}
+
 int cmd_repack(int argc,
 	       const char **argv,
 	       const char *prefix,
@@ -330,8 +361,10 @@ int cmd_repack(int argc,
 				N_("do not repack this pack")),
 		OPT_INTEGER('g', "geometric", &geometry.split_factor,
 			    N_("find a geometric progression with factor <N>")),
-		OPT_BOOL('m', "write-midx", &cfg.write_midx,
-			   N_("write a multi-pack index of the resulting packs")),
+		OPT_CALLBACK('m', "write-midx", &cfg.write_midx,
+			   N_("mode"),
+			   N_("write a multi-pack index of the resulting packs"),
+			   option_parse_write_midx),
 		OPT_STRING(0, "expire-to", &cfg.expire_to, N_("dir"),
 			   N_("pack prefix to store a pack containing pruned objects")),
 		OPT_STRING(0, "filter-to", &cfg.filter_to, N_("dir"),
@@ -650,7 +683,10 @@ int cmd_repack(int argc,
 			.midx_must_contain_cruft = midx_must_contain_cruft,
 		};
 
-		ret = write_midx_included_packs(&opts);
+		if (cfg.write_midx == WRITE_MIDX_DEFAULT)
+			ret = write_midx_included_packs(&opts);
+		else
+			ret = write_midx_incremental(&opts);
 
 		if (ret)
 			goto cleanup;
