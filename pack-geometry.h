@@ -13,6 +13,7 @@ struct pack_geometry {
 	uint32_t split;
 
 	int split_factor;
+	int midx_tip_rewritten;
 };
 
 void init_pack_geometry(struct pack_geometry *geometry,

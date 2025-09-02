@@ -790,3 +790,166 @@ out:
 
 	return ret;
 }
+
+struct midx_compaction_step {
+	union {
+		struct multi_pack_index *midx;
+		struct {
+			struct multi_pack_index *from;
+			struct multi_pack_index *to;
+		} compact;
+		struct string_list packs;
+	} u;
+	uint32_t nr_objects;
+
+	enum {
+		MIDX_UNKNOWN,
+		MIDX_KEEP_AS_IS,
+		MIDX_WRITE_PACKS,
+		MIDX_COMPACT_MIDXS,
+	} type;
+};
+
+int write_midx_incremental(struct repack_midx_opts *opts)
+{
+	struct midx_compaction_step *steps = NULL;
+	struct midx_compaction_step *step;
+	size_t steps_alloc = 0, steps_nr = 0;
+
+	struct multi_pack_index *m = get_local_multi_pack_index(the_repository);
+	struct strbuf buf = STRBUF_INIT;
+	uint32_t i, j;
+	uint32_t nr_objects;
+
+	ALLOC_GROW(steps, steps_alloc, steps_nr + 1);
+	step = &steps[steps_nr++];
+
+	memset(step, 0, sizeof(*step));
+
+	/*
+	 * The first MIDX in the resulting chain is always going to be
+	 * new.
+	 *
+	 * At a minimum, it will include all of the newly rewritten
+	 * packs. If the tip MIDX was rewritten, it will also include
+	 * any of its packs which were *not* rolled up as part of the
+	 * geometric repack.
+	 *
+	 * It may grow to include the packs from zero or more MIDXs
+	 * from the old chain, beginning either at the old tip (if the
+	 * MIDX tip was *not* rewritten) or the old tip's base
+	 * (otherwise).
+	 */
+	step->type = MIDX_WRITE_PACKS;
+	string_list_init_nodup(&step->u.packs);
+
+	/* First include all of the newly written packs. */
+	for (i = 0; i < opts->names->nr; i++) {
+		strbuf_addf(&buf, "pack-%s.idx", opts->names->items[i].string);
+		string_list_append(&step->u.packs, strbuf_detach(&buf, NULL));
+	}
+	for (i = 0; i < opts->geometry->split; i++)
+		step->nr_objects = u32_add(step->nr_objects,
+					   opts->geometry->pack[i]->num_objects);
+
+	/*
+	 * Then include all of the packs from the previous MIDX tip,
+	 * if that MIDX layer was rewritten.
+	 */
+	if (opts->geometry->rewrote_midx_tip) {
+		struct pack_geometry *geometry = opts->geometry;
+
+		for (i = geometry->split; i < geometry->pack_nr; i++) {
+			struct packed_git *p = opts->geometry->pack[i];
+
+			strbuf_addstr(&buf, pack_basename(p));
+			strbuf_strip_suffix(&buf, ".pack");
+			strbuf_addstr(&buf, ".idx");
+
+			string_list_append(&step->u.packs,
+					   strbuf_detach(&buf, NULL));
+			step->nr_objects = u32_add(step->nr_objects,
+						   p->num_objects);
+		}
+	}
+
+	/*
+	 * If the MIDX tip was rewritten, then we no longer consider
+	 * it a candidate for compaction, since it will not exist in
+	 * the resultant MIDX chain.
+	 */
+	if (opts->geometry->rewrote_midx_tip)
+		m = m->base_midx;
+
+	/*
+	 * Compact additional MIDX layers into this proposed one until
+	 * the merging condition is violated.
+	 */
+	while (m) {
+		if (u32_mult(step->nr_objects, opts->midx_factor) < m->nr_objects) {
+			for (i = m->num_packs_in_base;
+			     i < m->num_packs_in_base + m->pack_nr; i++) {
+				struct packed_git *p;
+				if (prepare_midx_pack(the_repository, m, i))
+					die("uh-oh");
+
+				p = nth_midxed_pack(m, i);
+
+				strbuf_addstr(&buf, pack_basename(m->packs[j]));
+				strbuf_strip_suffix(&buf, ".pack");
+				strbuf_addstr(&buf, ".idx");
+
+				string_list_append(&step->u.packs,
+						   strbuf_detach(&buf, NULL));
+			}
+
+			step->nr_objects = u32_add(step->nr_objects,
+						   m->num_objects);
+
+			m = m->base_midx;
+		} else {
+			break;
+		}
+	}
+
+	/*
+	 * Then start over, repeat, and either compact or keep as-is
+	 * until we have exhausted the chain.
+	 *
+	 * Finally, evaluate the remainder of the MIDX chain (if any)
+	 * and either compact a sequence of adjacent layers or keep
+	 * individual layers as-is according to the same merging
+	 * condition as above.
+	 */
+	while (m) {
+		struct multi_pack_index *next = m;
+
+		ALLOC_GROW(steps, steps_alloc, steps_nr + 1);
+		step = &steps[steps_nr++];
+
+		step->type = MIDX_UNKNOWN;
+		step->nr_objects = m->nr_objects;
+
+		memset(step, 0, sizeof(*step));
+
+		while (next->base_midx) {
+			if (u32_mult(step->nr_objects, opts->midx_factor) <
+			    next->base_midx->nr_objects) {
+				next = next->base_midx;
+				step->nr_objects = u32_add(step->nr_objects,
+							   next->nr_objects);
+			}
+		}
+
+		if (m == next) {
+			step->type = MIDX_KEEP_AS_IS;
+			step->u.midx = m;
+		} else {
+			step->type = MIDX_COMPACT_MIDXS;
+			step->u.compact.from = m;
+			step->u.compact.to = next;
+		}
+
+		m = next->base_midx;
+	}
+}

@@ -681,6 +681,8 @@ int cmd_repack(int argc,
 			.show_progress = show_progress,
 			.write_bitmaps = write_bitmaps,
 			.midx_must_contain_cruft = midx_must_contain_cruft,
+			.midx_split_factor = cfg.midx_split_factor,
+			.midx_new_layer_threshold = cfg.midx_new_layer_threshold,
 		};
 
 		if (cfg.write_midx == WRITE_MIDX_DEFAULT)
