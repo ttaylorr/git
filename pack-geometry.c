@@ -2,6 +2,7 @@
 #define DISABLE_SIGN_COMPARE_WARNINGS
 
 #include "git-compat-util.h"
+#include "midx.h"
 #include "pack-geometry.h"
 #include "repack.h"
 #include "packfile.h"

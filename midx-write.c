@@ -1537,7 +1537,7 @@ static int write_midx_internal(struct write_midx_opts *opts)
 		hold_lock_file_for_update(&lk, midx_name.buf, LOCK_DIE_ON_ERROR);
 		f = hashfd(opts->r->hash_algo, get_lock_file_fd(&lk),
 			   get_lock_file_path(&lk));
-	} else if (!(opts->flags & MIDX_WRITE_PRINT_CHECKSUM))
+	} else if (!(opts->flags & MIDX_WRITE_PRINT_CHECKSUM)) {
 		struct strbuf lock_name = STRBUF_INIT;
 
 		get_midx_chain_filename(&lock_name, opts->object_dir);
@@ -1665,7 +1665,7 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	}
 	CALLOC_ARRAY(keep_hashes, keep_hashes_nr);
 
-	if (opts->flags & MIDX_WRITE_CHECKSUM) {
+	if (opts->flags & MIDX_WRITE_PRINT_CHECKSUM) {
 		printf("%s\n", hash_to_hex_algop(midx_hash, opts->r->hash_algo));
 	} else if (ctx.incremental) {
 		FILE *chainf = fdopen_lock_file(&lk, "w");
