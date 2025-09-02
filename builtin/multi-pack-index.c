@@ -14,11 +14,11 @@
 
 #define BUILTIN_MIDX_WRITE_USAGE \
 	N_("git multi-pack-index [<options>] write [--preferred-pack=<pack>]" \
-	   "[--refs-snapshot=<path>]")
+	   "[--refs-snapshot=<path>] [--print-checksum]")
 
 #define BUILTIN_MIDX_COMPACT_USAGE \
 	N_("git multi-pack-index [<options>] compact [--bitmap] [--progress] " \
-	   "[--incremental] <from> <to>")
+	   "[--incremental] [--print-checksum] <from> <to>")
 
 #define BUILTIN_MIDX_VERIFY_USAGE \
 	N_("git multi-pack-index [<options>] verify")
@@ -143,6 +143,9 @@ static int cmd_multi_pack_index_write(int argc, const char **argv,
 			N_("force progress reporting"), MIDX_PROGRESS),
 		OPT_BIT(0, "incremental", &opts.flags,
 			N_("write a new incremental MIDX"), MIDX_WRITE_INCREMENTAL),
+		OPT_BIT(0, "print-checksum", &opts.flags,
+			N_("print the new checksum without updating the chain"),
+			MIDX_WRITE_PRINT_CHECKSUM),
 		OPT_BOOL(0, "stdin-packs", &opts.stdin_packs,
 			 N_("write multi-pack index containing only given indexes")),
 		OPT_FILENAME(0, "refs-snapshot", &opts.refs_snapshot,
@@ -210,6 +213,9 @@ static int cmd_multi_pack_index_compact(int argc, const char **argv,
 			N_("force progress reporting"), MIDX_PROGRESS),
 		OPT_BIT(0, "incremental", &opts.flags,
 			N_("write a new incremental MIDX"), MIDX_WRITE_INCREMENTAL),
+		OPT_BIT(0, "print-checksum", &opts.flags,
+			N_("print the new checksum without updating the chain"),
+			MIDX_WRITE_PRINT_CHECKSUM),
 		OPT_END(),
 	};
 

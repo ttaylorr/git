@@ -1533,7 +1533,11 @@ static int write_midx_internal(struct write_midx_opts *opts)
 		opts->flags &= ~(MIDX_WRITE_REV_INDEX | MIDX_WRITE_BITMAP);
 	}
 
-	if (ctx.incremental) {
+	if (!ctx.incremental) {
+		hold_lock_file_for_update(&lk, midx_name.buf, LOCK_DIE_ON_ERROR);
+		f = hashfd(opts->r->hash_algo, get_lock_file_fd(&lk),
+			   get_lock_file_path(&lk));
+	} else if (!(opts->flags & MIDX_WRITE_PRINT_CHECKSUM))
 		struct strbuf lock_name = STRBUF_INIT;
 
 		get_midx_chain_filename(&lock_name, opts->object_dir);
@@ -1554,10 +1558,6 @@ static int write_midx_internal(struct write_midx_opts *opts)
 
 		f = hashfd(opts->r->hash_algo, get_tempfile_fd(incr),
 			   get_tempfile_path(incr));
-	} else {
-		hold_lock_file_for_update(&lk, midx_name.buf, LOCK_DIE_ON_ERROR);
-		f = hashfd(opts->r->hash_algo, get_lock_file_fd(&lk),
-			   get_lock_file_path(&lk));
 	}
 
 	cf = init_chunkfile(f);
@@ -1665,7 +1665,9 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	}
 	CALLOC_ARRAY(keep_hashes, keep_hashes_nr);
 
-	if (ctx.incremental) {
+	if (opts->flags & MIDX_WRITE_CHECKSUM) {
+		printf("%s\n", hash_to_hex_algop(midx_hash, opts->r->hash_algo));
+	} else if (ctx.incremental) {
 		FILE *chainf = fdopen_lock_file(&lk, "w");
 		struct strbuf final_midx_name = STRBUF_INIT;
 		struct multi_pack_index *m = ctx.base_midx;
@@ -1747,8 +1749,9 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	if (commit_lock_file(&lk) < 0)
 		die_errno(_("could not write multi-pack-index"));
 
-	clear_midx_files(opts->r, opts->object_dir, keep_hashes, keep_hashes_nr,
-			 ctx.incremental);
+	if (!(opts->flags & MIDX_WRITE_PRINT_CHECKSUM))
+		clear_midx_files(opts->r, opts->object_dir, keep_hashes,
+				 keep_hashes_nr, ctx.incremental);
 
 cleanup:
 	for (i = 0; i < ctx.nr; i++) {

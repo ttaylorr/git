@@ -704,6 +704,62 @@ static void remove_redundant_bitmaps(struct string_list *include,
 	strbuf_release(&path);
 }
 
+static void prepare_midx_command(struct child_process *cmd,
+				 struct repack_midx_opts *opts,
+				 const char *verb)
+{
+	cmd->git_cmd = 1;
+
+	strvec_pushl(&cmd->args, "multi-pack-index", verb, NULL);
+
+	if (opts->show_progress)
+		strvec_push(&cmd->args, "--progress");
+	else
+		strvec_push(&cmd->args, "--no-progress");
+
+	if (opts->write_bitmaps > 0)
+		strvec_push(&cmd->args, "--bitmap");
+
+	if (opts->refs_snapshot)
+		strvec_pushf(&cmd.args, "--refs-snapshot=%s",
+			     get_tempfile_path(opts->refs_snapshot));
+}
+
+static int fill_midx_stdin_packs(struct child_process *cmd,
+				 struct string_list *include,
+				 struct string_list *out)
+{
+	struct string_list_item *item;
+	FILE *in;
+	int ret;
+
+	cmd.in = -1;
+	if (out)
+		cmd.out = -1;
+
+	ret = start_command(&cmd);
+	if (ret)
+		return ret;
+
+	in = xfdopen(cmd.in, "w");
+	for_each_string_list_item(item, &include)
+		fprintf(in, "%s\n", item->string);
+	fclose(in);
+
+	if (out) {
+		struct strbuf buf = STRBUF_INIT;
+		FILE *outf = xfdopen(cmd.out, "r");
+
+		while (strbuf_getline_lf(&buf, outf) != EOF)
+			string_list_append(out, buf.buf);
+		strbuf_release(&buf);
+
+		fclose(outf);
+	}
+
+	return finish_command(&cmd);
+}
+
 int write_midx_included_packs(struct repack_midx_opts *opts)
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
@@ -718,19 +774,8 @@ int write_midx_included_packs(struct repack_midx_opts *opts)
 	if (!include.nr)
 		goto out;
 
-	cmd.in = -1;
-	cmd.git_cmd = 1;
-
-	strvec_push(&cmd.args, "multi-pack-index");
-	strvec_pushl(&cmd.args, "write", "--stdin-packs", NULL);
-
-	if (opts->show_progress)
-		strvec_push(&cmd.args, "--progress");
-	else
-		strvec_push(&cmd.args, "--no-progress");
-
-	if (opts->write_bitmaps > 0)
-		strvec_push(&cmd.args, "--bitmap");
+	prepare_midx_command(&cmd, opts, "write");
+	strvec_push(&cmd.args, "--stdin-packs");
 
 	if (preferred)
 		strvec_pushf(&cmd.args, "--preferred-pack=%s",
@@ -768,20 +813,7 @@ int write_midx_included_packs(struct repack_midx_opts *opts)
 		;
 	}
 
-	if (opts->refs_snapshot)
-		strvec_pushf(&cmd.args, "--refs-snapshot=%s",
-			     get_tempfile_path(opts->refs_snapshot));
-
-	ret = start_command(&cmd);
-	if (ret)
-		goto out;
-
-	in = xfdopen(cmd.in, "w");
-	for_each_string_list_item(item, &include)
-		fprintf(in, "%s\n", item->string);
-	fclose(in);
-
-	ret = finish_command(&cmd);
+	ret = fill_midx_stdin_packs(&cmd, &include);
 out:
 	if (!ret && opts->write_bitmaps)
 		remove_redundant_bitmaps(&include, opts->packdir);
@@ -801,6 +833,7 @@ struct midx_compaction_step {
 		struct string_list packs;
 	} u;
 	uint32_t nr_objects;
+	const char *result;
 
 	enum {
 		MIDX_UNKNOWN,
@@ -810,7 +843,64 @@ struct midx_compaction_step {
 	} type;
 };
 
-int write_midx_incremental(struct repack_midx_opts *opts)
+static int midx_compaction_step_exec(struct midx_compaction_step *step,
+				     struct repack_midx_opts *opts)
+{
+	struct child_process cmd = CHILD_PROCESS_INIT;
+	struct string_list out = STRING_LIST_INIT_DUP;
+	int ret = 0;
+
+	switch (step->type) {
+	case MIDX_KEEP_AS_IS:
+		step->result = xstrdup(oid_to_hex(get_midx_checksum(&step->u.midx)));
+		break;
+	case MIDX_WRITE_PACKS:
+		prepare_midx_command(&cmd, opts, "write");
+		strvec_pushl(&cmd.args, "--stdin-packs", "--incremental",
+			     "--print-checksum", NULL);
+
+		ret = fill_midx_stdin_packs(&cmd, &step->u.packs, &out);
+		break;
+	case MIDX_COMPACT_MIDXS:
+		FILE *out;
+		struct strbuf buf = STRBUF_INIT;
+
+		const unsigned char *from =
+			get_midx_checksum(&step->u.compact.from);
+		const unsigned char *to =
+			get_midx_checksum(&step->u.compact.to);
+
+		prepare_midx_command(&cmd, opts, "compact", "--incremental",
+				     "--print-checksum", NULL);
+
+		strvec_push(&cmd.args, oid_to_hex(from));
+		strvec_push(&cmd.args, oid_to_hex(to));
+
+		ret = start_command(&cmd);
+		if (ret)
+			return ret;
+
+		out = xfdopen(cmd.out, "r");
+		while (strbuf_getline_lf(&buf, out) != EOF) {
+			if (result)
+				BUG("unexpected output: %s", out.buf);
+			step->result = strbuf_detach(&buf, NULL);
+		}
+
+		ret = finish_command(&cmd);
+		strbuf_release(&buf);
+
+		break;
+	default:
+		BUG("unknown MIDX compaction step type: %d", step->type);
+	}
+
+	return ret;
+}
+
+static int make_compaction_plan(struct repack_midx_opts *opts,
+				struct midx_compaction_step **steps_p,
+				size_t *steps_nr)
 {
 	struct midx_compaction_step *steps = NULL;
 	struct midx_compaction_step *step;
@@ -890,8 +980,11 @@ int write_midx_incremental(struct repack_midx_opts *opts)
 			for (i = m->num_packs_in_base;
 			     i < m->num_packs_in_base + m->pack_nr; i++) {
 				struct packed_git *p;
-				if (prepare_midx_pack(the_repository, m, i))
-					die("uh-oh");
+				if (prepare_midx_pack(the_repository, m, i)) {
+					free(steps);
+					return error(_("could not load pack %u of MIDX %s"),
+						     i, oid_to_hex(&m->oid));
+				}
 
 				p = nth_midxed_pack(m, i);
 
@@ -952,4 +1045,45 @@ int write_midx_incremental(struct repack_midx_opts *opts)
 
 		m = next->base_midx;
 	}
+
+	*steps_p = steps;
+	*steps_nr = steps_nr;
+	return 0;
+}
+
+int write_midx_incremental(struct repack_midx_opts *opts)
+{
+	struct midx_compaction_step *steps = NULL;
+	struct strbuf lock_name = STRBUF_INIT;
+	struct lock_file lf;
+	FILE *chain;
+	size_t steps_nr = 0;
+	int ret = 0;
+
+	if (make_compaction_plan(opts, &steps, &steps_nr) < 0)
+		return error(_("unable to generate compaction plan"));
+
+	for (size_t i = 0; i < steps_nr; i++) {
+		if (midx_compaction_step_exec(&step) < 0) {
+			ret = error(_("unable to execute compaction step %"PRIuMAX),
+				    (uintmax_t)i);
+			goto done;
+		}
+	}
+
+	get_midx_chain_filename(&lock_name,
+				repo_get_object_directory(the_repository));
+	hold_lock_file_for_update(&lf, lock_name.buf, LOCK_DIE_ON_ERROR);
+	chain = fdopen_lock_file(&lf, "w");
+
+	if (!chainf) {
+		ret = error_errno(_("unable to open multi-pack-index chain file"));
+		goto done;
+	}
+
+	for (size_t i = steps_nr - 1; i > 0; i--)
+		fprintf(chain, "%s\n", steps[i].result);
+
+done:
+	free(steps);
 }
