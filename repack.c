@@ -849,8 +849,23 @@ struct midx_compaction_step {
 	} type;
 };
 
+static const char *midx_compaction_step_base(struct midx_compaction_step *step)
+{
+	switch (step->type) {
+	case MIDX_WRITE_PACKS:
+		BUG("cannot use a MIDX_WRTIE_PACKS step as a base");
+	case MIDX_KEEP_AS_IS:
+		return hash_to_hex(get_midx_checksum(step->u.midx));
+	case MIDX_COMPACT_MIDXS:
+		return hash_to_hex(get_midx_checksum(step->u.compact.to));
+	default:
+		BUG("unknown MIDX compaction step type: %d", step->type);
+	}
+}
+
 static int midx_compaction_step_exec(struct midx_compaction_step *step,
-				     struct repack_midx_opts *opts)
+				     struct repack_midx_opts *opts,
+				     const char *base)
 {
 	FILE *out;
 	struct strbuf buf = STRBUF_INIT;
@@ -876,7 +891,9 @@ static int midx_compaction_step_exec(struct midx_compaction_step *step,
 		strvec_pushl(&cmd.args, "--stdin-packs", "--incremental",
 			     "--print-checksum", NULL);
 
-		warning("%s:%d: [EVAL] writing new MIDX", __FILE__, __LINE__);
+		strvec_pushl(&cmd.args, "--base", base ? base : "none", NULL);
+
+		warning("%s:%d: [EVAL] writing new MIDX (base=%s)", __FILE__, __LINE__, base ? base : "<none>");
 		for (size_t i = 0; i < step->u.packs.nr; i++)
 			warning("  including pack %s",
 				step->u.packs.items[i].string);
@@ -1178,7 +1195,12 @@ int write_midx_incremental(struct repack_midx_opts *opts)
 
 	for (size_t i = 0; i < steps_nr; i++) {
 		struct midx_compaction_step *step = &steps[i];
-		if (midx_compaction_step_exec(step, opts) < 0) {
+		const char *base = NULL;
+
+		if (i + 1 < steps_nr)
+			base = midx_compaction_step_base(&steps[i + 1]);
+
+		if (midx_compaction_step_exec(step, opts, base) < 0) {
 			ret = error(_("unable to execute compaction step %"PRIuMAX),
 				    (uintmax_t)i);
 			goto done;

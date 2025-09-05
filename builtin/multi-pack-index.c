@@ -14,7 +14,7 @@
 
 #define BUILTIN_MIDX_WRITE_USAGE \
 	N_("git multi-pack-index [<options>] write [--preferred-pack=<pack>]" \
-	   "[--refs-snapshot=<path>] [--print-checksum]")
+	   "[--refs-snapshot=<path>] [--base=<checksum>] [--print-checksum]")
 
 #define BUILTIN_MIDX_COMPACT_USAGE \
 	N_("git multi-pack-index [<options>] compact [--bitmap] [--progress] " \
@@ -65,6 +65,7 @@ static struct opts_multi_pack_index {
 	unsigned long batch_size;
 	unsigned flags;
 	int stdin_packs;
+	char *base;
 } opts;
 
 
@@ -146,6 +147,8 @@ static int cmd_multi_pack_index_write(int argc, const char **argv,
 		OPT_BIT(0, "print-checksum", &opts.flags,
 			N_("print the new checksum without updating the chain"),
 			MIDX_WRITE_PRINT_CHECKSUM),
+		OPT_STRING(0, "base", &opts.base, N_("checksum"),
+			   N_("base MIDX for incremental update")),
 		OPT_BOOL(0, "stdin-packs", &opts.stdin_packs,
 			 N_("write multi-pack index containing only given indexes")),
 		OPT_FILENAME(0, "refs-snapshot", &opts.refs_snapshot,
@@ -171,6 +174,12 @@ static int cmd_multi_pack_index_write(int argc, const char **argv,
 		usage_with_options(builtin_multi_pack_index_write_usage,
 				   options);
 
+	if (opts.base && !(opts.flags & MIDX_WRITE_INCREMENTAL)) {
+		error(_("cannot use --base without --incremental"));
+		usage_with_options(builtin_multi_pack_index_write_usage,
+				   options);
+	}
+
 	FREE_AND_NULL(options);
 
 	if (opts.stdin_packs) {
@@ -180,8 +189,8 @@ static int cmd_multi_pack_index_write(int argc, const char **argv,
 
 		ret = write_midx_file_only(repo, opts.object_dir, &packs,
 					   opts.preferred_pack,
-					   opts.refs_snapshot, opts.flags);
-
+					   opts.refs_snapshot, opts.base,
+					   opts.flags);
 		string_list_clear(&packs, 0);
 		free(opts.refs_snapshot);
 
@@ -190,7 +199,7 @@ static int cmd_multi_pack_index_write(int argc, const char **argv,
 	}
 
 	ret = write_midx_file(repo, opts.object_dir, opts.preferred_pack,
-			      opts.refs_snapshot, opts.flags);
+			      opts.refs_snapshot, opts.base, opts.flags);
 
 	free(opts.refs_snapshot);
 	return ret;

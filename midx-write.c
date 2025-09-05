@@ -738,9 +738,14 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 
 	trace2_region_enter("midx", "midx_pack_order", ctx->repo);
 
-	if (ctx->incremental && ctx->base_midx)
+	if (ctx->incremental && ctx->base_midx) {
 		base_objects = ctx->base_midx->num_objects +
 			ctx->base_midx->num_objects_in_base;
+		warning("base MIDX: %s, has %"PRIu32" objects",
+			hash_to_hex_algop(get_midx_checksum(ctx->base_midx),
+					  ctx->repo->hash_algo),
+			base_objects);
+	}
 
 	ALLOC_ARRAY(pack_order, ctx->entries_nr);
 	ALLOC_ARRAY(data, ctx->entries_nr);
@@ -764,6 +769,9 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 			pack->bitmap_pos = i + base_objects;
 		pack->bitmap_nr++;
 		pack_order[i] = data[i].nr;
+
+		warning("object %s is at pack order %"PRIu32,
+			oid_to_hex(&e->oid), i + base_objects);
 	}
 	for (i = 0; i < ctx->nr; i++) {
 		struct pack_info *pack = &ctx->info[midx_pack_perm(ctx, i)];
@@ -1208,6 +1216,7 @@ struct write_midx_opts {
 	const char *object_dir;
 	const char *preferred_pack_name;
 	const char *refs_snapshot;
+	const char *base;
 	unsigned flags;
 
 };
@@ -1291,6 +1300,26 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	 */
 	if (ctx.compact)
 		ctx.base_midx = opts->compact.from->base_midx;
+
+	if (opts->base) {
+		const unsigned char *cur_hash;
+		char *cur_csum;
+		while (ctx.base_midx) {
+			cur_hash = get_midx_checksum(ctx.base_midx);
+			cur_csum = hash_to_hex_algop(cur_hash, ctx.repo->hash_algo);
+
+			warning("%s:%d: checking MIDX %s vs. %s", __FILE__, __LINE__,
+				cur_csum, opts->base);
+
+			if (!strcmp(opts->base, cur_csum)) {
+				warning("%s:%d: using MIDX %s as base",
+					__FILE__, __LINE__, cur_csum);
+				break;
+			}
+
+			ctx.base_midx = ctx.base_midx->base_midx;
+		}
+	}
 
 	ctx.nr = 0;
 	ctx.alloc = ctx.m ? ctx.m->num_packs + ctx.m->num_packs_in_base : 16;
@@ -1795,13 +1824,16 @@ cleanup:
 
 int write_midx_file(struct repository *r, const char *object_dir,
 		    const char *preferred_pack_name,
-		    const char *refs_snapshot, unsigned flags)
+		    const char *refs_snapshot,
+		    const char *base,
+		    unsigned flags)
 {
 	struct write_midx_opts opts = {
 		.r = r,
 		.object_dir = object_dir,
 		.preferred_pack_name = preferred_pack_name,
 		.refs_snapshot = refs_snapshot,
+		.base = base,
 		.flags = flags,
 	};
 
@@ -1811,7 +1843,9 @@ int write_midx_file(struct repository *r, const char *object_dir,
 int write_midx_file_only(struct repository *r, const char *object_dir,
 			 struct string_list *packs_to_include,
 			 const char *preferred_pack_name,
-			 const char *refs_snapshot, unsigned flags)
+			 const char *refs_snapshot,
+			 const char *base,
+			 unsigned flags)
 {
 	struct write_midx_opts opts = {
 		.r = r,
@@ -1819,6 +1853,7 @@ int write_midx_file_only(struct repository *r, const char *object_dir,
 		.object_dir = object_dir,
 		.preferred_pack_name = preferred_pack_name,
 		.refs_snapshot = refs_snapshot,
+		.base = base,
 		.flags = flags,
 	};
 

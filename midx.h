@@ -136,11 +136,12 @@ int prepare_multi_pack_index_one(struct repository *r, const char *object_dir, i
  */
 int write_midx_file(struct repository *r, const char *object_dir,
 		    const char *preferred_pack_name, const char *refs_snapshot,
-		    unsigned flags);
+		    const char *base, unsigned flags);
 int write_midx_file_only(struct repository *r, const char *object_dir,
 			 struct string_list *packs_to_include,
 			 const char *preferred_pack_name,
-			 const char *refs_snapshot, unsigned flags);
+			 const char *refs_snapshot, const char *base,
+			 unsigned flags);
 int write_midx_file_compact(struct repository *r, const char *object_dir,
 			    struct multi_pack_index *from,
 			    struct multi_pack_index *to,

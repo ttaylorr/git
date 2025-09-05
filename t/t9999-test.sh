@@ -227,7 +227,9 @@ test_expect_success 'midx compaction' '
 				test_commit "$i-$j" &&
 				git repack -d || return 1
 			done >/dev/null 2>&1 &&
-			git repack --geometric=2 -d --write-midx=geometric &&
+			git repack --geometric=2 -d --write-midx=geometric \
+				--write-bitmap-index &&
+			git fsck &&
 			dump_chain || return 1
 		done
 

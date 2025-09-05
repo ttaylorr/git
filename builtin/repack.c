@@ -722,7 +722,7 @@ int cmd_repack(int argc,
 		if (git_env_bool(GIT_TEST_MULTI_PACK_INDEX_WRITE_INCREMENTAL, 0))
 			flags |= MIDX_WRITE_INCREMENTAL;
 		write_midx_file(the_repository, repo_get_object_directory(the_repository),
-				NULL, NULL, flags);
+				NULL, NULL, NULL, flags);
 	}
 
 cleanup:
