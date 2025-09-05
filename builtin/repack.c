@@ -303,7 +303,7 @@ int cmd_repack(int argc,
 	int show_progress;
 
 	/* variables to be filled by option parsing */
-	struct repack_config cfg;
+	struct repack_config cfg = REPACK_CONFIG_INIT;
 
 	struct option builtin_repack_options[] = {
 		OPT_BIT('a', NULL, &pack_everything,
@@ -361,7 +361,7 @@ int cmd_repack(int argc,
 				N_("do not repack this pack")),
 		OPT_INTEGER('g', "geometric", &geometry.split_factor,
 			    N_("find a geometric progression with factor <N>")),
-		OPT_CALLBACK('m', "write-midx", &cfg.write_midx,
+		OPT_CALLBACK('m', "write-midx", &cfg,
 			   N_("mode"),
 			   N_("write a multi-pack index of the resulting packs"),
 			   option_parse_write_midx),
@@ -395,14 +395,15 @@ int cmd_repack(int argc,
 		pack_everything |= ALL_INTO_ONE;
 
 	if (write_bitmaps < 0) {
-		if (!cfg.write_midx &&
+		if (cfg.write_midx == WRITE_MIDX_NONE &&
 		    (!(pack_everything & ALL_INTO_ONE) || !is_bare_repository()))
 			write_bitmaps = 0;
 	}
 	if (cfg.pack_kept_objects < 0)
-		cfg.pack_kept_objects = write_bitmaps > 0 && !cfg.write_midx;
+		cfg.pack_kept_objects = write_bitmaps > 0 && cfg.write_midx == WRITE_MIDX_NONE;
 
-	if (write_bitmaps && !(pack_everything & ALL_INTO_ONE) && !cfg.write_midx)
+	if (write_bitmaps && !(pack_everything & ALL_INTO_ONE) &&
+	    cfg.write_midx == WRITE_MIDX_NONE)
 		die(_(incremental_bitmap_conflict_error));
 
 	if (write_bitmaps && cfg.po_args.local &&
@@ -418,7 +419,7 @@ int cmd_repack(int argc,
 		write_bitmaps = 0;
 	}
 
-	if (cfg.write_midx && write_bitmaps) {
+	if (cfg.write_midx != WRITE_MIDX_NONE && write_bitmaps) {
 		struct strbuf path = STRBUF_INIT;
 
 		strbuf_addf(&path, "%s/%s_XXXXXX", repo_get_object_directory(the_repository),
@@ -471,7 +472,7 @@ int cmd_repack(int argc,
 	}
 	if (repo_has_promisor_remote(the_repository))
 		strvec_push(&cmd.args, "--exclude-promisor-objects");
-	if (!cfg.write_midx) {
+	if (cfg.write_midx == WRITE_MIDX_NONE) {
 		if (write_bitmaps > 0)
 			strvec_push(&cmd.args, "--write-bitmap-index");
 		else if (write_bitmaps < 0)
@@ -659,8 +660,6 @@ int cmd_repack(int argc,
 		string_list_sort(&midx_pack_names);
 	}
 
-	close_object_store(the_repository->objects);
-
 	/*
 	 * Ok we have prepared all new packfiles.
 	 */
@@ -670,7 +669,7 @@ int cmd_repack(int argc,
 	if (cfg.delete_redundant && pack_everything & ALL_INTO_ONE)
 		mark_packs_for_deletion(&existing, &names);
 
-	if (cfg.write_midx) {
+	if (cfg.write_midx != WRITE_MIDX_NONE) {
 		struct repack_midx_opts opts = {
 			.existing = &existing,
 			.geometry = &geometry,
@@ -694,6 +693,7 @@ int cmd_repack(int argc,
 			goto cleanup;
 	}
 
+	close_object_store(the_repository->objects);
 	reprepare_packed_git(the_repository);
 
 	if (cfg.delete_redundant) {

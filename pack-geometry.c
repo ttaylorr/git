@@ -36,9 +36,8 @@ void init_pack_geometry(struct pack_geometry *geometry,
 	struct multi_pack_index *m = get_multi_pack_index(the_repository);
 
 	for (p = get_all_packs(the_repository); p; p = p->next) {
-
-		if (p->multi_pack_index &&
-		    cfg->write_midx == MIDX_WRITE_INCREMENTAL) {
+		if (cfg->write_midx == WRITE_MIDX_GEOMETRIC &&
+		    p->multi_pack_index) {
 			/*
 			 * When writing MIDX layers incrementally, ignore packs
 			 * unless they are in the most recent MIDX layer *and*
@@ -51,7 +50,7 @@ void init_pack_geometry(struct pack_geometry *geometry,
 			 * those cases we want to ignore the pack.
 			 */
 			if (m->num_packs >= cfg->midx_new_layer_threshold &&
-			    midx_layer_contains_pack(m, p->pack_name))
+			    midx_layer_contains_pack(m, pack_basename(p)))
 				;
 			else
 				continue;
@@ -158,8 +157,6 @@ void split_pack_geometry(struct pack_geometry *geometry)
 
 		if (unsigned_add_overflows(total_size, geometry_pack_weight(p)))
 			die(_("pack %s too large to roll up"), p->pack_name);
-		if (p->multi_pack_index)
-			geometry->midx_tip_rewritten = 1;
 		total_size += geometry_pack_weight(p);
 	}
 	for (i = split; i < geometry->pack_nr; i++) {
@@ -180,6 +177,11 @@ void split_pack_geometry(struct pack_geometry *geometry)
 			total_size += geometry_pack_weight(ours);
 		} else
 			break;
+	}
+
+	for (i = 0; i < split; i++) {
+		if (geometry->pack[i]->multi_pack_index)
+			geometry->midx_tip_rewritten = 1;
 	}
 
 	geometry->split = split;

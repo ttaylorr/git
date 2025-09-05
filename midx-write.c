@@ -1334,10 +1334,9 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	}
 	stop_progress(&ctx.progress);
 
-	/* 2025-07-29: stopped here for the day */
-
 	if ((ctx.m && ctx.nr == ctx.m->num_packs + ctx.m->num_packs_in_base) &&
 	    !ctx.incremental &&
+	    !ctx.compact &&
 	    !(opts->packs_to_include || opts->packs_to_drop)) {
 		struct bitmap_index *bitmap_git;
 		int bitmap_exists;
@@ -1533,16 +1532,15 @@ static int write_midx_internal(struct write_midx_opts *opts)
 		opts->flags &= ~(MIDX_WRITE_REV_INDEX | MIDX_WRITE_BITMAP);
 	}
 
-	if (!ctx.incremental) {
-		hold_lock_file_for_update(&lk, midx_name.buf, LOCK_DIE_ON_ERROR);
-		f = hashfd(opts->r->hash_algo, get_lock_file_fd(&lk),
-			   get_lock_file_path(&lk));
-	} else if (!(opts->flags & MIDX_WRITE_PRINT_CHECKSUM)) {
-		struct strbuf lock_name = STRBUF_INIT;
+	if (ctx.incremental) {
+		if (!(opts->flags & MIDX_WRITE_PRINT_CHECKSUM)) {
+			struct strbuf lock_name = STRBUF_INIT;
 
-		get_midx_chain_filename(&lock_name, opts->object_dir);
-		hold_lock_file_for_update(&lk, lock_name.buf, LOCK_DIE_ON_ERROR);
-		strbuf_release(&lock_name);
+			get_midx_chain_filename(&lock_name, opts->object_dir);
+			hold_lock_file_for_update(&lk, lock_name.buf,
+						  LOCK_DIE_ON_ERROR);
+			strbuf_release(&lock_name);
+		}
 
 		incr = mks_tempfile_m(midx_name.buf, 0444);
 		if (!incr) {
@@ -1558,6 +1556,10 @@ static int write_midx_internal(struct write_midx_opts *opts)
 
 		f = hashfd(opts->r->hash_algo, get_tempfile_fd(incr),
 			   get_tempfile_path(incr));
+	} else {
+		hold_lock_file_for_update(&lk, midx_name.buf, LOCK_DIE_ON_ERROR);
+		f = hashfd(opts->r->hash_algo, get_lock_file_fd(&lk),
+			   get_lock_file_path(&lk));
 	}
 
 	cf = init_chunkfile(f);
@@ -1665,16 +1667,24 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	}
 	CALLOC_ARRAY(keep_hashes, keep_hashes_nr);
 
+	warning("HELLO");
 	if (opts->flags & MIDX_WRITE_PRINT_CHECKSUM) {
-		printf("%s\n", hash_to_hex_algop(midx_hash, opts->r->hash_algo));
-	} else if (ctx.incremental) {
-		FILE *chainf = fdopen_lock_file(&lk, "w");
+		warning("OK");
+		printf("%s\n", hash_to_hex_algop(midx_hash,
+						 opts->r->hash_algo));
+	}
+
+	if (ctx.incremental) {
+		FILE *chainf;
 		struct strbuf final_midx_name = STRBUF_INIT;
 		struct multi_pack_index *m = ctx.base_midx;
 
-		if (!chainf) {
-			error_errno(_("unable to open multi-pack-index chain file"));
-			return -1;
+		if (!(opts->flags & MIDX_WRITE_PRINT_CHECKSUM)) {
+			chainf = fdopen_lock_file(&lk, "w");
+			if (!chainf) {
+				error_errno(_("unable to open multi-pack-index chain file"));
+				return -1;
+			}
 		}
 
 		if (link_midx_to_chain(ctx.base_midx) < 0)
@@ -1733,8 +1743,11 @@ static int write_midx_internal(struct write_midx_opts *opts)
 				xstrdup(hash_to_hex_algop(midx_hash, opts->r->hash_algo));
 		}
 
-		for (i = 0; i < keep_hashes_nr; i++)
-			fprintf(get_lock_file_fp(&lk), "%s\n", keep_hashes[i]);
+		if (!(opts->flags & MIDX_WRITE_PRINT_CHECKSUM)) {
+			for (i = 0; i < keep_hashes_nr; i++)
+				fprintf(get_lock_file_fp(&lk), "%s\n",
+					keep_hashes[i]);
+		}
 	} else {
 		ASSERT(!ctx.num_multi_pack_indexes_before);
 		ASSERT(keep_hashes_nr == 1);
@@ -1746,8 +1759,10 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	if (ctx.m || ctx.base_midx)
 		close_object_store(ctx.repo->objects);
 
-	if (commit_lock_file(&lk) < 0)
-		die_errno(_("could not write multi-pack-index"));
+	if (!(opts->flags & MIDX_WRITE_PRINT_CHECKSUM)) {
+		if (commit_lock_file(&lk) < 0)
+			die_errno(_("could not write multi-pack-index"));
+	}
 
 	if (!(opts->flags & MIDX_WRITE_PRINT_CHECKSUM))
 		clear_midx_files(opts->r, opts->object_dir, keep_hashes,

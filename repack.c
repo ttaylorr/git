@@ -721,9 +721,15 @@ static void prepare_midx_command(struct child_process *cmd,
 	if (opts->write_bitmaps > 0)
 		strvec_push(&cmd->args, "--bitmap");
 
-	if (opts->refs_snapshot)
-		strvec_pushf(&cmd->args, "--refs-snapshot=%s",
-			     get_tempfile_path(opts->refs_snapshot));
+	/*
+	 * TODO(@ttaylorr): compaction should understand how to deal
+	 * with refs-snapshot
+	 */
+	if (strcmp(verb, "compact")) {
+		if (opts->refs_snapshot)
+			strvec_pushf(&cmd->args, "--refs-snapshot=%s",
+				     get_tempfile_path(opts->refs_snapshot));
+	}
 }
 
 static int fill_midx_stdin_packs(struct child_process *cmd,
@@ -856,13 +862,34 @@ static int midx_compaction_step_exec(struct midx_compaction_step *step,
 	switch (step->type) {
 	case MIDX_KEEP_AS_IS:
 		step->result = xstrdup(hash_to_hex(get_midx_checksum(step->u.midx)));
+
+		warning("%s:%d: [EVAL] keeping existing MIDX %s as-is", __FILE__, __LINE__, step->result);
+
 		break;
 	case MIDX_WRITE_PACKS:
+		if (!step->u.packs.nr) {
+			ret = error(_("no packs to write MIDX from"));
+			goto out;
+		}
+
 		prepare_midx_command(&cmd, opts, "write");
 		strvec_pushl(&cmd.args, "--stdin-packs", "--incremental",
 			     "--print-checksum", NULL);
 
+		warning("%s:%d: [EVAL] writing new MIDX", __FILE__, __LINE__);
+		for (size_t i = 0; i < step->u.packs.nr; i++)
+			warning("  including pack %s",
+				step->u.packs.items[i].string);
+
 		ret = fill_midx_stdin_packs(&cmd, &step->u.packs, &hash);
+
+		if (hash.nr != 1) {
+			ret = error(_("expected exactly one line, got: %"PRIuMAX),
+				    (uintmax_t)hash.nr);
+			goto out;
+		}
+		step->result = xstrdup(hash.items[0].string);
+
 		break;
 	case MIDX_COMPACT_MIDXS:
 		prepare_midx_command(&cmd, opts, "compact");
@@ -876,16 +903,24 @@ static int midx_compaction_step_exec(struct midx_compaction_step *step,
 		strvec_push(&cmd.args, hash_to_hex(from));
 		strvec_push(&cmd.args, hash_to_hex(to));
 
+		warning("%s:%d: [EVAL] compacting MIDX", __FILE__, __LINE__);
+		warning("  from=%s", hash_to_hex(from));
+		warning("  to  =%s", hash_to_hex(to));
+
+		cmd.out = -1;
+
 		ret = start_command(&cmd);
 		if (ret)
 			return ret;
 
 		out = xfdopen(cmd.out, "r");
 		while (strbuf_getline_lf(&buf, out) != EOF) {
+			warning("read: '%s'", buf.buf);
 			if (step->result)
 				BUG("unexpected output: %s", buf.buf);
 			step->result = strbuf_detach(&buf, NULL);
 		}
+		fclose(out);
 
 		ret = finish_command(&cmd);
 		strbuf_release(&buf);
@@ -895,6 +930,7 @@ static int midx_compaction_step_exec(struct midx_compaction_step *step,
 		BUG("unknown MIDX compaction step type: %d", step->type);
 	}
 
+out:
 	return ret;
 }
 
@@ -903,17 +939,20 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 				size_t *steps_nr_p)
 {
 	struct midx_compaction_step *steps = NULL;
-	struct midx_compaction_step *step;
+	struct midx_compaction_step step = { 0 };
 	size_t steps_alloc = 0, steps_nr = 0;
 
-	struct multi_pack_index *m = get_local_multi_pack_index(the_repository);
+	struct multi_pack_index *m;
 	struct strbuf buf = STRBUF_INIT;
 	uint32_t i;
 
-	ALLOC_GROW(steps, steps_nr + 1, steps_alloc);
-	step = &steps[steps_nr++];
+	reprepare_packed_git(the_repository);
+	m = get_multi_pack_index(the_repository);
 
-	memset(step, 0, sizeof(*step));
+	for (i = 0; m && i < m->num_packs + m->num_packs_in_base; i++) {
+		if (prepare_midx_pack(the_repository, m, i))
+			return error(_("could not load pack %u from MIDX"), i);
+	}
 
 	/*
 	 * The first MIDX in the resulting chain is always going to be
@@ -929,37 +968,59 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	 * MIDX tip was *not* rewritten) or the old tip's base
 	 * (otherwise).
 	 */
-	step->type = MIDX_WRITE_PACKS;
-	string_list_init_nodup(&step->u.packs);
+	step.type = MIDX_WRITE_PACKS;
+	string_list_init_nodup(&step.u.packs);
 
 	/* First include all of the newly written packs. */
 	for (i = 0; i < opts->names->nr; i++) {
+#if 1
+		warning("%s:%d adding new pack: %s", __FILE__, __LINE__, opts->names->items[i].string);
+#endif
 		strbuf_addf(&buf, "pack-%s.idx", opts->names->items[i].string);
-		string_list_append(&step->u.packs, strbuf_detach(&buf, NULL));
+		string_list_append(&step.u.packs, strbuf_detach(&buf, NULL));
 	}
 	for (i = 0; i < opts->geometry->split; i++)
-		step->num_objects = u32_add(step->num_objects,
+		step.num_objects = u32_add(step.num_objects,
 					   opts->geometry->pack[i]->num_objects);
 
 	/*
-	 * Then include all of the packs from the previous MIDX tip,
-	 * if that MIDX layer was rewritten.
+	 * Then handle existing packs which were not rewritten.
+	 *
+	 * The list of packs in opts->geometry only contains MIDX'd
+	 * packs from the youngest layer when that layer has more than
+	 * repack.midxNewLayerThreshold packs.
+	 *
+	 * If the MIDX tip was rewritten (i.e. one or more of those
+	 * packs appear below the split line), then add all packs above
+	 * the split line must be added to the new MIDX layer, since the
+	 * old one is no longer usable.
+	 *
+	 * If the MIDX tip was not rewritten (i.e. all MIDX'd packs from
+	 * the youngest layer appear above the split line), ignore them
+	 * since we will retain the existing MIDX layer as-is.
 	 */
-	if (opts->geometry->midx_tip_rewritten) {
-		struct pack_geometry *geometry = opts->geometry;
+	for (i = opts->geometry->split; i < opts->geometry->pack_nr; i++) {
+		struct packed_git *p = opts->geometry->pack[i];
 
-		for (i = geometry->split; i < geometry->pack_nr; i++) {
-			struct packed_git *p = opts->geometry->pack[i];
+		strbuf_reset(&buf);
+		strbuf_addstr(&buf, pack_basename(p));
+		strbuf_strip_suffix(&buf, ".pack");
+		strbuf_addstr(&buf, ".idx");
 
-			strbuf_addstr(&buf, pack_basename(p));
-			strbuf_strip_suffix(&buf, ".pack");
-			strbuf_addstr(&buf, ".idx");
-
-			string_list_append(&step->u.packs,
-					   strbuf_detach(&buf, NULL));
-			step->num_objects = u32_add(step->num_objects,
-						    p->num_objects);
+		warning("p->multi_pack_index=%d, opts->geometry->midx_tip_rewritten=%d",
+			p->multi_pack_index,
+			opts->geometry->midx_tip_rewritten);
+		if (p->multi_pack_index && !opts->geometry->midx_tip_rewritten) {
+			warning("%s:%d skipping old pack: %s", __FILE__, __LINE__, buf.buf);
+			continue;
 		}
+
+#if 1
+		warning("%s:%d adding old pack: %s", __FILE__, __LINE__, buf.buf);
+#endif
+
+		string_list_append(&step.u.packs, strbuf_detach(&buf, NULL));
+		step.num_objects = u32_add(step.num_objects, p->num_objects);
 	}
 
 	/*
@@ -967,44 +1028,69 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	 * it a candidate for compaction, since it will not exist in
 	 * the resultant MIDX chain.
 	 */
-	if (opts->geometry->midx_tip_rewritten)
+	if (opts->geometry->midx_tip_rewritten) {
 		m = m->base_midx;
+		warning("%s:%d: MIDX tip was rewritten (%p)", __FILE__, __LINE__, (void*)m);
+	} else {
+		warning("%s:%d: MIDX tip kept as-is (%p)", __FILE__, __LINE__, (void*)m);
+	}
 
 	/*
 	 * Compact additional MIDX layers into this proposed one until
 	 * the merging condition is violated.
 	 */
 	while (m) {
-		if (u32_mult(step->num_objects, opts->midx_split_factor) <
-		    m->num_objects) {
-			for (i = m->num_packs_in_base;
-			     i < m->num_packs_in_base + m->num_packs; i++) {
-				struct packed_git *p;
-				if (prepare_midx_pack(the_repository, m, i)) {
-					free(steps);
-					return error(_("could not load pack %u of MIDX %s"),
-						     i,
-						     hash_to_hex(get_midx_checksum(m)));
-				}
-
-				p = nth_midxed_pack(m, i);
-
-				strbuf_addstr(&buf, pack_basename(p));
-				strbuf_strip_suffix(&buf, ".pack");
-				strbuf_addstr(&buf, ".idx");
-
-				string_list_append(&step->u.packs,
-						   strbuf_detach(&buf, NULL));
-			}
-
-			step->num_objects = u32_add(step->num_objects,
-						    m->num_objects);
-
-			m = m->base_midx;
-		} else {
+		warning("evaluating existing MIDX: %p", (void*)m);
+		if (step.num_objects < m->num_objects / opts->midx_split_factor) {
+			/*
+			 * Stop compacting MIDXs as soon as the merged
+			 * size is less than half of the size of the
+			 * next MIDX in the chain.
+			 */
+			warning(" STOP step_nr: %"PRIuMAX", m_nr: %"PRIuMAX,
+				(uintmax_t)step.num_objects, (uintmax_t)m->num_objects);
 			break;
 		}
+		warning(" GO step_nr: %"PRIuMAX", m_nr: %"PRIuMAX,
+			(uintmax_t)step.num_objects, (uintmax_t)m->num_objects);
+
+		for (i = 0; i < m->num_packs; i++) {
+			uint32_t pack_int_id = i + m->num_packs_in_base;
+			struct packed_git *p;
+
+			if (prepare_midx_pack(the_repository, m, pack_int_id)) {
+				free(steps);
+				return error(_("could not load pack %u of MIDX %s"),
+					     pack_int_id,
+					     hash_to_hex(get_midx_checksum(m)));
+			}
+
+			p = nth_midxed_pack(m, pack_int_id);
+
+			strbuf_reset(&buf);
+			strbuf_addstr(&buf, pack_basename(p));
+			strbuf_strip_suffix(&buf, ".pack");
+			strbuf_addstr(&buf, ".idx");
+
+			string_list_append(&step.u.packs,
+					   strbuf_detach(&buf, NULL));
+		}
+
+		step.num_objects = u32_add(step.num_objects, m->num_objects);
+		m = m->base_midx;
+		warning("backing up");
 	}
+
+	/*
+	 * In the special case where no new packs were written, avoid
+	 * writing a bogus step into the plan.
+	 */
+	if (step.u.packs.nr > 0) {
+		ALLOC_GROW(steps, steps_nr + 1, steps_alloc);
+		steps[steps_nr++] = step;
+		warning("%s:%d: adding first step of type %d", __FILE__, __LINE__, step.type);
+	}
+
 
 	/*
 	 * Then start over, repeat, and either compact or keep as-is
@@ -1015,40 +1101,54 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	 * individual layers as-is according to the same merging
 	 * condition as above.
 	 */
+	warning("considering remaining MIDXs: %p", (void*)m);
 	while (m) {
 		struct multi_pack_index *next = m;
 
 		ALLOC_GROW(steps, steps_nr + 1, steps_alloc);
-		step = &steps[steps_nr++];
 
-		step->type = MIDX_UNKNOWN;
-		step->num_objects = m->num_objects;
-
-		memset(step, 0, sizeof(*step));
+		memset(&step, 0, sizeof(step));
+		step.type = MIDX_UNKNOWN;
+		step.num_objects = m->num_objects;
 
 		while (next->base_midx) {
-			if (u32_mult(step->num_objects, opts->midx_split_factor) <
-			    next->base_midx->num_objects) {
-				next = next->base_midx;
-				step->num_objects = u32_add(step->num_objects,
-							    next->num_objects);
+			struct multi_pack_index *base = m->base_midx;
+			uint32_t proposed = u32_add(step.num_objects,
+						    base->num_objects);
+
+			if (proposed < base->num_objects / opts->midx_split_factor) {
+				/*
+				 * Stop compacting MIDXs as soon as the meregd
+				 * size is less than half of the size of the
+				 * next MIDX in the chain.
+				 */
+				break;
 			}
+
+			step.num_objects = u32_add(step.num_objects,
+						   next->num_objects);
+			next = base;
 		}
 
 		if (m == next) {
-			step->type = MIDX_KEEP_AS_IS;
-			step->u.midx = m;
+			step.type = MIDX_KEEP_AS_IS;
+			step.u.midx = m;
 		} else {
-			step->type = MIDX_COMPACT_MIDXS;
-			step->u.compact.from = m;
-			step->u.compact.to = next;
+			step.type = MIDX_COMPACT_MIDXS;
+			step.u.compact.from = next;
+			step.u.compact.to = m;
 		}
 
 		m = next->base_midx;
+
+		steps[steps_nr++] = step;
+		warning("%s:%d: adding step of type %d", __FILE__, __LINE__, step.type);
 	}
 
 	*steps_p = steps;
 	*steps_nr_p = steps_nr;
+
+	warning("TOTAL STEPS: %"PRIuMAX, (uintmax_t)*steps_nr_p);
 	return 0;
 }
 
@@ -1057,9 +1157,21 @@ int write_midx_incremental(struct repack_midx_opts *opts)
 	struct midx_compaction_step *steps = NULL;
 	struct strbuf lock_name = STRBUF_INIT;
 	struct lock_file lf;
-	FILE *chain;
 	size_t steps_nr = 0;
+	size_t i;
 	int ret = 0;
+
+	get_midx_chain_filename(&lock_name,
+				repo_get_object_directory(the_repository));
+	if (safe_create_leading_directories(the_repository, lock_name.buf))
+		die_errno(_("unable to create leading directories of %s"),
+			  lock_name.buf);
+	hold_lock_file_for_update(&lf, lock_name.buf, LOCK_DIE_ON_ERROR);
+
+	if (!fdopen_lock_file(&lf, "w")) {
+		ret = error_errno(_("unable to open multi-pack-index chain file"));
+		goto done;
+	}
 
 	if (make_compaction_plan(opts, &steps, &steps_nr) < 0)
 		return error(_("unable to generate compaction plan"));
@@ -1073,18 +1185,16 @@ int write_midx_incremental(struct repack_midx_opts *opts)
 		}
 	}
 
-	get_midx_chain_filename(&lock_name,
-				repo_get_object_directory(the_repository));
-	hold_lock_file_for_update(&lf, lock_name.buf, LOCK_DIE_ON_ERROR);
-
-	chain = fdopen_lock_file(&lf, "w");
-	if (!chain) {
-		ret = error_errno(_("unable to open multi-pack-index chain file"));
-		goto done;
+	i = steps_nr;
+	while (i--) {
+		struct midx_compaction_step *step = &steps[i];
+		if (!step->result)
+			BUG("missing result for compaction step %"PRIuMAX,
+			    (uintmax_t)i);
+		fprintf(get_lock_file_fp(&lf), "%s\n", step->result);
 	}
 
-	for (size_t i = steps_nr - 1; i > 0; i--)
-		fprintf(chain, "%s\n", steps[i].result);
+	commit_lock_file(&lf);
 
 done:
 	free(steps);

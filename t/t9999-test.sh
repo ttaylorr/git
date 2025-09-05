@@ -196,4 +196,61 @@ test_expect_success 'MIDX compaction with bitmaps (non-trivial)' '
 	)
 '
 
+push () {
+	test_commit "$@" && git repack -d
+}
+
+dump_chain () {
+	echo "==> $midx_chain <==" &&
+	(
+		! test -f "$midx_chain" || cat $midx_chain
+	) &&
+	echo "--- 8< ---"
+}
+
+rand () {
+	perl -e "print int rand($1)"
+}
+
+test_expect_success 'midx compaction' '
+	git init midx-compaction-test &&
+	(
+		cd midx-compaction-test &&
+
+		git config repack.midxsplitfactor 1 &&
+		git config repack.midxnewlayerthreshold 8 &&
+
+		for i in $(seq 1 100)
+		do
+			for j in $(seq 1 $(rand 50))
+			do
+				test_commit "$i-$j" &&
+				git repack -d || return 1
+			done >/dev/null 2>&1 &&
+			git repack --geometric=2 -d --write-midx=geometric &&
+			dump_chain || return 1
+		done
+
+		# push A &&
+		# push B &&
+		# push C &&
+
+		# dump_chain &&
+
+		# git repack --geometric=2 -d --write-midx=geometric &&
+		# dump_chain &&
+
+		# push D &&
+
+		# git repack --geometric=2 -d --write-midx=geometric &&
+		# dump_chain &&
+
+		# push E &&
+		# push F &&
+
+		# git repack --geometric=2 -d --write-midx=geometric &&
+		# dump_chain
+	)
+'
+
 test_done
