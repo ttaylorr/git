@@ -198,9 +198,44 @@ static uint32_t compactible_packs_between(const struct multi_pack_index *from,
 	return nr - from->num_packs_in_base;
 }
 
+static int compact_midx_pack(struct pack_info *info,
+			     struct write_midx_context *ctx,
+			     struct multi_pack_index *m, uint32_t pack_int_id)
+{
+	struct packed_git *p;
+	const char *pack_name;
+
+	if (prepare_midx_pack(ctx->repo, m, pack_int_id))
+		die(_("cannot load pack %"PRIu32" from MIDX"),
+		    pack_int_id);
+
+	p = nth_midxed_pack(m, pack_int_id);
+	if (!p)
+		BUG("failed to get pack %u from MIDX",
+		    pack_int_id);
+
+	if (open_pack_index(p)) {
+		warning(_("failed to open pack-index '%s'"),
+			p->pack_name);
+		close_pack(p);
+		free(p);
+		return -1;
+	}
+
+	pack_name = m->pack_names[pack_int_id - m->num_packs_in_base];
+
+	fill_pack_info(info, p, pack_name, pack_int_id);
+
+	warning("pack %s has pack_int_id=%"PRIu32, pack_name, pack_int_id);
+
+	ctx->nr++;
+
+	return 0;
+}
+
 static void compact_midx_pack_range(struct write_midx_context *ctx)
 {
-	struct multi_pack_index *m;
+	struct multi_pack_index *m = ctx->compact_to;
 	uint32_t compacted_packs_nr;
 
 	if (!ctx->compact)
@@ -217,39 +252,40 @@ static void compact_midx_pack_range(struct write_midx_context *ctx)
 	 * add packs from compacted range to the new midx, preserving their pack
 	 * IDs
 	 */
-	for (m = ctx->compact_to; m != ctx->compact_from->base_midx;
-	     m = m->base_midx) {
+	while (m != ctx->compact_from->base_midx) {
+		uint32_t pack_int_id, preferred_pack_id;
 		uint32_t i;
-		uint32_t pack_int_id;
+
+		if (midx_preferred_pack(m, &preferred_pack_id) < 0)
+			die(_("could not determine preferred pack"));
+
+		/*
+		 * preferred pack must always come first
+		 *
+		 * TODO: more here on why
+		 */
+		pack_int_id = m->num_packs_in_base;
+		if (compact_midx_pack(&ctx->info[pack_int_id++], ctx, m,
+				      preferred_pack_id) < 0)
+			warning("uh-oh");
+		warning("added %s as preferred (%d)", m->pack_names[preferred_pack_id
+			- m->num_packs_in_base], pack_int_id - 1);
 
 		for (i = 0; i < m->num_packs; i++) {
-			struct packed_git *p;
-			uint32_t pos = compacted_packs_nr - ctx->nr - 1;
-
-			pack_int_id = i + m->num_packs_in_base;
-
-			if (prepare_midx_pack(ctx->repo, m, pack_int_id))
-				die(_("cannot load pack %"PRIu32" from MIDX"),
-				    pack_int_id);
-
-			p = nth_midxed_pack(m, pack_int_id);
-			if (!p)
-				BUG("failed to get pack %u from MIDX",
-				    pack_int_id);
-
-			if (open_pack_index(p)) {
-				warning(_("failed to open pack-index '%s'"),
-					p->pack_name);
-				close_pack(p);
-				free(p);
+			if (preferred_pack_id - m->num_packs_in_base == i) {
+				warning("skipping %s as preferred",
+					m->pack_names[preferred_pack_id
+					- m->num_packs_in_base]);
 				continue;
 			}
-
-			fill_pack_info(&ctx->info[pos], p, m->pack_names[i],
-				       pack_int_id);
-
-			ctx->nr++;
+			if (compact_midx_pack(&ctx->info[pack_int_id], ctx, m,
+					      i + m->num_packs_in_base) < 0)
+				continue;
+			warning("added %s (%d)", m->pack_names[i], pack_int_id);
+			pack_int_id++;
 		}
+
+		m = m->base_midx;
 	}
 
 	ASSERT(ctx->nr == compacted_packs_nr);
@@ -258,8 +294,6 @@ static void compact_midx_pack_range(struct write_midx_context *ctx)
 static int midx_pack_perm(struct write_midx_context *ctx,
 			  uint32_t orig_pack_int_id)
 {
-	if (ctx->compact)
-		return orig_pack_int_id;
 	return ctx->pack_perm[orig_pack_int_id];
 }
 
@@ -438,19 +472,19 @@ static void compute_sorted_entries(struct write_midx_context *ctx,
 		uint32_t to = ctx->compact_to->num_objects +
 			      ctx->compact_to->num_objects_in_base;
 
+		ALLOC_GROW(ctx->entries, to - from, alloc_objects);
 		for (uint32_t i = from; i < to; i++) {
 			struct pack_midx_entry *entry;
 
 			ALLOC_GROW(ctx->entries, st_add(ctx->entries_nr, 1),
 				   alloc_objects);
 
-			entry = &ctx->entries[i - from];
+			entry = &ctx->entries[ctx->entries_nr++];
+			memset(entry, 0, sizeof(*entry));
+
 			if (nth_midxed_pack_midx_entry(ctx->compact_to, entry,
 						       i))
 				die(_("failed to get MIDX entry %"PRIu32), i);
-
-			entry->pack_int_id -= ctx->compact_from->num_packs_in_base;
-			ctx->entries_nr++;
 		}
 
 		/*
@@ -470,6 +504,9 @@ static void compute_sorted_entries(struct write_midx_context *ctx,
 		 * the entire array is in lexical order.
 		 */
 		QSORT(ctx->entries, ctx->entries_nr, midx_oid_compare);
+		for (uint32_t i = 0; i < ctx->entries_nr; i++) {
+			warning("object: %s", oid_to_hex(&ctx->entries[i].oid));
+		}
 
 		return;
 	}
@@ -545,6 +582,7 @@ static int write_midx_pack_names(struct hashfile *f, void *data)
 
 		writelen = strlen(ctx->info[i].pack_name) + 1;
 		hashwrite(f, ctx->info[i].pack_name, writelen);
+		warning("wrote pack name: %s", ctx->info[i].pack_name);
 		written += writelen;
 	}
 
@@ -703,8 +741,11 @@ static int write_midx_revindex(struct hashfile *f,
 	else
 		nr_base = 0;
 
-	for (i = 0; i < ctx->entries_nr; i++)
+	for (i = 0; i < ctx->entries_nr; i++) {
+		warning("pack_order[%d] = %"PRIu32,
+			i, ctx->pack_order[i] + nr_base);
 		hashwrite_be32(f, ctx->pack_order[i] + nr_base);
+	}
 
 	return 0;
 }
@@ -732,7 +773,7 @@ static int midx_pack_order_cmp(const void *va, const void *vb)
 
 static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 {
-	struct midx_pack_order_data *data;
+	struct midx_pack_order_data *data = NULL;
 	uint32_t *pack_order, base_objects = 0;
 	uint32_t i;
 
@@ -748,6 +789,47 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 	}
 
 	ALLOC_ARRAY(pack_order, ctx->entries_nr);
+
+	if (ctx->compact) {
+		struct multi_pack_index *m = ctx->compact_to;
+
+		while (m) {
+			if (load_midx_revindex(m) < 0)
+				die("could not load revindex for MIDX");
+			if (m == ctx->compact_from)
+				break;
+			m = m->base_midx;
+		}
+
+		m = ctx->compact_to;
+		/* something's not right here */
+		for (i = 0; i < ctx->entries_nr; i++)
+			pack_order[i] = pack_pos_to_midx(m, i + base_objects);
+		for (i = 0; i < ctx->nr; i++) {
+			struct pack_info *pack = &ctx->info[i];
+			struct bitmapped_pack bp;
+
+			if (nth_bitmapped_pack(ctx->repo, m, &bp,
+					       pack->orig_pack_int_id) < 0)
+				die("could not load bitmap info for pack %"PRIu32,
+				    pack->orig_pack_int_id);
+
+			pack->bitmap_nr = bp.bitmap_nr;
+			pack->bitmap_pos = bp.bitmap_pos;
+		}
+
+		for (i = 0; i < ctx->entries_nr; i++) {
+			struct pack_midx_entry *e = &ctx->entries[pack_order[i]];
+
+			warning("object %s at pos=%"PRIu32", pack=%"PRIu32,
+				oid_to_hex(&e->oid),
+				i + base_objects,
+				midx_pack_perm(ctx, e->pack_int_id));
+		}
+
+		goto done;
+	}
+
 	ALLOC_ARRAY(data, ctx->entries_nr);
 
 	for (i = 0; i < ctx->entries_nr; i++) {
@@ -770,14 +852,18 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 		pack->bitmap_nr++;
 		pack_order[i] = data[i].nr;
 
-		warning("object %s is at pack order %"PRIu32,
-			oid_to_hex(&e->oid), i + base_objects);
+		warning("object %s at pos=%"PRIu32", pack=%"PRIu32,
+			oid_to_hex(&e->oid),
+			i + base_objects,
+			data[i].pack & ~(1U << 31));
 	}
 	for (i = 0; i < ctx->nr; i++) {
 		struct pack_info *pack = &ctx->info[midx_pack_perm(ctx, i)];
 		if (pack->bitmap_pos == BITMAP_POS_UNKNOWN)
 			pack->bitmap_pos = 0;
 	}
+
+done:
 	free(data);
 
 	trace2_region_leave("midx", "midx_pack_order", ctx->repo);
@@ -1503,24 +1589,19 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	 *
 	 *   pack_perm[old_id] = new_id
 	 *
-	 * When performing MIDX compaction, the pack-int-ids are
-	 * preserved from the compaction range in the new MIDX, so we
-	 * can avoid allocating a separate pack_perm array entirely.
-	 *
-	 * ctx.pack_perm must be accessed through the midx_pack_perm()
-	 * function, or guarded behind "if (!ctx.compact)".
+	 * When performing MIDX compaction, TODO
 	 */
-	if (!ctx.compact) {
-		ALLOC_ARRAY(ctx.pack_perm, ctx.nr);
-		for (i = 0; i < ctx.nr; i++) {
-			if (ctx.info[i].expired) {
-				dropped_packs++;
-				ctx.pack_perm[ctx.info[i].orig_pack_int_id] = PACK_EXPIRED;
-			} else {
-				ctx.pack_perm[ctx.info[i].orig_pack_int_id] = i - dropped_packs;
-			}
+	ALLOC_ARRAY(ctx.pack_perm, ctx.nr);
+	for (i = 0; i < ctx.nr; i++) {
+		if (ctx.info[i].expired) {
+			dropped_packs++;
+			ctx.pack_perm[ctx.info[i].orig_pack_int_id] = PACK_EXPIRED;
+		} else {
+			ctx.pack_perm[ctx.info[i].orig_pack_int_id] = i - dropped_packs;
 		}
 	}
+	for (i = 0; i < ctx.nr; i++)
+		warning("%d -> %d", i, ctx.pack_perm[i]);
 
 	for (i = 0; i < ctx.nr; i++) {
 		if (ctx.info[i].expired)

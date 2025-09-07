@@ -212,7 +212,7 @@ rand () {
 	perl -e "print int rand($1)"
 }
 
-test_expect_success 'midx compaction' '
+test_expect_success 'midx compaction during repacking' '
 	git init midx-compaction-test &&
 	(
 		cd midx-compaction-test &&
@@ -252,6 +252,27 @@ test_expect_success 'midx compaction' '
 
 		# git repack --geometric=2 -d --write-midx=geometric &&
 		# dump_chain
+	)
+'
+
+test_expect_success 'wtf' '
+	git init midx-wtf &&
+	(
+		cd midx-wtf &&
+
+		push one &&
+		push two &&
+		git multi-pack-index write --incremental --bitmap &&
+
+		push three &&
+		push four &&
+		git multi-pack-index write --incremental --bitmap &&
+
+		git multi-pack-index compact --incremental --bitmap \
+			$(nth_line 1 "$midx_chain") \
+			$(nth_line 2 "$midx_chain") &&
+
+		false
 	)
 '
 
