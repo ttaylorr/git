@@ -463,7 +463,8 @@ int prepare_midx_pack(struct repository *r, struct multi_pack_index *m,
 	pack_int_id = midx_for_pack(&m, pack_int_id);
 
 	if (debug)
-		warning("preparing pack %s (pack_int_id=%u) from MIDX", m->pack_names[pack_int_id], pack_int_id);
+		warning("preparing pack %s (pack_int_id=%u) from MIDX (csum=%s)", m->pack_names[pack_int_id], pack_int_id,
+			hash_to_hex_algop(get_midx_checksum(m), r->hash_algo));
 
 	if (m->packs[pack_int_id] == MIDX_PACK_ERROR)
 		return 1;

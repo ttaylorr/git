@@ -789,11 +789,12 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 			pack->bitmap_pos = i + base_objects;
 		pack->bitmap_nr++;
 		pack_order[i] = data[i].nr;
-
+ #if 0
 		warning("object %s at pos=%"PRIu32", pack=%"PRIu32,
 			oid_to_hex(&e->oid),
 			i + base_objects,
 			data[i].pack & ~(1U << 31));
+#endif
 	}
 	for (i = 0; i < ctx->nr; i++) {
 		struct pack_info *pack = &ctx->info[midx_pack_perm(ctx, i)];
@@ -1330,9 +1331,10 @@ static int write_midx_internal(struct write_midx_opts *opts)
 		while (ctx.base_midx) {
 			cur_hash = get_midx_checksum(ctx.base_midx);
 			cur_csum = hash_to_hex_algop(cur_hash, ctx.repo->hash_algo);
-
+#if 0
 			warning("%s:%d: checking MIDX %s vs. %s", __FILE__, __LINE__,
 				cur_csum, opts->base);
+#endif
 
 			if (!strcmp(opts->base, cur_csum)) {
 				warning("%s:%d: using MIDX %s as base",

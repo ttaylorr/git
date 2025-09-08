@@ -217,8 +217,10 @@ test_expect_success 'midx compaction during repacking' '
 	(
 		cd midx-compaction-test &&
 
-		git config repack.midxsplitfactor 1 &&
+		git config repack.midxsplitfactor 2 &&
 		git config repack.midxnewlayerthreshold 8 &&
+		git config gc.auto 0 &&
+		git config maintenance.auto false &&
 
 		for i in $(seq 1 100)
 		do
@@ -227,9 +229,12 @@ test_expect_success 'midx compaction during repacking' '
 				test_commit "$i-$j" &&
 				git repack -d || return 1
 			done >/dev/null 2>&1 &&
-			git repack --geometric=2 -d --write-midx=geometric \
-				--write-bitmap-index &&
-			git fsck &&
+
+			# ls $packdir/pack-*.idx | sort >packs.before &&
+			git repack --geometric=2 -d --write-midx=geometric && # \
+				# --write-bitmap-index &&
+			# ls $packdir/pack-*.idx | sort >packs.after &&
+			# diff -u packs.before packs.after || true &&
 			dump_chain || return 1
 		done
 

@@ -267,8 +267,11 @@ void remove_redundant_pack(const char *dir_name, const char *base_name)
 	struct strbuf buf = STRBUF_INIT;
 	struct multi_pack_index *m = get_local_multi_pack_index(the_repository);
 	strbuf_addf(&buf, "%s.pack", base_name);
-	if (m && midx_contains_pack(m, buf.buf))
+	warning("removing pack %s", buf.buf);
+	if (m && midx_contains_pack(m, buf.buf)) {
+		warning("and removing MIDX");
 		clear_midx_file(the_repository);
+	}
 	strbuf_insertf(&buf, 0, "%s/", dir_name);
 	unlink_pack_path(buf.buf, 1);
 	strbuf_release(&buf);
@@ -1046,10 +1049,13 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	 * the resultant MIDX chain.
 	 */
 	if (opts->geometry->midx_tip_rewritten) {
+		warning("%s:%d: MIDX tip was rewritten (%s -> %s)", __FILE__, __LINE__,
+			hash_to_hex(get_midx_checksum(m)),
+			m->base_midx ?  hash_to_hex(get_midx_checksum(m->base_midx)) : "<none>");
 		m = m->base_midx;
-		warning("%s:%d: MIDX tip was rewritten (%p)", __FILE__, __LINE__, (void*)m);
 	} else {
-		warning("%s:%d: MIDX tip kept as-is (%p)", __FILE__, __LINE__, (void*)m);
+		warning("%s:%d: MIDX tip kept as-is (%s)", __FILE__, __LINE__,
+			m ? hash_to_hex(get_midx_checksum(m)) : "<none>");
 	}
 
 	/*
@@ -1057,7 +1063,8 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	 * the merging condition is violated.
 	 */
 	while (m) {
-		warning("evaluating existing MIDX: %p", (void*)m);
+		warning("evaluating existing MIDX: %s",
+			hash_to_hex(get_midx_checksum(m)));
 		if (step.num_objects < m->num_objects / opts->midx_split_factor) {
 			/*
 			 * Stop compacting MIDXs as soon as the merged
@@ -1109,7 +1116,8 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	 * individual layers as-is according to the same merging
 	 * condition as above.
 	 */
-	warning("considering remaining MIDXs: %p", (void*)m);
+	warning("considering remaining MIDXs: %s", m ?
+		hash_to_hex(get_midx_checksum(m)) : "<none>");
 	while (m) {
 		struct multi_pack_index *next = m;
 
@@ -1141,10 +1149,17 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 		if (m == next) {
 			step.type = MIDX_KEEP_AS_IS;
 			step.u.midx = m;
+
+			warning("%s:%d: keeping MIDX %s as-is", __FILE__, __LINE__,
+				hash_to_hex(get_midx_checksum(m)));
 		} else {
 			step.type = MIDX_COMPACT_MIDXS;
 			step.u.compact.from = next;
 			step.u.compact.to = m;
+
+			warning("%s:%d: compacting MIDX from=%s to=%s", __FILE__, __LINE__,
+				hash_to_hex(get_midx_checksum(next)),
+				hash_to_hex(get_midx_checksum(m)));
 		}
 
 		m = next->base_midx;
