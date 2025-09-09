@@ -104,6 +104,7 @@ struct write_midx_context {
 	unsigned large_offsets_needed:1;
 	uint32_t num_large_offsets;
 
+	int bitmap;
 	int preferred_pack_idx;
 
 	int incremental;
@@ -254,8 +255,12 @@ static void compact_midx_pack_range(struct write_midx_context *ctx)
 		uint32_t pack_int_id, preferred_pack_id;
 		uint32_t i;
 
-		if (midx_preferred_pack(m, &preferred_pack_id) < 0)
-			die(_("could not determine preferred pack"));
+		if (ctx->bitmap) {
+			if (midx_preferred_pack(m, &preferred_pack_id) < 0)
+				die(_("could not determine preferred pack"));
+		} else {
+			preferred_pack_id = m->num_packs_in_base;
+		}
 
 		/*
 		 * preferred pack must always come first
@@ -1274,6 +1279,7 @@ static int write_midx_internal(struct write_midx_opts *opts)
 
 	ctx.incremental = !!(opts->flags & MIDX_WRITE_INCREMENTAL);
 	ctx.compact = !!(opts->flags & MIDX_WRITE_COMPACT);
+	ctx.bitmap = !!(opts->flags & MIDX_WRITE_BITMAP);
 
 	if (ctx.compact) {
 		if (!opts->compact.from)
@@ -1337,8 +1343,10 @@ static int write_midx_internal(struct write_midx_opts *opts)
 #endif
 
 			if (!strcmp(opts->base, cur_csum)) {
+#if 0
 				warning("%s:%d: using MIDX %s as base",
 					__FILE__, __LINE__, cur_csum);
+#endif
 				break;
 			}
 

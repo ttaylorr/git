@@ -49,7 +49,7 @@ void init_pack_geometry(struct pack_geometry *geometry,
 			 * its packs as candidates for repacking. In either of
 			 * those cases we want to ignore the pack.
 			 */
-			if (m->num_packs >= cfg->midx_new_layer_threshold &&
+			if (m->num_packs > cfg->midx_new_layer_threshold &&
 			    midx_layer_contains_pack(m, pack_basename(p)))
 				;
 			else

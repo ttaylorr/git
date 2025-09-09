@@ -1,6 +1,8 @@
 #define USE_THE_REPOSITORY_VARIABLE
 #define DISABLE_SIGN_COMPARE_WARNINGS
 
+#define PLAN_VERBOSE
+
 #include "git-compat-util.h"
 #include "dir.h"
 #include "hex.h"
@@ -267,11 +269,8 @@ void remove_redundant_pack(const char *dir_name, const char *base_name)
 	struct strbuf buf = STRBUF_INIT;
 	struct multi_pack_index *m = get_local_multi_pack_index(the_repository);
 	strbuf_addf(&buf, "%s.pack", base_name);
-	warning("removing pack %s", buf.buf);
-	if (m && midx_contains_pack(m, buf.buf)) {
-		warning("and removing MIDX");
+	if (m && midx_contains_pack(m, buf.buf))
 		clear_midx_file(the_repository);
-	}
 	strbuf_insertf(&buf, 0, "%s/", dir_name);
 	unlink_pack_path(buf.buf, 1);
 	strbuf_release(&buf);
@@ -880,9 +879,9 @@ static int midx_compaction_step_exec(struct midx_compaction_step *step,
 	switch (step->type) {
 	case MIDX_KEEP_AS_IS:
 		step->result = xstrdup(hash_to_hex(get_midx_checksum(step->u.midx)));
-
+#ifdef PLAN_VERBOSE
 		warning("%s:%d: [EVAL] keeping existing MIDX %s as-is", __FILE__, __LINE__, step->result);
-
+#endif
 		break;
 	case MIDX_WRITE_PACKS:
 		if (!step->u.packs.nr) {
@@ -896,10 +895,12 @@ static int midx_compaction_step_exec(struct midx_compaction_step *step,
 
 		strvec_pushl(&cmd.args, "--base", base ? base : "none", NULL);
 
+#ifdef PLAN_VERBOSE
 		warning("%s:%d: [EVAL] writing new MIDX (base=%s)", __FILE__, __LINE__, base ? base : "<none>");
 		for (size_t i = 0; i < step->u.packs.nr; i++)
 			warning("  including pack %s",
 				step->u.packs.items[i].string);
+#endif
 
 		ret = fill_midx_stdin_packs(&cmd, &step->u.packs, &hash);
 
@@ -923,9 +924,11 @@ static int midx_compaction_step_exec(struct midx_compaction_step *step,
 		strvec_push(&cmd.args, hash_to_hex(from));
 		strvec_push(&cmd.args, hash_to_hex(to));
 
+#ifdef PLAN_VERBOSE
 		warning("%s:%d: [EVAL] compacting MIDX", __FILE__, __LINE__);
 		warning("  from=%s", hash_to_hex(from));
 		warning("  to  =%s", hash_to_hex(to));
+#endif
 
 		cmd.out = -1;
 
@@ -935,7 +938,6 @@ static int midx_compaction_step_exec(struct midx_compaction_step *step,
 
 		out = xfdopen(cmd.out, "r");
 		while (strbuf_getline_lf(&buf, out) != EOF) {
-			warning("read: '%s'", buf.buf);
 			if (step->result)
 				BUG("unexpected output: %s", buf.buf);
 			step->result = strbuf_detach(&buf, NULL);
@@ -970,7 +972,7 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	m = get_multi_pack_index(the_repository);
 
 	for (i = 0; m && i < m->num_packs + m->num_packs_in_base; i++) {
-		if (prepare_midx_pack(the_repository, m, (1u<<31)|i))
+		if (prepare_midx_pack(the_repository, m, i))
 			return error(_("could not load pack %u from MIDX"), i);
 	}
 
@@ -993,7 +995,7 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 
 	/* First include all of the newly written packs. */
 	for (i = 0; i < opts->names->nr; i++) {
-#if 1
+#ifdef PLAN_VERBOSE
 		warning("%s:%d adding new pack: %s", __FILE__, __LINE__, opts->names->items[i].string);
 #endif
 		strbuf_addf(&buf, "pack-%s.idx", opts->names->items[i].string);
@@ -1027,15 +1029,19 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 		strbuf_strip_suffix(&buf, ".pack");
 		strbuf_addstr(&buf, ".idx");
 
+#ifdef PLAN_VERBOSE
 		warning("p->multi_pack_index=%d, opts->geometry->midx_tip_rewritten=%d",
 			p->multi_pack_index,
 			opts->geometry->midx_tip_rewritten);
+#endif
 		if (p->multi_pack_index && !opts->geometry->midx_tip_rewritten) {
+#ifdef PLAN_VERBOSE
 			warning("%s:%d skipping old pack: %s", __FILE__, __LINE__, buf.buf);
+#endif
 			continue;
 		}
 
-#if 1
+#ifdef PLAN_VERBOSE
 		warning("%s:%d adding old pack: %s", __FILE__, __LINE__, buf.buf);
 #endif
 
@@ -1049,13 +1055,18 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	 * the resultant MIDX chain.
 	 */
 	if (opts->geometry->midx_tip_rewritten) {
+#ifdef PLAN_VERBOSE
 		warning("%s:%d: MIDX tip was rewritten (%s -> %s)", __FILE__, __LINE__,
 			hash_to_hex(get_midx_checksum(m)),
 			m->base_midx ?  hash_to_hex(get_midx_checksum(m->base_midx)) : "<none>");
+#endif
 		m = m->base_midx;
 	} else {
+#ifdef PLAN_VERBOSE
 		warning("%s:%d: MIDX tip kept as-is (%s)", __FILE__, __LINE__,
 			m ? hash_to_hex(get_midx_checksum(m)) : "<none>");
+#endif
+		;
 	}
 
 	/*
@@ -1063,20 +1074,26 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	 * the merging condition is violated.
 	 */
 	while (m) {
+#ifdef PLAN_VERBOSE
 		warning("evaluating existing MIDX: %s",
 			hash_to_hex(get_midx_checksum(m)));
+#endif
 		if (step.num_objects < m->num_objects / opts->midx_split_factor) {
 			/*
 			 * Stop compacting MIDXs as soon as the merged
 			 * size is less than half of the size of the
 			 * next MIDX in the chain.
 			 */
+#ifdef PLAN_VERBOSE
 			warning(" STOP step_nr: %"PRIuMAX", m_nr: %"PRIuMAX,
 				(uintmax_t)step.num_objects, (uintmax_t)m->num_objects);
+#endif
 			break;
 		}
+#ifdef PLAN_VERBOSE
 		warning(" GO step_nr: %"PRIuMAX", m_nr: %"PRIuMAX,
 			(uintmax_t)step.num_objects, (uintmax_t)m->num_objects);
+#endif
 
 		for (i = 0; i < m->num_packs; i++) {
 			uint32_t pack_int_id = i + m->num_packs_in_base;
@@ -1093,7 +1110,9 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 
 		step.num_objects = u32_add(step.num_objects, m->num_objects);
 		m = m->base_midx;
+#ifdef PLAN_VERBOSE
 		warning("backing up");
+#endif
 	}
 
 	/*
@@ -1103,7 +1122,9 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	if (step.u.packs.nr > 0) {
 		ALLOC_GROW(steps, steps_nr + 1, steps_alloc);
 		steps[steps_nr++] = step;
+#ifdef PLAN_VERBOSE
 		warning("%s:%d: adding first step of type %d", __FILE__, __LINE__, step.type);
+#endif
 	}
 
 
@@ -1116,8 +1137,10 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	 * individual layers as-is according to the same merging
 	 * condition as above.
 	 */
+#ifdef PLAN_VERBOSE
 	warning("considering remaining MIDXs: %s", m ?
 		hash_to_hex(get_midx_checksum(m)) : "<none>");
+#endif
 	while (m) {
 		struct multi_pack_index *next = m;
 
@@ -1125,10 +1148,10 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 
 		memset(&step, 0, sizeof(step));
 		step.type = MIDX_UNKNOWN;
-		step.num_objects = m->num_objects;
+		step.num_objects = next->num_objects;
 
 		while (next->base_midx) {
-			struct multi_pack_index *base = m->base_midx;
+			struct multi_pack_index *base = next->base_midx;
 			uint32_t proposed = u32_add(step.num_objects,
 						    base->num_objects);
 
@@ -1150,28 +1173,36 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 			step.type = MIDX_KEEP_AS_IS;
 			step.u.midx = m;
 
+#ifdef PLAN_VERBOSE
 			warning("%s:%d: keeping MIDX %s as-is", __FILE__, __LINE__,
 				hash_to_hex(get_midx_checksum(m)));
+#endif
 		} else {
 			step.type = MIDX_COMPACT_MIDXS;
 			step.u.compact.from = next;
 			step.u.compact.to = m;
 
+#ifdef PLAN_VERBOSE
 			warning("%s:%d: compacting MIDX from=%s to=%s", __FILE__, __LINE__,
 				hash_to_hex(get_midx_checksum(next)),
 				hash_to_hex(get_midx_checksum(m)));
+#endif
 		}
 
 		m = next->base_midx;
 
 		steps[steps_nr++] = step;
+#ifdef PLAN_VERBOSE
 		warning("%s:%d: adding step of type %d", __FILE__, __LINE__, step.type);
+#endif
 	}
 
 	*steps_p = steps;
 	*steps_nr_p = steps_nr;
 
+#ifdef PLAN_VERBOSE
 	warning("TOTAL STEPS: %"PRIuMAX, (uintmax_t)*steps_nr_p);
+#endif
 	return 0;
 }
 
