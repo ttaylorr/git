@@ -1,7 +1,7 @@
 #define USE_THE_REPOSITORY_VARIABLE
 #define DISABLE_SIGN_COMPARE_WARNINGS
 
-#define PLAN_VERBOSE
+#undef PLAN_VERBOSE
 
 #include "git-compat-util.h"
 #include "dir.h"
@@ -890,7 +890,9 @@ static int midx_compaction_step_exec(struct midx_compaction_step *step,
 			goto out;
 		}
 
+#ifdef PLAN_VERBOSE
 		warning("%s:%d: [EVAL] writing new MIDX (base=%s)", __FILE__, __LINE__, base ? base : "<none>");
+#endif
 		for (size_t i = 0; i < step->u.packs.nr; i++) {
 			if (step->u.packs.items[i].util) {
 				preferred_pack = step->u.packs.items[i].string;

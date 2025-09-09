@@ -205,12 +205,14 @@ dump_chain () {
 	tac $midx_chain | nl -w1 -v0 |
 	while read nr layer
 	do
-		echo "  MIDX #${nr}: "
+		echo -n "  MIDX #${nr}: "
 		test-tool read-midx $objdir "$layer" | grep '\.idx$' >packs
 		for p in $(cat packs)
 		do
-			echo "    $p $(git show-index <"$packdir/$p" | wc -l)"
-		done
+			git show-index <"$packdir/$p" | wc -l
+			# echo "    $p $(git show-index <"$packdir/$p" | wc -l)"
+		done | sort -n | tr $'\n' ' ' &&
+		echo
 	done
 	# echo "==> $midx_chain <==" &&
 	# (
@@ -246,7 +248,7 @@ test_expect_success 'midx compaction during repacking' '
 				--write-bitmap-index &&
 			# ls $packdir/pack-*.idx | sort >packs.after &&
 			# diff -u packs.before packs.after || true &&
-			test-tool read-midx --bitmap $objdir &&
+			# test-tool read-midx --bitmap $objdir &&
 			dump_chain || return 1
 		done
 
