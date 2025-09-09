@@ -226,8 +226,6 @@ static int compact_midx_pack(struct pack_info *info,
 
 	fill_pack_info(info, p, pack_name, pack_int_id);
 
-	warning("pack %s has pack_int_id=%"PRIu32, pack_name, pack_int_id);
-
 	ctx->nr++;
 
 	return 0;
@@ -268,20 +266,13 @@ static void compact_midx_pack_range(struct write_midx_context *ctx)
 		if (compact_midx_pack(&ctx->info[pack_int_id++], ctx, m,
 				      preferred_pack_id) < 0)
 			warning("uh-oh");
-		warning("added %s as preferred (%d)", m->pack_names[preferred_pack_id
-			- m->num_packs_in_base], pack_int_id - 1);
 
 		for (i = 0; i < m->num_packs; i++) {
-			if (preferred_pack_id - m->num_packs_in_base == i) {
-				warning("skipping %s as preferred",
-					m->pack_names[preferred_pack_id
-					- m->num_packs_in_base]);
+			if (preferred_pack_id - m->num_packs_in_base == i)
 				continue;
-			}
 			if (compact_midx_pack(&ctx->info[pack_int_id], ctx, m,
 					      i + m->num_packs_in_base) < 0)
 				continue;
-			warning("added %s (%d)", m->pack_names[i], pack_int_id);
 			pack_int_id++;
 		}
 
@@ -504,9 +495,6 @@ static void compute_sorted_entries(struct write_midx_context *ctx,
 		 * the entire array is in lexical order.
 		 */
 		QSORT(ctx->entries, ctx->entries_nr, midx_oid_compare);
-		for (uint32_t i = 0; i < ctx->entries_nr; i++) {
-			warning("object: %s", oid_to_hex(&ctx->entries[i].oid));
-		}
 
 		return;
 	}
@@ -582,7 +570,6 @@ static int write_midx_pack_names(struct hashfile *f, void *data)
 
 		writelen = strlen(ctx->info[i].pack_name) + 1;
 		hashwrite(f, ctx->info[i].pack_name, writelen);
-		warning("wrote pack name: %s", ctx->info[i].pack_name);
 		written += writelen;
 	}
 
@@ -741,11 +728,8 @@ static int write_midx_revindex(struct hashfile *f,
 	else
 		nr_base = 0;
 
-	for (i = 0; i < ctx->entries_nr; i++) {
-		warning("pack_order[%d] = %"PRIu32,
-			i, ctx->pack_order[i] + nr_base);
+	for (i = 0; i < ctx->entries_nr; i++)
 		hashwrite_be32(f, ctx->pack_order[i] + nr_base);
-	}
 
 	return 0;
 }
@@ -779,64 +763,18 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 
 	trace2_region_enter("midx", "midx_pack_order", ctx->repo);
 
-	if (ctx->incremental && ctx->base_midx) {
+	if (ctx->incremental && ctx->base_midx)
 		base_objects = ctx->base_midx->num_objects +
 			ctx->base_midx->num_objects_in_base;
-		warning("base MIDX: %s, has %"PRIu32" objects",
-			hash_to_hex_algop(get_midx_checksum(ctx->base_midx),
-					  ctx->repo->hash_algo),
-			base_objects);
-	}
 
 	ALLOC_ARRAY(pack_order, ctx->entries_nr);
-
-	if (ctx->compact) {
-		struct multi_pack_index *m = ctx->compact_to;
-
-		while (m) {
-			if (load_midx_revindex(m) < 0)
-				die("could not load revindex for MIDX");
-			if (m == ctx->compact_from)
-				break;
-			m = m->base_midx;
-		}
-
-		m = ctx->compact_to;
-		/* something's not right here */
-		for (i = 0; i < ctx->entries_nr; i++)
-			pack_order[i] = pack_pos_to_midx(m, i + base_objects);
-		for (i = 0; i < ctx->nr; i++) {
-			struct pack_info *pack = &ctx->info[i];
-			struct bitmapped_pack bp;
-
-			if (nth_bitmapped_pack(ctx->repo, m, &bp,
-					       pack->orig_pack_int_id) < 0)
-				die("could not load bitmap info for pack %"PRIu32,
-				    pack->orig_pack_int_id);
-
-			pack->bitmap_nr = bp.bitmap_nr;
-			pack->bitmap_pos = bp.bitmap_pos;
-		}
-
-		for (i = 0; i < ctx->entries_nr; i++) {
-			struct pack_midx_entry *e = &ctx->entries[pack_order[i]];
-
-			warning("object %s at pos=%"PRIu32", pack=%"PRIu32,
-				oid_to_hex(&e->oid),
-				i + base_objects,
-				midx_pack_perm(ctx, e->pack_int_id));
-		}
-
-		goto done;
-	}
-
 	ALLOC_ARRAY(data, ctx->entries_nr);
 
 	for (i = 0; i < ctx->entries_nr; i++) {
 		struct pack_midx_entry *e = &ctx->entries[i];
 		data[i].nr = i;
 		data[i].pack = midx_pack_perm(ctx, e->pack_int_id);
-		if (!e->preferred)
+		if (!e->preferred || ctx->compact)
 			data[i].pack |= (1U << 31);
 		data[i].offset = e->offset;
 	}
@@ -863,7 +801,6 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 			pack->bitmap_pos = 0;
 	}
 
-done:
 	free(data);
 
 	trace2_region_leave("midx", "midx_pack_order", ctx->repo);
@@ -1600,8 +1537,6 @@ static int write_midx_internal(struct write_midx_opts *opts)
 			ctx.pack_perm[ctx.info[i].orig_pack_int_id] = i - dropped_packs;
 		}
 	}
-	for (i = 0; i < ctx.nr; i++)
-		warning("%d -> %d", i, ctx.pack_perm[i]);
 
 	for (i = 0; i < ctx.nr; i++) {
 		if (ctx.info[i].expired)
@@ -1777,12 +1712,9 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	}
 	CALLOC_ARRAY(keep_hashes, keep_hashes_nr);
 
-	warning("HELLO");
-	if (opts->flags & MIDX_WRITE_PRINT_CHECKSUM) {
-		warning("OK");
+	if (opts->flags & MIDX_WRITE_PRINT_CHECKSUM)
 		printf("%s\n", hash_to_hex_algop(midx_hash,
 						 opts->r->hash_algo));
-	}
 
 	if (ctx.incremental) {
 		FILE *chainf;

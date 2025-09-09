@@ -453,8 +453,17 @@ int prepare_midx_pack(struct repository *r, struct multi_pack_index *m,
 	struct strbuf pack_name = STRBUF_INIT;
 	struct strbuf key = STRBUF_INIT;
 	struct packed_git *p;
+	int debug = 0;
+
+	if (pack_int_id & (1U << 31)) {
+		debug = 1;
+		pack_int_id &= ~(1U << 31);
+	}
 
 	pack_int_id = midx_for_pack(&m, pack_int_id);
+
+	if (debug)
+		warning("preparing pack %s (pack_int_id=%u) from MIDX", m->pack_names[pack_int_id], pack_int_id);
 
 	if (m->packs[pack_int_id] == MIDX_PACK_ERROR)
 		return 1;

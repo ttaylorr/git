@@ -967,7 +967,7 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	m = get_multi_pack_index(the_repository);
 
 	for (i = 0; m && i < m->num_packs + m->num_packs_in_base; i++) {
-		if (prepare_midx_pack(the_repository, m, i))
+		if (prepare_midx_pack(the_repository, m, (1u<<31)|i))
 			return error(_("could not load pack %u from MIDX"), i);
 	}
 
@@ -1073,16 +1073,7 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 
 		for (i = 0; i < m->num_packs; i++) {
 			uint32_t pack_int_id = i + m->num_packs_in_base;
-			struct packed_git *p;
-
-			if (prepare_midx_pack(the_repository, m, pack_int_id)) {
-				free(steps);
-				return error(_("could not load pack %u of MIDX %s"),
-					     pack_int_id,
-					     hash_to_hex(get_midx_checksum(m)));
-			}
-
-			p = nth_midxed_pack(m, pack_int_id);
+			struct packed_git *p = nth_midxed_pack(m, pack_int_id);
 
 			strbuf_reset(&buf);
 			strbuf_addstr(&buf, pack_basename(p));
