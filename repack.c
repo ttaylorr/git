@@ -872,6 +872,7 @@ static int midx_compaction_step_exec(struct midx_compaction_step *step,
 	FILE *out;
 	struct strbuf buf = STRBUF_INIT;
 	const unsigned char *from, *to;
+	const char *preferred_pack = NULL;
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	struct string_list hash = STRING_LIST_INIT_DUP;
 	int ret = 0;
@@ -889,18 +890,32 @@ static int midx_compaction_step_exec(struct midx_compaction_step *step,
 			goto out;
 		}
 
+		warning("%s:%d: [EVAL] writing new MIDX (base=%s)", __FILE__, __LINE__, base ? base : "<none>");
+		for (size_t i = 0; i < step->u.packs.nr; i++) {
+			if (step->u.packs.items[i].util) {
+				preferred_pack = step->u.packs.items[i].string;
+#ifdef PLAN_VERBOSE
+				warning("  including pack %s <- ",
+					step->u.packs.items[i].string);
+#endif
+			} else {
+#ifdef PLAN_VERBOSE
+				warning("  including pack %s",
+					step->u.packs.items[i].string);
+#endif
+				;
+			}
+		}
+
 		prepare_midx_command(&cmd, opts, "write");
 		strvec_pushl(&cmd.args, "--stdin-packs", "--incremental",
 			     "--print-checksum", NULL);
 
-		strvec_pushl(&cmd.args, "--base", base ? base : "none", NULL);
+		if (preferred_pack)
+			strvec_pushf(&cmd.args, "--preferred-pack=%s",
+				     preferred_pack);
 
-#ifdef PLAN_VERBOSE
-		warning("%s:%d: [EVAL] writing new MIDX (base=%s)", __FILE__, __LINE__, base ? base : "<none>");
-		for (size_t i = 0; i < step->u.packs.nr; i++)
-			warning("  including pack %s",
-				step->u.packs.items[i].string);
-#endif
+		strvec_pushl(&cmd.args, "--base", base ? base : "none", NULL);
 
 		ret = fill_midx_stdin_packs(&cmd, &step->u.packs, &hash);
 
@@ -1023,6 +1038,7 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	 */
 	for (i = opts->geometry->split; i < opts->geometry->pack_nr; i++) {
 		struct packed_git *p = opts->geometry->pack[i];
+		struct string_list_item *item;
 
 		strbuf_reset(&buf);
 		strbuf_addstr(&buf, pack_basename(p));
@@ -1045,7 +1061,11 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 		warning("%s:%d adding old pack: %s", __FILE__, __LINE__, buf.buf);
 #endif
 
-		string_list_append(&step.u.packs, strbuf_detach(&buf, NULL));
+		item = string_list_append(&step.u.packs,
+					  strbuf_detach(&buf, NULL));
+		if (p->multi_pack_index || i == opts->geometry->pack_nr - 1)
+			item->util = (void *)1; /* mark as preferred */
+
 		step.num_objects = u32_add(step.num_objects, p->num_objects);
 	}
 
@@ -1074,6 +1094,7 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 	 * the merging condition is violated.
 	 */
 	while (m) {
+		uint32_t preferred_pack_idx;
 #ifdef PLAN_VERBOSE
 		warning("evaluating existing MIDX: %s",
 			hash_to_hex(get_midx_checksum(m)));
@@ -1095,7 +1116,12 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 			(uintmax_t)step.num_objects, (uintmax_t)m->num_objects);
 #endif
 
+		if (midx_preferred_pack(m, &preferred_pack_idx) < 0)
+			return error(_("could not determine preferred pack for %s"),
+				     hash_to_hex(get_midx_checksum(m)));
+
 		for (i = 0; i < m->num_packs; i++) {
+			struct string_list_item *item;
 			uint32_t pack_int_id = i + m->num_packs_in_base;
 			struct packed_git *p = nth_midxed_pack(m, pack_int_id);
 
@@ -1104,8 +1130,11 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 			strbuf_strip_suffix(&buf, ".pack");
 			strbuf_addstr(&buf, ".idx");
 
-			string_list_append(&step.u.packs,
-					   strbuf_detach(&buf, NULL));
+			item = string_list_append(&step.u.packs,
+						  strbuf_detach(&buf, NULL));
+
+			if (i + m->num_packs_in_base == preferred_pack_idx)
+				item->util = (void *)1;
 		}
 
 		step.num_objects = u32_add(step.num_objects, m->num_objects);
@@ -1148,24 +1177,39 @@ static int make_compaction_plan(struct repack_midx_opts *opts,
 
 		memset(&step, 0, sizeof(step));
 		step.type = MIDX_UNKNOWN;
-		step.num_objects = next->num_objects;
+		step.num_objects = 0;
 
-		while (next->base_midx) {
+		while (next) {
 			struct multi_pack_index *base = next->base_midx;
-			uint32_t proposed = u32_add(step.num_objects,
-						    base->num_objects);
+			uint32_t proposed = u32_add(step.num_objects, next->num_objects);
 
+			if (!base) {
+				/*
+				 * If we are at the end of the MIDX
+				 * chain, there is nothing to comapct
+				 * into this MIDX, so mark it for
+				 * inclusion and then stop.
+				 */
+				step.num_objects = proposed;
+				break;
+			}
 			if (proposed < base->num_objects / opts->midx_split_factor) {
 				/*
-				 * Stop compacting MIDXs as soon as the meregd
-				 * size is less than half of the size of the
-				 * next MIDX in the chain.
+				 * If there is a MIDX following this
+				 * one, but our accumulated size is less
+				 * than half of its size, so compacting
+				 * them would violate the merging
+				 * condition.
 				 */
 				break;
 			}
 
-			step.num_objects = u32_add(step.num_objects,
-						   next->num_objects);
+			/*
+			 * Otherwise, it is OK to compact the next layer
+			 * into this one, so do so and then continue
+			 * down the remainder of the MIDX chain.
+			 */
+			step.num_objects = proposed;
 			next = base;
 		}
 
