@@ -235,10 +235,10 @@ test_expect_success 'midx compaction during repacking' '
 		git config gc.auto 0 &&
 		git config maintenance.auto false &&
 
-		for i in $(seq 0 100)
+		for i in $(seq 0 1000)
 		do
 			echo "Repack step $i" &&
-			for j in $(seq 1 5)
+			for j in $(seq 1 $(rand 20))
 			do
 				push "$i-$j" || return 1
 			done &&
