@@ -40,6 +40,7 @@ struct write_pack_opts {
 };
 
 const char *write_pack_opts_pack_prefix(struct write_pack_opts *opts);
+int write_pack_opts_is_local(struct write_pack_opts *opts);
 
 struct repository;
 struct packed_git;

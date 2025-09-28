@@ -77,6 +77,12 @@ const char *write_pack_opts_pack_prefix(struct write_pack_opts *opts)
 	return pack_prefix;
 }
 
+int write_pack_opts_is_local(struct write_pack_opts *opts)
+{
+	const char *scratch;
+	return skip_prefix(opts->destination, opts->packdir, &scratch);
+}
+
 #define DELETE_PACK 1
 #define RETAIN_PACK 2
 
