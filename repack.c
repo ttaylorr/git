@@ -83,6 +83,39 @@ int write_pack_opts_is_local(struct write_pack_opts *opts)
 	return skip_prefix(opts->destination, opts->packdir, &scratch);
 }
 
+int finish_pack_objects_cmd(const struct git_hash_algo *algop,
+			    struct write_pack_opts *opts,
+			    struct child_process *cmd,
+			    struct string_list *names)
+{
+	FILE *out;
+	int local = write_pack_opts_is_local(opts);
+	struct strbuf line = STRBUF_INIT;
+
+	out = xfdopen(cmd->out, "r");
+	while (strbuf_getline_lf(&line, out) != EOF) {
+		struct string_list_item *item;
+
+		if (line.len != algop->hexsz)
+			die(_("repack: Expecting full hex object ID lines only "
+			      "from pack-objects."));
+		/*
+		 * Avoid putting packs written outside of the repository in the
+		 * list of names.
+		 */
+		if (local) {
+			item = string_list_append(names, line.buf);
+			item->util = generated_pack_populate(line.buf,
+							     opts->packtmp);
+		}
+	}
+	fclose(out);
+
+	strbuf_release(&line);
+
+	return finish_command(cmd);
+}
+
 #define DELETE_PACK 1
 #define RETAIN_PACK 2
 
