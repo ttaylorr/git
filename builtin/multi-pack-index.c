@@ -61,6 +61,7 @@ static char const * const builtin_multi_pack_index_usage[] = {
 static struct opts_multi_pack_index {
 	char *object_dir;
 	const char *preferred_pack;
+	const char *incremental_base;
 	char *refs_snapshot;
 	unsigned long batch_size;
 	unsigned flags;
@@ -214,6 +215,8 @@ static int cmd_multi_pack_index_compact(int argc, const char **argv,
 
 	struct option *options;
 	static struct option builtin_multi_pack_index_compact_options[] = {
+		OPT_STRING(0, "base", &opts.incremental_base, N_("checksum"),
+			   N_("base MIDX for incremental writes")),
 		OPT_BIT(0, "bitmap", &opts.flags, N_("write multi-pack bitmap"),
 			MIDX_WRITE_BITMAP | MIDX_WRITE_REV_INDEX),
 		OPT_BIT(0, "incremental", &opts.flags,
@@ -258,7 +261,8 @@ static int cmd_multi_pack_index_compact(int argc, const char **argv,
 	if (!to_midx)
 		die(_("could not find MIDX 'to': %s"), argv[1]);
 
-	return write_midx_file_compact(source, from_midx, to_midx, opts.flags);
+	return write_midx_file_compact(source, from_midx, to_midx,
+				       opts.incremental_base, opts.flags);
 }
 
 static int cmd_multi_pack_index_verify(int argc, const char **argv,
