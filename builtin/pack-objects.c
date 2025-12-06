@@ -285,9 +285,9 @@ static struct oidset excluded_by_config;
 static int name_hash_version = -1;
 
 enum stdin_packs_mode {
-	STDIN_PACKS_MODE_NONE,
-	STDIN_PACKS_MODE_STANDARD,
-	STDIN_PACKS_MODE_FOLLOW,
+	STDIN_PACKS_MODE_NONE     = 0,
+	STDIN_PACKS_MODE_STANDARD = (1<<0),
+	STDIN_PACKS_MODE_FOLLOW   = (1<<1),
 };
 
 /**
@@ -3772,7 +3772,7 @@ static void show_object_pack_hint(struct object *object, const char *name,
 				  void *data)
 {
 	enum stdin_packs_mode mode = *(enum stdin_packs_mode *)data;
-	if (mode == STDIN_PACKS_MODE_FOLLOW) {
+	if (mode & STDIN_PACKS_MODE_FOLLOW) {
 		if (object->type == OBJ_BLOB &&
 		    !odb_has_object(the_repository->objects, &object->oid, 0))
 			return;
@@ -3803,7 +3803,7 @@ static void show_commit_pack_hint(struct commit *commit, void *data)
 {
 	enum stdin_packs_mode mode = *(enum stdin_packs_mode *)data;
 
-	if (mode == STDIN_PACKS_MODE_FOLLOW) {
+	if (mode & STDIN_PACKS_MODE_FOLLOW) {
 		show_object_pack_hint((struct object *)commit, "", data);
 		return;
 	}
