@@ -356,4 +356,46 @@ test_expect_success '--stdin-packs=follow tolerates missing commits' '
 	stdin_packs__follow_with_only HEAD HEAD^{tree}
 '
 
+test_expect_success '--stdin-packs=reachable excludes unreachable objects' '
+	rm -fr stdin_packs__reachable_exclude_unreachable &&
+	git init stdin_packs__reachable_exclude_unreachable &&
+	(
+		cd stdin_packs__reachable_exclude_unreachable &&
+
+		test_commit base &&
+		test_commit A &&
+		git branch -M main &&
+		git checkout --detach &&
+		test_commit B &&
+		git checkout main &&
+		test_commit C &&
+
+		# Construct three packs with overlapping reachable and
+		# unreachable objects.
+		p0="$(echo base | git pack-objects --revs $packdir/pack)" &&
+		p1="$(echo B | git pack-objects --revs $packdir/pack)" &&
+		p2="$(echo A..C | git pack-objects --revs $packdir/pack)" &&
+
+		B="$(git rev-parse B)" &&
+
+		git tag -d B &&
+		git reflog expire --all --expire=all &&
+
+		git prune-packed &&
+
+		cat >in <<-EOF &&
+		^pack-$p0.pack
+		pack-$p1.pack
+		pack-$p2.pack
+		EOF
+		p="$(git pack-objects --stdin-packs=reachable $packdir/pack <in)" &&
+
+		packed_objects $packdir/pack-$p.idx >actual &&
+		git rev-list --objects --no-object-names base..C >expect.raw &&
+		sort expect.raw >expect &&
+
+		test_cmp expect actual
+	)
+'
+
 test_done

@@ -102,6 +102,9 @@ resurrect once-unreachable objects found in cruft packs to generate
 packs which are closed under reachability up to the boundary set by the
 excluded packs.
 +
+When `mode` is "reachable", unreachable objects from included packs are
+not packed. Implies "follow".
++
 Incompatible with `--revs`, or options that imply `--revs` (such as
 `--all`), with the exception of `--unpacked`, which is compatible.
 

@@ -14,6 +14,7 @@ enum packed_git_keep_flags {
 	PACK_KEEP_NONE = 0,
 	PACK_KEEP_ON_DISK = 1 << 0,
 	PACK_KEEP_IN_CORE = 1 << 1,
+	PACK_KEEP_IN_CORE_CLOSED = 1 << 2,
 };
 
 struct packed_git {

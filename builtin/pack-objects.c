@@ -285,9 +285,10 @@ static struct oidset excluded_by_config;
 static int name_hash_version = -1;
 
 enum stdin_packs_mode {
-	STDIN_PACKS_MODE_NONE     = 0,
-	STDIN_PACKS_MODE_STANDARD = (1<<0),
-	STDIN_PACKS_MODE_FOLLOW   = (1<<1),
+	STDIN_PACKS_MODE_NONE      = 0,
+	STDIN_PACKS_MODE_STANDARD  = (1<<0),
+	STDIN_PACKS_MODE_FOLLOW    = (1<<1),
+	STDIN_PACKS_MODE_REACHABLE = (1<<2),
 };
 
 /**
@@ -3829,7 +3830,8 @@ static int pack_mtime_cmp(const void *_a, const void *_b)
 		return 0;
 }
 
-static void read_packs_list_from_stdin(struct rev_info *revs)
+static void read_packs_list_from_stdin(struct rev_info *revs,
+				       enum stdin_packs_mode mode)
 {
 	struct strbuf buf = STRBUF_INIT;
 	struct strmap packs_by_name = STRMAP_INIT;
@@ -3846,10 +3848,13 @@ static void read_packs_list_from_stdin(struct rev_info *revs)
 		if (!buf.len)
 			continue;
 
-		pack_name = *buf.buf == '^' ? buf.buf + 1 : buf.buf;
+		if (*buf.buf == '^' || *buf.buf == '!')
+			pack_name = buf.buf + 1;
+		else
+			pack_name = buf.buf;
 
 		p = strmap_get(&packs_by_name, pack_name);
-		if (*buf.buf != '^')
+		if (pack_name == buf.buf)
 			string_list_append(&include_packs, buf.buf)->util = p;
 
 		/*
@@ -3876,6 +3881,9 @@ static void read_packs_list_from_stdin(struct rev_info *revs)
 		case '^':
 			p->keep_flags |= PACK_KEEP_IN_CORE;
 			break;
+		case '!':
+			p->keep_flags |= PACK_KEEP_IN_CORE|PACK_KEEP_IN_CORE_CLOSED;
+			break;
 		default:
 			break;
 		}
@@ -3885,18 +3893,31 @@ static void read_packs_list_from_stdin(struct rev_info *revs)
 	string_list_remove_duplicates(&include_packs, 0);
 
 	/*
-	 * Order packs by ascending mtime; use QSORT directly to access the
-	 * string_list_item's ->util pointer, which string_list_sort() does not
-	 * provide.
+	 * If we are not in REACHABLE mode, we want to pack all objects
+	 * appearing in the included packs, less any which appear in at
+	 * least one excluded pack.
+	 *
+	 * In REACHABLE mode, we only want to pack reachable objects
+	 * from included packs (excluding those found in excluded packs
+	 * as before). Populate the packing list separately during the
+	 * same revision walk that picks up name hashes (see function
+	 * 'read_stdin_packs()').
 	 */
-	QSORT(include_packs.items, include_packs.nr, pack_mtime_cmp);
+	if (!(mode & STDIN_PACKS_MODE_REACHABLE)) {
+		/*
+		 * Order packs by ascending mtime; use QSORT directly to
+		 * access the string_list_item's ->util pointer, which
+		 * string_list_sort() does not provide.
+		 */
+		QSORT(include_packs.items, include_packs.nr, pack_mtime_cmp);
 
-	for_each_string_list_item(item, &include_packs) {
-		struct packed_git *p = item->util;
-		for_each_object_in_pack(p,
-					add_object_entry_from_pack,
-					revs,
-					FOR_EACH_OBJECT_PACK_ORDER);
+		for_each_string_list_item(item, &include_packs) {
+			struct packed_git *p = item->util;
+			for_each_object_in_pack(p,
+						add_object_entry_from_pack,
+						revs,
+						FOR_EACH_OBJECT_PACK_ORDER);
+		}
 	}
 
 	strbuf_release(&buf);
@@ -3906,11 +3927,26 @@ static void read_packs_list_from_stdin(struct rev_info *revs)
 
 static void add_unreachable_loose_objects(struct rev_info *revs);
 
+static int stdin_packs_reachable_include_check_obj(struct object *obj,
+						   void *data UNUSED)
+{
+	return !has_object_kept_pack(to_pack.repo, &obj->oid,
+				     PACK_KEEP_IN_CORE_CLOSED);
+}
+
+static int stdin_packs_reachable_include_check(struct commit *commit,
+					       void *data)
+{
+	return stdin_packs_reachable_include_check_obj((struct object*)commit,
+						       data);
+}
+
 static void read_stdin_packs(enum stdin_packs_mode mode, int rev_list_unpacked)
 {
 	struct rev_info revs;
 
 	repo_init_revisions(the_repository, &revs, NULL);
+
 	/*
 	 * Use a revision walk to fill in the namehash of objects in the include
 	 * packs. To save time, we'll avoid traversing through objects that are
@@ -3929,9 +3965,21 @@ static void read_stdin_packs(enum stdin_packs_mode mode, int rev_list_unpacked)
 
 	/* avoids adding objects in excluded packs */
 	ignore_packed_keep_in_core = 1;
-	read_packs_list_from_stdin(&revs);
-	if (rev_list_unpacked)
+	if (mode & STDIN_PACKS_MODE_REACHABLE) {
+		revs.include_check = stdin_packs_reachable_include_check;
+		revs.include_check_obj = stdin_packs_reachable_include_check_obj;
+	}
+
+	read_packs_list_from_stdin(&revs, mode);
+
+	if (rev_list_unpacked) {
 		add_unreachable_loose_objects(&revs);
+	} else if (mode & STDIN_PACKS_MODE_REACHABLE) {
+		struct strvec argv = STRVEC_INIT;
+		strvec_pushl(&argv, "pack-objects", "--all", NULL);
+
+		setup_revisions_from_strvec(&argv, &revs, NULL);
+	}
 
 	if (prepare_revision_walk(&revs))
 		die(_("revision walk setup failed"));
@@ -4843,6 +4891,8 @@ static int parse_stdin_packs_mode(const struct option *opt, const char *arg,
 		*mode = STDIN_PACKS_MODE_STANDARD;
 	else if (!strcmp(arg, "follow"))
 		*mode = STDIN_PACKS_MODE_FOLLOW;
+	else if (!strcmp(arg, "reachable"))
+		*mode = STDIN_PACKS_MODE_FOLLOW | STDIN_PACKS_MODE_REACHABLE;
 	else
 		die(_("invalid value for '%s': '%s'"), opt->long_name, arg);
 
@@ -5132,8 +5182,15 @@ int cmd_pack_objects(int argc,
 				  filter_options.choice, "--filter");
 
 
-	if (stdin_packs && use_internal_rev_list)
-		die(_("cannot use internal rev list with --stdin-packs"));
+	if (stdin_packs) {
+		int reachable = stdin_packs & STDIN_PACKS_MODE_REACHABLE;
+
+		if (use_internal_rev_list)
+			die(_("cannot use internal rev list with --stdin-packs"));
+
+		die_for_incompatible_opt2(reachable, "--stdin-packs=reachable",
+					  rev_list_unpacked, "--unpacked");
+	}
 
 	if (cruft) {
 		if (use_internal_rev_list)
