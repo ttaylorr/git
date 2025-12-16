@@ -10,6 +10,12 @@
 /* in odb.h */
 struct object_info;
 
+enum packed_git_keep_flags {
+	PACK_KEEP_NONE = 0,
+	PACK_KEEP_ON_DISK = 1 << 0,
+	PACK_KEEP_IN_CORE = 1 << 1,
+};
+
 struct packed_git {
 	struct pack_window *windows;
 	off_t pack_size;
@@ -370,21 +376,21 @@ int packed_object_info(struct repository *r,
 void mark_bad_packed_object(struct packed_git *, const struct object_id *);
 const struct packed_git *has_packed_and_bad(struct repository *, const struct object_id *);
 
-#define ON_DISK_KEEP_PACKS 1
-#define IN_CORE_KEEP_PACKS 2
-
 /*
  * Iff a pack file in the given repository contains the object named by sha1,
  * return true and store its location to e.
  */
 int find_pack_entry(struct repository *r, const struct object_id *oid, struct pack_entry *e);
-int find_kept_pack_entry(struct repository *r, const struct object_id *oid, unsigned flags, struct pack_entry *e);
+int find_kept_pack_entry(struct repository *r, const struct object_id *oid,
+			 enum packed_git_keep_flags flags,
+			 struct pack_entry *e);
 
 int has_object_pack(struct repository *r, const struct object_id *oid);
 int has_object_kept_pack(struct repository *r, const struct object_id *oid,
-			 unsigned flags);
+			 enum packed_git_keep_flags flags);
 
-struct packed_git **kept_pack_cache(struct repository *r, unsigned flags);
+struct packed_git **kept_pack_cache(struct repository *r,
+				    enum packed_git_keep_flags flags);
 
 /*
  * Return 1 if an object in a promisor packfile is or refers to the given

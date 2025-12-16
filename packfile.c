@@ -2146,7 +2146,7 @@ int find_pack_entry(struct repository *r, const struct object_id *oid, struct pa
 }
 
 static void maybe_invalidate_kept_pack_cache(struct repository *r,
-					     unsigned flags)
+					     enum packed_git_keep_flags flags)
 {
 	if (!r->objects->packfiles->kept_cache.packs)
 		return;
@@ -2156,7 +2156,8 @@ static void maybe_invalidate_kept_pack_cache(struct repository *r,
 	r->objects->packfiles->kept_cache.flags = 0;
 }
 
-struct packed_git **kept_pack_cache(struct repository *r, unsigned flags)
+struct packed_git **kept_pack_cache(struct repository *r,
+				    enum packed_git_keep_flags flags)
 {
 	maybe_invalidate_kept_pack_cache(r, flags);
 
@@ -2174,8 +2175,8 @@ struct packed_git **kept_pack_cache(struct repository *r, unsigned flags)
 		 * the non-kept version.
 		 */
 		repo_for_each_pack(r, p) {
-			if ((p->pack_keep && (flags & ON_DISK_KEEP_PACKS)) ||
-			    (p->pack_keep_in_core && (flags & IN_CORE_KEEP_PACKS))) {
+			if ((p->pack_keep && (flags & PACK_KEEP_ON_DISK)) ||
+			    (p->pack_keep_in_core && (flags & PACK_KEEP_IN_CORE))) {
 				ALLOC_GROW(packs, nr + 1, alloc);
 				packs[nr++] = p;
 			}
@@ -2192,7 +2193,7 @@ struct packed_git **kept_pack_cache(struct repository *r, unsigned flags)
 
 int find_kept_pack_entry(struct repository *r,
 			 const struct object_id *oid,
-			 unsigned flags,
+			 enum packed_git_keep_flags flags,
 			 struct pack_entry *e)
 {
 	struct packed_git **cache;
@@ -2213,7 +2214,7 @@ int has_object_pack(struct repository *r, const struct object_id *oid)
 }
 
 int has_object_kept_pack(struct repository *r, const struct object_id *oid,
-			 unsigned flags)
+			 enum packed_git_keep_flags flags)
 {
 	struct pack_entry e;
 	return find_kept_pack_entry(r, oid, flags, &e);

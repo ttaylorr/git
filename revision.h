@@ -12,6 +12,7 @@
 #include "ident.h"
 #include "list-objects-filter-options.h"
 #include "strvec.h"
+#include "packfile.h"
 
 /**
  * The revision walking API offers functions to build a list of revisions
@@ -369,7 +370,7 @@ struct rev_info {
 	struct bloom_filter_settings *bloom_filter_settings;
 
 	/* misc. flags related to '--no-kept-objects' */
-	unsigned keep_pack_cache_flags;
+	enum packed_git_keep_flags keep_pack_cache_flags;
 
 	/* Location where temporary objects for remerge-diff are written. */
 	struct tmp_objdir *remerge_objdir;
