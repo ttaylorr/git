@@ -3832,67 +3832,57 @@ static int pack_mtime_cmp(const void *_a, const void *_b)
 static void read_packs_list_from_stdin(struct rev_info *revs)
 {
 	struct strbuf buf = STRBUF_INIT;
+	struct strmap packs_by_name = STRMAP_INIT;
 	struct string_list include_packs = STRING_LIST_INIT_DUP;
-	struct string_list exclude_packs = STRING_LIST_INIT_DUP;
 	struct string_list_item *item = NULL;
 	struct packed_git *p;
 
+	repo_for_each_pack(the_repository, p) {
+		strmap_put(&packs_by_name, pack_basename(p), p);
+	}
+
 	while (strbuf_getline(&buf, stdin) != EOF) {
+		const char *pack_name;
 		if (!buf.len)
 			continue;
 
-		if (*buf.buf == '^')
-			string_list_append(&exclude_packs, buf.buf + 1);
-		else
-			string_list_append(&include_packs, buf.buf);
+		pack_name = *buf.buf == '^' ? buf.buf + 1 : buf.buf;
 
-		strbuf_reset(&buf);
+		p = strmap_get(&packs_by_name, pack_name);
+		if (*buf.buf != '^')
+			string_list_append(&include_packs, buf.buf)->util = p;
+
+		/*
+		 * Arguments we got on stdin may not even be packs.
+		 * First check that to avoid segfaulting later on in
+		 * e.g. pack_mtime_cmp(), excluded packs are handled
+		 * below.
+		 *
+		 * Since we're handling STDIN line by line, bail on the
+		 * first non-existent or invalid pack we see (if any).
+		 */
+		if (!p)
+			die(_("could not find pack '%s'"), pack_name);
+		if (!is_pack_valid(p))
+			die(_("packfile %s cannot be accessed"), p->pack_name);
+
+		/*
+		 * Then, handle all of the excluded packs, marking them
+		 * as kept in-core so that later calls to
+		 * add_object_entry() discards any objects that are also
+		 * found in excluded packs.
+		 */
+		switch (*buf.buf) {
+		case '^':
+			p->keep_flags |= PACK_KEEP_IN_CORE;
+			break;
+		default:
+			break;
+		}
 	}
 
 	string_list_sort(&include_packs);
 	string_list_remove_duplicates(&include_packs, 0);
-	string_list_sort(&exclude_packs);
-	string_list_remove_duplicates(&exclude_packs, 0);
-
-	repo_for_each_pack(the_repository, p) {
-		const char *pack_name = pack_basename(p);
-
-		if ((item = string_list_lookup(&include_packs, pack_name)))
-			item->util = p;
-		if ((item = string_list_lookup(&exclude_packs, pack_name)))
-			item->util = p;
-	}
-
-	/*
-	 * Arguments we got on stdin may not even be packs. First
-	 * check that to avoid segfaulting later on in
-	 * e.g. pack_mtime_cmp(), excluded packs are handled below.
-	 *
-	 * Since we first parsed our STDIN and then sorted the input
-	 * lines the pack we error on will be whatever line happens to
-	 * sort first. This is lazy, it's enough that we report one
-	 * bad case here, we don't need to report the first/last one,
-	 * or all of them.
-	 */
-	for_each_string_list_item(item, &include_packs) {
-		struct packed_git *p = item->util;
-		if (!p)
-			die(_("could not find pack '%s'"), item->string);
-		if (!is_pack_valid(p))
-			die(_("packfile %s cannot be accessed"), p->pack_name);
-	}
-
-	/*
-	 * Then, handle all of the excluded packs, marking them as
-	 * kept in-core so that later calls to add_object_entry()
-	 * discards any objects that are also found in excluded packs.
-	 */
-	for_each_string_list_item(item, &exclude_packs) {
-		struct packed_git *p = item->util;
-		if (!p)
-			die(_("could not find pack '%s'"), item->string);
-		p->keep_flags |= PACK_KEEP_IN_CORE;
-	}
 
 	/*
 	 * Order packs by ascending mtime; use QSORT directly to access the
@@ -3911,7 +3901,7 @@ static void read_packs_list_from_stdin(struct rev_info *revs)
 
 	strbuf_release(&buf);
 	string_list_clear(&include_packs, 0);
-	string_list_clear(&exclude_packs, 0);
+	strmap_clear(&packs_by_name, 0);
 }
 
 static void add_unreachable_loose_objects(struct rev_info *revs);
