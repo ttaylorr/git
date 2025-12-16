@@ -1632,9 +1632,11 @@ static int want_found_object(const struct object_id *oid, int exclude,
 		 * abort quickly.
 		 */
 		if (!ignore_packed_keep_in_core_has_cruft) {
-			if (ignore_packed_keep_on_disk && p->pack_keep)
+			if (ignore_packed_keep_on_disk &&
+			    packed_git_is_kept(p, PACK_KEEP_ON_DISK))
 				return 0;
-			if (ignore_packed_keep_in_core && p->pack_keep_in_core)
+			if (ignore_packed_keep_in_core &&
+			    packed_git_is_kept(p, PACK_KEEP_IN_CORE))
 				return 0;
 			if (has_object_kept_pack(p->repo, oid, flags))
 				return 0;
@@ -3889,7 +3891,7 @@ static void read_packs_list_from_stdin(struct rev_info *revs)
 		struct packed_git *p = item->util;
 		if (!p)
 			die(_("could not find pack '%s'"), item->string);
-		p->pack_keep_in_core = 1;
+		p->keep_flags |= PACK_KEEP_IN_CORE;
 	}
 
 	/*
@@ -4053,7 +4055,10 @@ static void mark_pack_kept_in_core(struct string_list *packs, unsigned keep)
 			die(_("could not find pack '%s'"), item->string);
 		if (p->is_cruft && keep)
 			ignore_packed_keep_in_core_has_cruft = 1;
-		p->pack_keep_in_core = keep;
+		if (keep)
+			p->keep_flags |= PACK_KEEP_IN_CORE;
+		else
+			p->keep_flags &= ~PACK_KEEP_IN_CORE;
 	}
 }
 
@@ -4103,7 +4108,7 @@ static void enumerate_and_traverse_cruft_objects(struct string_list *fresh_packs
 	 * unknown packs do not halt the reachability traversal early.
 	 */
 	repo_for_each_pack(the_repository, p)
-		p->pack_keep_in_core = 0;
+		p->keep_flags &= ~PACK_KEEP_IN_CORE;
 	mark_pack_kept_in_core(fresh_packs, 1);
 
 	if (prepare_revision_walk(&revs))
@@ -4159,7 +4164,7 @@ static void read_cruft_objects(void)
 			 * unmark it before starting the traversal so it doesn't
 			 * halt the traversal early.
 			 */
-			p->pack_keep_in_core = 1;
+			p->keep_flags |= PACK_KEEP_IN_CORE;
 		}
 	}
 
@@ -4401,7 +4406,8 @@ static int has_sha1_pack_kept_or_nonlocal(const struct object_id *oid)
 		if (p == last_found)
 			continue;
 
-		if ((!p->pack_local || p->pack_keep || p->pack_keep_in_core) &&
+		if ((!p->pack_local ||
+		     packed_git_is_kept(p, PACK_KEEP_ON_DISK|PACK_KEEP_IN_CORE)) &&
 		    find_pack_entry_one(oid, p)) {
 			last_found = p;
 			return 1;
@@ -4440,7 +4446,8 @@ static void loosen_unused_packed_objects(void)
 	struct object_id oid;
 
 	repo_for_each_pack(the_repository, p) {
-		if (!p->pack_local || p->pack_keep || p->pack_keep_in_core)
+		if (!p->pack_local ||
+		    packed_git_is_kept(p, PACK_KEEP_ON_DISK|PACK_KEEP_IN_CORE))
 			continue;
 
 		if (open_pack_index(p))
@@ -4754,7 +4761,7 @@ static void add_extra_kept_packs(const struct string_list *names)
 				break;
 
 		if (i < names->nr) {
-			p->pack_keep_in_core = 1;
+			p->keep_flags |= PACK_KEEP_IN_CORE;
 			ignore_packed_keep_in_core = 1;
 			continue;
 		}
@@ -5183,7 +5190,8 @@ int cmd_pack_objects(int argc,
 		struct packed_git *p;
 
 		repo_for_each_pack(the_repository, p)
-			if (p->pack_local && p->pack_keep)
+			if (p->pack_local &&
+			    packed_git_is_kept(p, PACK_KEEP_ON_DISK))
 				break;
 		if (!p) /* no keep-able packs found */
 			ignore_packed_keep_on_disk = 0;

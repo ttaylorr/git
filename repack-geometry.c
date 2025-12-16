@@ -48,7 +48,7 @@ void pack_geometry_init(struct pack_geometry *geometry,
 			 * this saves us from doing a more expensive
 			 * check.
 			 */
-			if (p->pack_keep)
+			if (packed_git_is_kept(p, PACK_KEEP_ON_DISK))
 				continue;
 
 			/*
@@ -213,7 +213,7 @@ void pack_geometry_remove_redundant(struct pack_geometry *geometry,
 		strbuf_addstr(&buf, pack_basename(p));
 		strbuf_strip_suffix(&buf, ".pack");
 
-		if ((p->pack_keep) ||
+		if ((packed_git_is_kept(p, PACK_KEEP_ON_DISK)) ||
 		    (string_list_has_string(&existing->kept_packs, buf.buf)))
 			continue;
 

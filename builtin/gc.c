@@ -533,7 +533,7 @@ static int too_many_packs(struct gc_config *cfg)
 	repo_for_each_pack(the_repository, p) {
 		if (!p->pack_local)
 			continue;
-		if (p->pack_keep)
+		if (packed_git_is_kept(p, PACK_KEEP_ON_DISK))
 			continue;
 		/*
 		 * Perhaps check the size of the pack and count only

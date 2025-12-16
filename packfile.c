@@ -832,7 +832,7 @@ struct packed_git *add_packed_git(struct repository *r, const char *path,
 	 */
 	xsnprintf(p->pack_name + path_len, alloc - path_len, ".keep");
 	if (!access(p->pack_name, F_OK))
-		p->pack_keep = 1;
+		p->keep_flags |= PACK_KEEP_ON_DISK;
 
 	xsnprintf(p->pack_name + path_len, alloc - path_len, ".promisor");
 	if (!access(p->pack_name, F_OK))
@@ -2175,8 +2175,7 @@ struct packed_git **kept_pack_cache(struct repository *r,
 		 * the non-kept version.
 		 */
 		repo_for_each_pack(r, p) {
-			if ((p->pack_keep && (flags & PACK_KEEP_ON_DISK)) ||
-			    (p->pack_keep_in_core && (flags & PACK_KEEP_IN_CORE))) {
+			if (packed_git_is_kept(p, flags)) {
 				ALLOC_GROW(packs, nr + 1, alloc);
 				packs[nr++] = p;
 			}
@@ -2205,6 +2204,12 @@ int find_kept_pack_entry(struct repository *r,
 	}
 
 	return 0;
+}
+
+bool packed_git_is_kept(const struct packed_git *p,
+			enum packed_git_keep_flags flags)
+{
+	return p->keep_flags & flags;
 }
 
 int has_object_pack(struct repository *r, const struct object_id *oid)
@@ -2279,10 +2284,10 @@ int for_each_packed_object(struct repository *repo, each_packed_object_fn cb,
 		    !p->pack_promisor)
 			continue;
 		if ((flags & FOR_EACH_OBJECT_SKIP_IN_CORE_KEPT_PACKS) &&
-		    p->pack_keep_in_core)
+		    packed_git_is_kept(p, PACK_KEEP_IN_CORE))
 			continue;
 		if ((flags & FOR_EACH_OBJECT_SKIP_ON_DISK_KEPT_PACKS) &&
-		    p->pack_keep)
+		    packed_git_is_kept(p, PACK_KEEP_ON_DISK))
 			continue;
 		if (open_pack_index(p)) {
 			pack_errors = 1;

@@ -1553,7 +1553,8 @@ int expire_midx_packs(struct odb_source *source, unsigned flags)
 		if (prepare_midx_pack(m, i))
 			continue;
 
-		if (m->packs[i]->pack_keep || m->packs[i]->is_cruft)
+		if (packed_git_is_kept(m->packs[i], PACK_KEEP_ON_DISK) ||
+		    m->packs[i]->is_cruft)
 			continue;
 
 		pack_name = xstrdup(m->packs[i]->pack_name);
@@ -1604,7 +1605,7 @@ static int want_included_pack(struct multi_pack_index *m,
 	if (prepare_midx_pack(m, pack_int_id))
 		return 0;
 	p = m->packs[pack_int_id];
-	if (!pack_kept_objects && p->pack_keep)
+	if (!pack_kept_objects && packed_git_is_kept(p, PACK_KEEP_ON_DISK))
 		return 0;
 	if (p->is_cruft)
 		return 0;

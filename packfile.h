@@ -29,8 +29,6 @@ struct packed_git {
 	int pack_fd;
 	int index;              /* for builtin/pack-objects.c */
 	unsigned pack_local:1,
-		 pack_keep:1,
-		 pack_keep_in_core:1,
 		 freshened:1,
 		 do_not_close:1,
 		 pack_promisor:1,
@@ -51,6 +49,8 @@ struct packed_git {
 
 	/* repo denotes the repository this packfile belongs to */
 	struct repository *repo;
+
+	enum packed_git_keep_flags keep_flags;
 
 	/* something like ".git/objects/pack/xxxxx.pack" */
 	char pack_name[FLEX_ARRAY]; /* more */
@@ -391,6 +391,9 @@ int has_object_kept_pack(struct repository *r, const struct object_id *oid,
 
 struct packed_git **kept_pack_cache(struct repository *r,
 				    enum packed_git_keep_flags flags);
+
+bool packed_git_is_kept(const struct packed_git *p,
+			enum packed_git_keep_flags flags);
 
 /*
  * Return 1 if an object in a promisor packfile is or refers to the given
