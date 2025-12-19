@@ -80,6 +80,7 @@ int existing_packs_has_non_kept(const struct existing_packs *existing);
 int existing_pack_is_marked_for_deletion(struct string_list_item *item);
 void existing_packs_retain_cruft(struct existing_packs *existing,
 				 struct packed_git *cruft);
+void existing_packs_retain_all_cruft(struct existing_packs *existing);
 void existing_packs_retain_non_kept(struct existing_packs *existing,
 				    struct packed_git *p);
 void existing_packs_mark_for_deletion(struct existing_packs *existing,
@@ -114,10 +115,6 @@ void pack_geometry_init(struct pack_geometry *geometry,
 void pack_geometry_split(struct pack_geometry *geometry,
 			 struct existing_packs *existing);
 struct packed_git *pack_geometry_preferred_pack(struct pack_geometry *geometry);
-void pack_geometry_remove_redundant(struct pack_geometry *geometry,
-				    struct string_list *names,
-				    struct existing_packs *existing,
-				    const char *packdir);
 void pack_geometry_release(struct pack_geometry *geometry);
 
 struct tempfile;

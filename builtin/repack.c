@@ -498,8 +498,12 @@ int cmd_repack(int argc,
 				       packtmp);
 	/* End of pack replacement. */
 
-	if (delete_redundant && pack_everything & ALL_INTO_ONE)
-		existing_packs_mark_for_deletion(&existing, &names);
+	if (delete_redundant) {
+		if (geometry.split_factor && !combine_cruft_below_size)
+			existing_packs_retain_all_cruft(&existing);
+		if (pack_everything & ALL_INTO_ONE || geometry.split_factor)
+			existing_packs_mark_for_deletion(&existing, &names);
+	}
 
 	if (write_midx) {
 		struct repack_write_midx_opts opts = {
@@ -525,9 +529,6 @@ int cmd_repack(int argc,
 		int opts = 0;
 		existing_packs_remove_redundant(&existing, packdir);
 
-		if (geometry.split_factor)
-			pack_geometry_remove_redundant(&geometry, &names,
-						       &existing, packdir);
 		if (show_progress)
 			opts |= PRUNE_PACKED_VERBOSE;
 		prune_packed_objects(opts);
