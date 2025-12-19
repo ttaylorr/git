@@ -78,7 +78,8 @@ void pack_geometry_init(struct pack_geometry *geometry,
 	strbuf_release(&buf);
 }
 
-void pack_geometry_split(struct pack_geometry *geometry)
+void pack_geometry_split(struct pack_geometry *geometry,
+			 struct existing_packs *existing)
 {
 	uint32_t i;
 	uint32_t split;
@@ -155,6 +156,9 @@ void pack_geometry_split(struct pack_geometry *geometry)
 		} else
 			break;
 	}
+
+	for (i = split; i < geometry->pack_nr; i++)
+		existing_packs_retain_non_kept(existing, geometry->pack[i]);
 
 	geometry->split = split;
 }

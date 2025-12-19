@@ -1595,7 +1595,7 @@ static int maintenance_task_geometric_repack(struct maintenance_run_opts *opts,
 	existing_packs.repo = the_repository;
 	existing_packs_collect(&existing_packs, &kept_packs);
 	pack_geometry_init(&geometry, &existing_packs, &po_args);
-	pack_geometry_split(&geometry);
+	pack_geometry_split(&geometry, &existing_packs);
 
 	child.git_cmd = 1;
 
@@ -1649,7 +1649,7 @@ static int geometric_repack_auto_condition(struct gc_config *cfg UNUSED)
 	existing_packs.repo = the_repository;
 	existing_packs_collect(&existing_packs, &kept_packs);
 	pack_geometry_init(&geometry, &existing_packs, &po_args);
-	pack_geometry_split(&geometry);
+	pack_geometry_split(&geometry, &existing_packs);
 
 	/*
 	 * When we'd merge at least two packs with one another we always

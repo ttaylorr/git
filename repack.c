@@ -249,6 +249,21 @@ void existing_packs_retain_cruft(struct existing_packs *existing,
 	existing_packs_mark_retained(item);
 }
 
+void existing_packs_retain_non_kept(struct existing_packs *existing,
+				    struct packed_git *p)
+{
+	struct string_list_item *item;
+
+	if (!p->pack_local)
+		return;
+
+	item = locate_existing_pack(&existing->non_kept_packs, p);
+	if (!item)
+		BUG("could not find non-kept pack '%s'", pack_basename(p));
+
+	existing_packs_mark_retained(item);
+}
+
 void existing_packs_mark_for_deletion(struct existing_packs *existing,
 				      struct string_list *names)
 
