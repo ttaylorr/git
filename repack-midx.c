@@ -80,9 +80,15 @@ static int midx_has_unknown_packs(struct string_list *include,
 				  struct existing_packs *existing)
 {
 	struct string_list_item *item;
+	struct strbuf idx_name = STRBUF_INIT;
 
 	for_each_string_list_item(item, &existing->midx_packs) {
 		const char *pack_name = item->string;
+
+		strbuf_reset(&idx_name);
+		strbuf_addstr(&idx_name, item->string);
+		strbuf_strip_suffix(&idx_name, ".pack");
+		strbuf_addstr(&idx_name, ".idx");
 
 		/*
 		 * Determine whether or not each MIDX'd pack from the existing
@@ -101,25 +107,16 @@ static int midx_has_unknown_packs(struct string_list *include,
 		 *  - In the existing non-kept packs list (if not using pack
 		 *    geometry), and marked as non-deleted.
 		 */
-		if (string_list_has_string(include, pack_name)) {
+		if (string_list_has_string(include, idx_name.buf)) {
 			continue;
 		} else if (geometry) {
-			struct strbuf buf = STRBUF_INIT;
 			uint32_t j;
 
 			for (j = 0; j < geometry->split; j++) {
-				strbuf_reset(&buf);
-				strbuf_addstr(&buf, pack_basename(geometry->pack[j]));
-				strbuf_strip_suffix(&buf, ".pack");
-				strbuf_addstr(&buf, ".idx");
-
-				if (!strcmp(pack_name, buf.buf)) {
-					strbuf_release(&buf);
+				if (!strcmp(pack_name,
+					    pack_basename(geometry->pack[j])))
 					break;
-				}
 			}
-
-			strbuf_release(&buf);
 
 			if (j < geometry->split)
 				continue;
@@ -136,9 +133,11 @@ static int midx_has_unknown_packs(struct string_list *include,
 		 * If we got to this point, the MIDX includes some pack that we
 		 * don't know about.
 		 */
+		strbuf_release(&idx_name);
 		return 1;
 	}
 
+	strbuf_release(&idx_name);
 	return 0;
 }
 
