@@ -36,7 +36,8 @@ int write_cruft_pack(const struct write_pack_opts *opts,
 		     const char *cruft_expiration,
 		     unsigned long combine_cruft_below_size,
 		     struct string_list *names,
-		     struct existing_packs *existing)
+		     struct existing_packs *existing,
+		     struct pack_geometry *geometry)
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	struct string_list_item *item;
@@ -81,8 +82,18 @@ int write_cruft_pack(const struct write_pack_opts *opts,
 	else
 		for_each_string_list_item(item, &existing->cruft_packs)
 			fprintf(in, "-%s.pack\n", item->string);
-	for_each_string_list_item(item, &existing->non_kept_packs)
-		fprintf(in, "-%s.pack\n", item->string);
+	if (geometry) {
+		uint32_t i;
+		for (i = 0; i < geometry->split; i++)
+			fprintf(in, "-%s\n",
+				pack_basename(geometry->pack[i]));
+		for (; i < geometry->pack_nr; i++)
+			fprintf(in, "%s\n",
+				pack_basename(geometry->pack[i]));
+	} else {
+		for_each_string_list_item(item, &existing->non_kept_packs)
+			fprintf(in, "-%s.pack\n", item->string);
+	}
 	for_each_string_list_item(item, &existing->kept_packs)
 		fprintf(in, "%s.pack\n", item->string);
 

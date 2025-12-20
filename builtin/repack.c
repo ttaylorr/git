@@ -11,6 +11,7 @@
 #include "string-list.h"
 #include "midx.h"
 #include "packfile.h"
+#include "pack-bitmap.h"
 #include "prune-packed.h"
 #include "promisor-remote.h"
 #include "repack.h"
@@ -217,7 +218,7 @@ int cmd_repack(int argc,
 				  keep_unreachable, "-k/--keep-unreachable",
 				  pack_everything & PACK_CRUFT, "--cruft");
 
-	if (pack_everything & PACK_CRUFT)
+	if (pack_everything & PACK_CRUFT && !geometry.split_factor)
 		pack_everything |= ALL_INTO_ONE;
 
 	if (write_bitmaps < 0) {
@@ -265,7 +266,7 @@ int cmd_repack(int argc,
 	existing_packs_collect(&existing, &keep_pack_list);
 
 	if (geometry.split_factor) {
-		if (pack_everything)
+		if (pack_everything & ~PACK_CRUFT)
 			die(_("options '%s' and '%s' cannot be used together"), "--geometric", "-A/-a");
 		pack_geometry_init(&geometry, &existing, &po_args);
 		pack_geometry_split(&geometry, &existing);
@@ -334,9 +335,13 @@ int cmd_repack(int argc,
 	} else if (geometry.split_factor) {
 		if (midx_must_contain_cruft)
 			strvec_push(&cmd.args, "--stdin-packs");
+		else if (pack_everything & PACK_CRUFT)
+			strvec_push(&cmd.args, "--stdin-packs=reachable");
 		else
 			strvec_push(&cmd.args, "--stdin-packs=follow");
-		strvec_push(&cmd.args, "--unpacked");
+
+		if (!(pack_everything & PACK_CRUFT))
+			strvec_push(&cmd.args, "--unpacked");
 	} else {
 		strvec_push(&cmd.args, "--unpacked");
 		strvec_push(&cmd.args, "--incremental");
@@ -358,7 +363,14 @@ int cmd_repack(int argc,
 		goto cleanup;
 
 	if (geometry.split_factor) {
+		struct multi_pack_index *m;
+		struct bitmap_index *bitmap_git = NULL;
 		FILE *in = xfdopen(cmd.in, "w");
+
+		m = get_multi_pack_index(repo->objects->sources);
+		if (m)
+			bitmap_git = prepare_midx_bitmap_git(m);
+
 		/*
 		 * The resulting pack should contain all objects in packs that
 		 * are going to be rolled up, but exclude objects in packs which
@@ -366,8 +378,13 @@ int cmd_repack(int argc,
 		 */
 		for (i = 0; i < geometry.split; i++)
 			fprintf(in, "%s\n", pack_basename(geometry.pack[i]));
-		for (i = geometry.split; i < geometry.pack_nr; i++)
-			fprintf(in, "^%s\n", pack_basename(geometry.pack[i]));
+		for (i = geometry.split; i < geometry.pack_nr; i++) {
+			struct packed_git *p = geometry.pack[i];
+			if (p->multi_pack_index && bitmap_git)
+				fprintf(in, "!%s\n", pack_basename(p));
+			else
+				fprintf(in, "^%s\n", pack_basename(p));
+		}
 		fclose(in);
 	}
 
@@ -429,7 +446,8 @@ int cmd_repack(int argc,
 
 		ret = write_cruft_pack(&opts, cruft_expiration,
 				       combine_cruft_below_size, &names,
-				       &existing);
+				       &existing,
+				       geometry.split_factor ? &geometry : NULL);
 		if (ret)
 			goto cleanup;
 
@@ -464,7 +482,7 @@ int cmd_repack(int argc,
 			 */
 			opts.destination = expire_to;
 			ret = write_cruft_pack(&opts, NULL, 0ul, &names,
-					       &existing);
+					       &existing, NULL);
 			if (ret)
 				goto cleanup;
 		}

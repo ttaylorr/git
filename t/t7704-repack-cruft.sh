@@ -887,4 +887,79 @@ test_expect_success 'repack --write-midx includes cruft when already geometric' 
 	)
 '
 
+assert_pack_contents () {
+	idx="$1" && shift &&
+	git show-index <"$idx" >actual.raw &&
+	cut -d" " -f2 actual.raw | sort >actual &&
+
+	git rev-list --objects --no-object-names "$@" >expect.raw &&
+	sort expect.raw >expect &&
+
+	test_cmp expect actual
+}
+
+test_expect_success 'repack --geometric with --cruft' '
+	git init repack--geometric-with-cruft &&
+	(
+		cd repack--geometric-with-cruft &&
+
+		git config repack.midxMustContainCruft false &&
+
+		test_commit A &&
+		test_commit B &&
+
+		B="$(git rev-parse B)" &&
+
+		git reset --hard $B^ &&
+		git tag -d B &&
+		git reflog expire --all --expire=all &&
+
+		git repack -d --cruft --write-midx --write-bitmap-index &&
+
+		ls $packdir/pack-*.idx | sort >packs.old &&
+
+		old_cruft="$(ls $packdir/pack-*.mtimes)" &&
+		old_cruft="${old_cruft%.mtimes}.idx" &&
+		assert_pack_contents "$old_cruft" A.."$B" &&
+
+		old_pack="$(ls $packdir/pack-*.idx | grep -v "$old_cruft")" &&
+		assert_pack_contents "$old_pack" A &&
+
+		test_commit C &&
+		test_merge D "$B" &&
+		test_commit E &&
+
+		E="$(git rev-parse E)" &&
+
+		# todo: why does the placement of repack before/after reflog
+		# expiry determine whether or not we get two cruft packs after
+		# doing a geometric/cruft repack?
+		git reset --hard $E^ &&
+		git tag -d E &&
+		git reflog expire --all --expire=all &&
+
+		# todo: want to rescue cruft through excluded packs but not
+		# excluded/closed packs.
+		ls -la $packdir &&
+		test-tool read-midx $objdir &&
+
+
+		git repack -d --geometric=2 --cruft --write-midx --write-bitmap-index &&
+
+		ls -la $packdir &&
+		test-tool read-midx $objdir &&
+		false &&
+
+		new_cruft="$(ls $packdir/pack-*.mtimes |
+			sed -e "s/\.mtimes$/.idx/" | grep -v "$old_cruft")" &&
+		# assert_pack_contents "$new_cruft" D.."$E" &&
+
+		ls $packdir/pack-*.idx | sort >tmp &&
+		comm -13 packs.old tmp >packs.new &&
+
+		new_pack="$(grep -v "$new_cruft" packs.new)" # &&
+		# assert_pack_contents "$new_pack" A..D
+	)
+'
+
 test_done
