@@ -81,8 +81,6 @@ static int midx_has_unknown_packs(struct string_list *include,
 {
 	struct string_list_item *item;
 
-	string_list_sort(include);
-
 	for_each_string_list_item(item, &existing->midx_packs) {
 		const char *pack_name = item->string;
 
@@ -156,7 +154,7 @@ static void midx_included_packs(struct string_list *include,
 	for_each_string_list_item(item, &existing->kept_packs) {
 		strbuf_reset(&buf);
 		strbuf_addf(&buf, "%s.idx", item->string);
-		string_list_insert(include, buf.buf);
+		string_list_append(include, buf.buf);
 	}
 
 	for_each_string_list_item(item, names) {
@@ -172,7 +170,7 @@ static void midx_included_packs(struct string_list *include,
 
 		strbuf_reset(&buf);
 		strbuf_addf(&buf, "pack-%s.idx", item->string);
-		string_list_insert(include, buf.buf);
+		string_list_append(include, buf.buf);
 	}
 
 	if (geometry->split_factor) {
@@ -197,7 +195,7 @@ static void midx_included_packs(struct string_list *include,
 			strbuf_strip_suffix(&buf, ".pack");
 			strbuf_addstr(&buf, ".idx");
 
-			string_list_insert(include, buf.buf);
+			string_list_append(include, buf.buf);
 		}
 	} else {
 		for_each_string_list_item(item, &existing->non_kept_packs) {
@@ -206,9 +204,11 @@ static void midx_included_packs(struct string_list *include,
 
 			strbuf_reset(&buf);
 			strbuf_addf(&buf, "%s.idx", item->string);
-			string_list_insert(include, buf.buf);
+			string_list_append(include, buf.buf);
 		}
 	}
+
+	string_list_sort(include);
 
 	if (opts->midx_must_contain_cruft ||
 	    midx_has_unknown_packs(include, geometry, existing)) {
@@ -245,7 +245,7 @@ static void midx_included_packs(struct string_list *include,
 
 			strbuf_reset(&buf);
 			strbuf_addf(&buf, "%s.idx", item->string);
-			string_list_insert(include, buf.buf);
+			string_list_append(include, buf.buf);
 		}
 
 		/*
@@ -258,8 +258,15 @@ static void midx_included_packs(struct string_list *include,
 
 			strbuf_reset(&buf);
 			strbuf_addf(&buf, "pack-%s.idx", item->string);
-			string_list_insert(include, buf.buf);
+			string_list_append(include, buf.buf);
 		}
+
+		/*
+		 * We added at least one new pack to the include list,
+		 * so re-sort it to ensure that it remains in sorted
+		 * order.
+		 */
+		string_list_sort(include);
 	} else {
 		/*
 		 * Modern versions of Git (with the appropriate
