@@ -767,7 +767,7 @@ test_expect_success 'repack --write-midx excludes cruft where possible' '
 	)
 '
 
-test_expect_failure 'repack --write-midx excludes fresh cruft pack' '
+test_expect_success 'repack --write-midx excludes fresh cruft pack' '
 	setup_cruft_exclude_tests exclude-fresh-cruft &&
 	(
 		cd exclude-fresh-cruft &&

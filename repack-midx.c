@@ -160,6 +160,16 @@ static void midx_included_packs(struct string_list *include,
 	}
 
 	for_each_string_list_item(item, names) {
+		if (generated_pack_has_ext(item->util, ".mtimes")) {
+			/*
+			 * Generated cruft packs are handled separately
+			 * if and only if the MIDX must contain cruft
+			 * packs in order to maintain a reachability
+			 * closure.
+			 */
+			continue;
+		}
+
 		strbuf_reset(&buf);
 		strbuf_addf(&buf, "pack-%s.idx", item->string);
 		string_list_insert(include, buf.buf);
@@ -235,6 +245,19 @@ static void midx_included_packs(struct string_list *include,
 
 			strbuf_reset(&buf);
 			strbuf_addf(&buf, "%s.idx", item->string);
+			string_list_insert(include, buf.buf);
+		}
+
+		/*
+		 * Include any cruft pack(s) we wrote as part of this
+		 * repack operation.
+		 */
+		for_each_string_list_item(item, names) {
+			if (!generated_pack_has_ext(item->util, ".mtimes"))
+				continue;
+
+			strbuf_reset(&buf);
+			strbuf_addf(&buf, "pack-%s.idx", item->string);
 			string_list_insert(include, buf.buf);
 		}
 	} else {

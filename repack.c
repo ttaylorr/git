@@ -290,7 +290,21 @@ static struct {
 };
 
 struct generated_pack {
-	struct tempfile *tempfiles[ARRAY_SIZE(exts)];
+	struct {
+		/*
+		 * tempfile represents the written pack component on
+		 * disk. Note that this is only non-NULL if the
+		 * component was actually written and not yet installed.
+		 */
+		struct tempfile *tempfile;
+
+		/*
+		 * written indicates whether or not the pack component
+		 * was written. It remains 'true' even after a written
+		 * component has been installed.
+		 */
+		bool written;
+	} ext[ARRAY_SIZE(exts)];
 };
 
 struct generated_pack *generated_pack_populate(const char *name,
@@ -308,7 +322,8 @@ struct generated_pack *generated_pack_populate(const char *name,
 		if (stat(path.buf, &statbuf))
 			continue;
 
-		pack->tempfiles[i] = register_tempfile(path.buf);
+		pack->ext[i].tempfile = register_tempfile(path.buf);
+		pack->ext[i].written = true;
 	}
 
 	strbuf_release(&path);
@@ -321,7 +336,7 @@ int generated_pack_has_ext(const struct generated_pack *pack, const char *ext)
 	for (i = 0; i < ARRAY_SIZE(exts); i++) {
 		if (strcmp(exts[i].name, ext))
 			continue;
-		return !!pack->tempfiles[i];
+		return pack->ext[i].written;
 	}
 	BUG("unknown pack extension: '%s'", ext);
 }
@@ -336,8 +351,14 @@ void generated_pack_install(struct generated_pack *pack, const char *name,
 		fname = mkpathdup("%s/pack-%s%s", packdir, name,
 				  exts[ext].name);
 
-		if (pack->tempfiles[ext]) {
-			const char *fname_old = get_tempfile_path(pack->tempfiles[ext]);
+		/*
+		 * Deliberately use ".tempfile" here instead of
+		 * ".written", since ".tempfile" being non-NULL
+		 * indicates that there is a pack component that we
+		 * still need to move into place.
+		 */
+		if (pack->ext[ext].tempfile) {
+			const char *fname_old = get_tempfile_path(pack->ext[ext].tempfile);
 			struct stat statbuffer;
 
 			if (!stat(fname_old, &statbuffer)) {
@@ -345,7 +366,7 @@ void generated_pack_install(struct generated_pack *pack, const char *name,
 				chmod(fname_old, statbuffer.st_mode);
 			}
 
-			if (rename_tempfile(&pack->tempfiles[ext], fname))
+			if (rename_tempfile(&pack->ext[ext].tempfile, fname))
 				die_errno(_("renaming pack to '%s' failed"),
 					  fname);
 		} else if (!exts[ext].optional)
