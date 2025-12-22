@@ -767,6 +767,24 @@ test_expect_success 'repack --write-midx excludes cruft where possible' '
 	)
 '
 
+test_expect_failure 'repack --write-midx excludes fresh cruft pack' '
+	setup_cruft_exclude_tests exclude-fresh-cruft &&
+	(
+		cd exclude-fresh-cruft &&
+
+		git repack -d --cruft --write-midx &&
+
+		cruft="$(ls $packdir/*.mtimes)" &&
+		( cd $packdir && ls pack-*.idx ) | sort >packs.all &&
+		grep -v "$(basename "$cruft" .mtimes).idx" packs.all >expect &&
+
+		test-tool read-midx $objdir >midx &&
+		grep "^pack-" midx | sort >actual &&
+
+		test_cmp expect actual
+	)
+'
+
 test_expect_success 'repack --write-midx includes cruft when instructed' '
 	setup_cruft_exclude_tests exclude-cruft-when-instructed &&
 	(
