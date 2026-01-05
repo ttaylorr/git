@@ -1387,8 +1387,11 @@ int parse_git_diff_header(struct strbuf *root,
 				return -1;
 			if (check_header_line(*linenr, patch))
 				return -1;
-			if (res > 0)
+			if (res > 0) {
+				if (offset <= len)
+					return offset;
 				goto done;
+			}
 			break;
 		}
 	}

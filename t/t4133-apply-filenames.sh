@@ -60,4 +60,19 @@ test_expect_success 'apply diff with old filename missing from headers' '
 	test_grep "lacks filename information" err
 '
 
+test_expect_success 'apply diff with corrupt new file header' '
+	cat >corrupt_new_file_header.diff <<-\EOF &&
+	diff --git a/new.txt b/new.txt
+	oops
+	--- /dev/null
+	+++ b/new.txt
+	@@ -0,0 +1 @@
+	+hello world
+	EOF
+
+	test_path_is_missing new.txt &&
+	git apply corrupt_new_file_header.diff &&
+	test_path_is_file new.txt
+'
+
 test_done
