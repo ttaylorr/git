@@ -1738,8 +1738,19 @@ static void fill_included_packs_batch(struct repository *r,
 		 */
 		expected_size = (uint64_t)pack_info[i].referenced_objects << 14;
 		expected_size /= p->num_objects;
-		expected_size = u64_mult(expected_size, p->pack_size);
-		expected_size = u64_add(expected_size, 1u << 13) >> 14;
+
+		if (unsigned_mult_overflows(expected_size,
+					    (uint64_t)p->pack_size))
+			die(_("overflow during fixed-point multiply (%"PRIu64" "
+			      "* %"PRIu64")"),
+			    expected_size, (uint64_t)p->pack_size);
+		expected_size = expected_size * p->pack_size;
+
+		if (unsigned_add_overflows(expected_size, 1u << 13))
+			die(_("overflow during fixed-point rounding (%"PRIu64" "
+			      " + %"PRIu64")"),
+			    expected_size, (uint64_t)(1ul << 13));
+		expected_size = (expected_size + (1u << 13)) >> 14;
 
 		if (expected_size >= batch_size)
 			continue;
