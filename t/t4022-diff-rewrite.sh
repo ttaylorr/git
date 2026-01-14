@@ -98,4 +98,3 @@ test_expect_success 'no newline at eof is on its own line with -B' '
 '
 
 test_done
-

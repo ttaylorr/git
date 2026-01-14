@@ -72,4 +72,3 @@ test_expect_success 'log -g @{-1}' '
 '
 
 test_done
-

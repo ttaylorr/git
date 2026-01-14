@@ -61,4 +61,3 @@ test_expect_success 'first commit is still available' \
    '
 
 test_done
-

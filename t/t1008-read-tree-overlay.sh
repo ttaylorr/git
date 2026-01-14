@@ -32,4 +32,3 @@ test_expect_success 'multi-read' '
 '
 
 test_done
-

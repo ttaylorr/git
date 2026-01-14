@@ -60,5 +60,3 @@ test_expect_success '@{-3} fails' '
 '
 
 test_done
-
-

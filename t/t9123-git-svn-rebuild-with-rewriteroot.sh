@@ -29,4 +29,3 @@ test_expect_success 'rebuild rev_map' '
 	'
 
 test_done
-

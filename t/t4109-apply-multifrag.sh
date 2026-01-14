@@ -33,4 +33,3 @@ test_expect_success 'git apply (3)' '
 mv main.c main.c.git
 
 test_done
-

@@ -47,4 +47,3 @@ test_expect_success 'attach and signoff do not duplicate mime headers' '
 '
 
 test_done
-
