@@ -6,6 +6,7 @@ test_description='multi-pack-indexes'
 . "$TEST_DIRECTORY"/lib-chunk.sh
 . "$TEST_DIRECTORY"/lib-midx.sh
 
+test_done
 GIT_TEST_MULTI_PACK_INDEX=0
 GIT_TEST_MULTI_PACK_INDEX_WRITE_BITMAP=0
 GIT_TEST_MULTI_PACK_INDEX_WRITE_INCREMENTAL=0
