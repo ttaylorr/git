@@ -706,6 +706,33 @@ fi
 test "${test_description}" != "" ||
 error "Test script did not set test_description."
 
+# saw_test_done=
+# while IFS= read -r line
+# do
+#
+# 	case "$line" in
+# 	test_done*)
+# 		saw_test_done=t
+# 		;;
+# 	"")
+# 		;;
+# 	*)
+# 		if test t = "$saw_test_done"
+# 		then
+# 			error "unexpected contents after test_done? ($line)"
+# 		fi
+# 	esac
+# done <"$0"
+
+# for i in $(grep -n "^test_done" "$0")
+# do
+# 	nr="${i%%:*}"
+# 	if test "$nr" -ne $(wc -l <"$0")
+# 	then
+# 		error "unexpected test_done (L$nr)"
+# 	fi
+# done
+
 if test "$help" = "t"
 then
 	printf '%s\n' "$test_description"
