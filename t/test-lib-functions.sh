@@ -1748,6 +1748,19 @@ test_oid_cache () {
 	local tag rest k v &&
 
 	{ test -n "$test_hash_algo" || test_detect_hash; } &&
+
+	if false
+	then
+	eval "$(perl -alne '
+		next if /^#/ || /^\s*$/;
+		($tag, $rest) = @F;
+		($k, $v) = split /:/, $rest, 2;
+		if ($k !~ /^[a-z0-9][a-z0-9]*$/) {
+			die "bad hash algorithm: $k\n";
+		}
+		print "test_oid_${k}_$tag=" . $v;
+	')"
+	else
 	while read tag rest
 	do
 		case $tag in
@@ -1770,6 +1783,7 @@ test_oid_cache () {
 		fi &&
 		eval "test_oid_${k}_$tag=\"\$v\""
 	done
+	fi
 }
 
 # Look up a per-hash value based on a key ($1).  The value must have been loaded
