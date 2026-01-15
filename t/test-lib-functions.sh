@@ -1745,45 +1745,7 @@ test_oid_init () {
 # rawsz sha1:20
 # rawsz sha256:32
 test_oid_cache () {
-	local tag rest k v &&
-
-	{ test -n "$test_hash_algo" || test_detect_hash; } &&
-
-	if false
-	then
-	eval "$(perl -alne '
-		next if /^#/ || /^\s*$/;
-		($tag, $rest) = @F;
-		($k, $v) = split /:/, $rest, 2;
-		if ($k !~ /^[a-z0-9][a-z0-9]*$/) {
-			die "bad hash algorithm: $k\n";
-		}
-		print "test_oid_${k}_$tag=" . $v;
-	')"
-	else
-	while read tag rest
-	do
-		case $tag in
-		\#*)
-			continue;;
-		?*)
-			# non-empty
-			;;
-		*)
-			# blank line
-			continue;;
-		esac &&
-
-		k="${rest%:*}" &&
-		v="${rest#*:}" &&
-
-		if ! expr "$k" : '[a-z0-9][a-z0-9]*$' >/dev/null
-		then
-			BUG 'bad hash algorithm'
-		fi &&
-		eval "test_oid_${k}_$tag=\"\$v\""
-	done
-	fi
+	eval "$(test-tool oid-cache)"
 }
 
 # Look up a per-hash value based on a key ($1).  The value must have been loaded
