@@ -5,11 +5,19 @@
 #include "string-list.h"
 #include "hash.h"
 #include "quote.h"
+#include "usage.h"
+
+static void warn_test(const char *warn, va_list params)
+{
+	vfreportf(fcntl(7, F_GETFD) == -1 ? 2 : 7, _("warning: "), err, params);
+}
 
 static const char *const oid_cache_usage[] = {
 	"test-tool oid-cache",
 	NULL
 };
+
+#define IFS " \t"
 
 int cmd__oid_cache(int argc, const char **argv)
 {
@@ -19,6 +27,8 @@ int cmd__oid_cache(int argc, const char **argv)
 	struct option options[] = {
 		OPT_END()
 	};
+
+	set_warn_routine(warn_test);
 
 	argc = parse_options(argc, argv, "test-tools", options, oid_cache_usage, 0);
 	if (argc > 0)
@@ -33,15 +43,19 @@ int cmd__oid_cache(int argc, const char **argv)
 			continue;
 
 		string_list_setlen(&parts, 0);
-		string_list_split_in_place_f(&parts, buf.buf, " \t", 1,
+		string_list_split_in_place_f(&parts, buf.buf, IFS, 1,
 					     STRING_LIST_SPLIT_TRIM);
 
-		if (parts.nr != 2)
-			die(_("malformed oid-cache line: %s"), buf.buf);
+		if (parts.nr != 2) {
+			warning(_("malformed oid-cache line: %s"), buf.buf);
+			continue;
+		}
 
 		colon = strchr(parts.items[1].string, ':');
-		if (!colon)
-			die(_("malformed oid-cache line: %s"), buf.buf);
+		if (!colon) {
+			warning(_("malformed oid-cache line: %s"), buf.buf);
+			continue;
+		}
 		*colon = '\0';
 
 		algo = hash_algo_by_name(parts.items[1].string);
@@ -56,6 +70,10 @@ int cmd__oid_cache(int argc, const char **argv)
 
 		printf("%s\n", out.buf);
 	}
+
+	strbuf_release(&buf);
+	strbuf_release(&out);
+	string_list_clear(&parts, 0);
 
 	return 0;
 }
