@@ -349,4 +349,82 @@ test_expect_success 'MIDX compaction with --checksum-only' '
 	)
 '
 
+push () {
+	test_commit "$@" >/dev/null&&
+	git -c core.multipackindex=false repack -d -q
+}
+
+dump_chain () {
+	tac $midx_chain | nl -w1 -v0 |
+	while read nr layer
+	do
+		echo -n "  MIDX #${nr}: "
+		test-tool read-midx $objdir "$layer" | grep '\.idx$' >packs
+		for p in $(cat packs)
+		do
+			git show-index <"$packdir/$p" | wc -l
+			# echo "    $p $(git show-index <"$packdir/$p" | wc -l)"
+		done | sort -n | tr $'\n' ' ' &&
+		echo
+	done
+	# echo "==> $midx_chain <==" &&
+	# (
+	# 	! test -f "$midx_chain" || cat $midx_chain
+	# ) &&
+	# echo "--- 8< ---"
+}
+
+rand () {
+	perl -e "print int rand($1)"
+}
+
+test_expect_success 'midx compaction during repacking' '
+	git init midx-compaction-test &&
+	(
+		cd midx-compaction-test &&
+
+		git config repack.midxsplitfactor 2 &&
+		git config repack.midxnewlayerthreshold 8 &&
+		git config gc.auto 0 &&
+		git config maintenance.auto false &&
+
+		for i in $(seq 0 1000)
+		do
+			echo "Repack step $i" &&
+			for j in $(seq 1 $(rand 20))
+			do
+				push "$i-$j" || return 1
+			done &&
+
+			# ls $packdir/pack-*.idx | sort >packs.before &&
+			git repack --geometric=2 -q -d --write-midx=incremental \
+				--write-bitmap-index &&
+			# ls $packdir/pack-*.idx | sort >packs.after &&
+			# diff -u packs.before packs.after || true &&
+			# test-tool read-midx --bitmap $objdir &&
+			dump_chain || return 1
+		done
+
+		# push A &&
+		# push B &&
+		# push C &&
+
+		# dump_chain &&
+
+		# git repack --geometric=2 -d --write-midx=geometric &&
+		# dump_chain &&
+
+		# push D &&
+
+		# git repack --geometric=2 -d --write-midx=geometric &&
+		# dump_chain &&
+
+		# push E &&
+		# push F &&
+
+		# git repack --geometric=2 -d --write-midx=geometric &&
+		# dump_chain
+	)
+'
+
 test_done
