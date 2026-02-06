@@ -109,6 +109,7 @@ struct pack_geometry {
 	uint32_t promisor_split;
 
 	int split_factor;
+	bool midx_tip_rewritten;
 };
 
 void pack_geometry_repack_promisors(struct repository *repo,
