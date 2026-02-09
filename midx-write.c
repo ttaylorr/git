@@ -1293,9 +1293,6 @@ static int write_midx_internal(struct write_midx_opts *opts)
 
 		ctx.compact_from = opts->compact_from;
 		ctx.compact_to = opts->compact_to;
-	} else if (opts->incremental_base) {
-		error(_("custom bases are only supported during compaction"));
-		goto cleanup;
 	}
 
 	if (ctx.incremental)
@@ -1338,18 +1335,22 @@ static int write_midx_internal(struct write_midx_opts *opts)
 		ctx.base_midx = ctx.compact_from->base_midx;
 
 	if (opts->incremental_base) {
-		while (ctx.base_midx) {
-			if (!strcmp(opts->incremental_base,
-				    midx_get_checksum_hex(ctx.base_midx)))
-				break;
+		if (!strcmp(opts->incremental_base, "none")) {
+			ctx.base_midx = NULL;
+		} else {
+			while (ctx.base_midx) {
+				const char *cmp = midx_get_checksum_hex(ctx.base_midx);
+				if (!strcmp(opts->incremental_base, cmp))
+					break;
 
-			ctx.base_midx = ctx.base_midx->base_midx;
-		}
+				ctx.base_midx = ctx.base_midx->base_midx;
+			}
 
-		if (!ctx.base_midx) {
-			error(_("could not find base MIDX '%s'"),
-			      opts->incremental_base);
-			goto cleanup;
+			if (!ctx.base_midx) {
+				error(_("could not find base MIDX '%s'"),
+				      opts->incremental_base);
+				goto cleanup;
+			}
 		}
 	}
 
@@ -1864,7 +1865,8 @@ cleanup:
 
 int write_midx_file(struct odb_source *source,
 		    const char *preferred_pack_name,
-		    const char *refs_snapshot, unsigned flags)
+		    const char *refs_snapshot,
+		    unsigned flags)
 {
 	struct write_midx_opts opts = {
 		.source = source,
@@ -1879,13 +1881,16 @@ int write_midx_file(struct odb_source *source,
 int write_midx_file_only(struct odb_source *source,
 			 struct string_list *packs_to_include,
 			 const char *preferred_pack_name,
-			 const char *refs_snapshot, unsigned flags)
+			 const char *refs_snapshot,
+			 const char *incremental_base,
+			 unsigned flags)
 {
 	struct write_midx_opts opts = {
 		.source = source,
 		.packs_to_include = packs_to_include,
 		.preferred_pack_name = preferred_pack_name,
 		.refs_snapshot = refs_snapshot,
+		.incremental_base = incremental_base,
 		.flags = flags,
 	};
 

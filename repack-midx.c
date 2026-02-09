@@ -444,6 +444,7 @@ static const char *midx_compaction_step_base(const struct midx_compaction_step *
 static int midx_compaction_step_exec_copy(struct midx_compaction_step *step)
 {
 	step->csum = xstrdup(midx_get_checksum_hex(step->u.copy));
+	warning("%s:%d: finalized copy -> %s", __FILE__, __LINE__, step->csum);
 	return 0;
 }
 
@@ -469,9 +470,25 @@ static int midx_compaction_step_exec_write(struct midx_compaction_step *step,
 
 	repack_prepare_midx_command(&cmd, opts, "write");
 	strvec_pushl(&cmd.args, "--incremental", "--checksum-only", NULL);
+	strvec_pushf(&cmd.args, "--base=%s", base ? base : "none");
 
-	if (preferred_pack)
-		strvec_pushf(&cmd.args, "--preferred-pack=%s", preferred_pack);
+	if (preferred_pack) {
+		struct strbuf buf = STRBUF_INIT;
+
+		strbuf_addstr(&buf, preferred_pack);
+		strbuf_strip_suffix(&buf, ".idx");
+		strbuf_addstr(&buf, ".pack");
+
+		strvec_pushf(&cmd.args, "--preferred-pack=%s", buf.buf);
+
+		strbuf_release(&buf);
+	}
+
+#if 0
+	warning("running:");
+	for (int i = 0; i < cmd.args.nr; i++)
+		warning("  %s", cmd.args.v[i]);
+#endif
 
 	ret = repack_fill_midx_stdin_packs(&cmd, &step->u.write, &hash);
 	if (hash.nr != 1) {
@@ -482,6 +499,7 @@ static int midx_compaction_step_exec_write(struct midx_compaction_step *step,
 	}
 
 	step->csum = xstrdup(hash.items[0].string);
+	warning("%s:%d: finalized write -> %s", __FILE__, __LINE__, step->csum);
 
 out:
 	string_list_clear(&hash, 0);
@@ -515,6 +533,7 @@ static int midx_compaction_step_exec_compact(struct midx_compaction_step *step,
 			goto out;
 		}
 		step->csum = strbuf_detach(&buf, NULL);
+		warning("%s:%d: finalized compaction -> %s", __FILE__, __LINE__, step->csum);
 	}
 
 	ret = finish_command(&cmd);
@@ -587,8 +606,10 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 	step.type = MIDX_COMPACTION_STEP_WRITE;
 	string_list_init_nodup(&step.u.write);
 
+	warning("%s:%d: adding written pack(s)", __FILE__, __LINE__);
 	for (i = 0; i < opts->names->nr; i++) {
-		strbuf_addf(&buf, "pack-%s.pack", opts->names->items[i].string);
+		strbuf_addf(&buf, "pack-%s.idx", opts->names->items[i].string);
+		warning("%s:%d:   adding written pack %s", __FILE__, __LINE__, buf.buf);
 		string_list_append(&step.u.write, strbuf_detach(&buf, NULL));
 	}
 	for (i = 0; i < opts->geometry->split; i++) {
@@ -600,6 +621,7 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 
 		step.objects_nr += p->num_objects;
 	}
+	warning("%s:%d:   total objects_nr %"PRIu32, __FILE__, __LINE__, step.objects_nr);
 
 	/*
 	 * Now handle any existing packs which were *not* rewritten.
@@ -628,8 +650,13 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 		strbuf_strip_suffix(&buf, ".pack");
 		strbuf_addstr(&buf, ".idx");
 
-		if (p->multi_pack_index && !opts->geometry->midx_tip_rewritten)
+		if (p->multi_pack_index && !opts->geometry->midx_tip_rewritten) {
+			warning("%s:%d:   skipping non-rewritten pack %s from MIDX tip layer",
+				__FILE__, __LINE__, buf.buf);
 			continue;
+		}
+
+		warning("%s:%d:   adding non-rewritten pack %s", __FILE__, __LINE__, buf.buf);
 
 		item = string_list_append(&step.u.write,
 					  strbuf_detach(&buf, NULL));
@@ -648,10 +675,12 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 	 * a candidate for compaction, since it will not exist in the
 	 * MIDX chain being built.
 	 */
-	if (opts->geometry->midx_tip_rewritten)
+	if (opts->geometry->midx_tip_rewritten) {
+		warning("%s:%d: skipping tip MIDX layer due to rewritten tip", __FILE__, __LINE__);
 		m = m->base_midx;
+	}
 
-
+	warning("%s:%d: compacting additional MIDX layer(s)", __FILE__, __LINE__);
 	/*
 	 * Compact additional MIDX layers into this proposed one until
 	 * the merging condition is violated.
@@ -665,6 +694,9 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 			 * merged size is less than half the size of the
 			 * next layer in the chain.
 			 */
+			warning("%s:%d:   stopping compaction of additional MIDX layers due to merging condition: "
+				"current objects_nr %"PRIu32" vs next layer's num_objects %"PRIu32,
+				__FILE__, __LINE__, step.objects_nr, m->num_objects);
 			break;
 		}
 
@@ -673,6 +705,9 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 				      "%s"), midx_get_checksum_hex(m));
 			goto out;
 		}
+
+		warning("%s:%d:   compacting MIDX layer with checksum %s and num_objects %"PRIu32" into current step with objects_nr %"PRIu32,
+			__FILE__, __LINE__, midx_get_checksum_hex(m), m->num_objects, step.objects_nr);
 
 		for (i = 0; i < m->num_packs; i++) {
 			struct string_list_item *item;
@@ -683,6 +718,8 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 			strbuf_addstr(&buf, pack_basename(p));
 			strbuf_strip_suffix(&buf, ".pack");
 			strbuf_addstr(&buf, ".idx");
+
+			warning("%s:%d:     adding pack %s from MIDX layer", __FILE__, __LINE__, buf.buf);
 
 			item = string_list_append(&step.u.write,
 						  strbuf_detach(&buf, NULL));
@@ -696,8 +733,12 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 		}
 		step.objects_nr += m->num_objects;
 
+		warning("%s:%d:   total objects_nr after compaction would be %"PRIu32,
+			__FILE__, __LINE__, step.objects_nr);
+
 		m = m->base_midx;
 	}
+	warning("%s:%d: done compacting additional MIDX layer(s)", __FILE__, __LINE__);
 
 	if (step.u.write.nr > 0) {
 		/*
@@ -706,7 +747,11 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 		 */
 		ALLOC_GROW(steps, steps_nr + 1, steps_alloc);
 		steps[steps_nr++] = step;
+		warning("%s:%d: added initial step with %"PRIuMAX" pack(s)", __FILE__, __LINE__, (uintmax_t)step.u.write.nr);
 	}
+
+	warning("%s:%d: evaluating remaining MIDX layers for compaction",
+		__FILE__, __LINE__);
 
 	/*
 	 * Then start over, repeat, and either compact or keep as-is
@@ -725,6 +770,9 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 		memset(&step, 0, sizeof(step));
 		step.type = MIDX_COMPACTION_STEP_UNKNOWN;
 
+		warning("%s:%d:   evaluating MIDX layer with checksum %s and num_objects %"PRIu32" for compaction",
+			__FILE__, __LINE__, midx_get_checksum_hex(m), m->num_objects);
+
 		while (next) {
 			struct multi_pack_index *base = next->base_midx;
 			uint32_t proposed_objects_nr;
@@ -735,6 +783,8 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 			}
 
 			proposed_objects_nr = step.objects_nr + next->num_objects;
+			warning("%s:%d:     proposed objects_nr if compacted would be %"PRIu32,
+				__FILE__, __LINE__, step.objects_nr + next->num_objects);
 
 			if (!base) {
 				/*
@@ -742,6 +792,8 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 				 * chain, there is nothing to compact,
 				 * so mark it and stop.
 				 */
+				warning("%s:%d:     stopping compaction of additional MIDX layers since there are no more layers in the chain",
+					__FILE__, __LINE__);
 				step.objects_nr = proposed_objects_nr;
 				break;
 			}
@@ -754,6 +806,9 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 				 * them would violate the merging
 				 * condition, so stop here.
 				 */
+				warning("%s:%d:     stopping compaction of additional MIDX layers due to merging condition: "
+					"proposed objects_nr %"PRIu32" vs next layer's num_objects %"PRIu32,
+					__FILE__, __LINE__, proposed_objects_nr, base->num_objects);
 				break;
 			}
 
@@ -762,15 +817,19 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 			 * into this one. Do so, and then continue
 			 * through the remainder of the chain.
 			 */
+			warning("%s:%d:     compacting additional MIDX layer with checksum %s and num_objects %"PRIu32" into current step with proposed objects_nr %"PRIu32,
+				__FILE__, __LINE__, midx_get_checksum_hex(next), next->num_objects, proposed_objects_nr);
 			step.objects_nr = proposed_objects_nr;
 			next = base;
-
 		}
 
 		if (m == next) {
+			warning("%s:%d:   keeping MIDX layer with checksum %s as-is", __FILE__, __LINE__, midx_get_checksum_hex(m));
 			step.type = MIDX_COMPACTION_STEP_COPY;
 			step.u.copy = m;
 		} else {
+			warning("%s:%d:   compacting MIDX layer with checksum %s into new layer with proposed objects_nr %"PRIu32,
+				__FILE__, __LINE__, midx_get_checksum_hex(m), step.objects_nr);
 			step.type = MIDX_COMPACTION_STEP_COMPACT;
 			step.u.compact.from = next;
 			step.u.compact.to = m;
@@ -780,6 +839,9 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 
 		steps[steps_nr++] = step;
 	}
+
+	warning("%s:%d: done evaluating MIDX layers for compaction",
+		__FILE__, __LINE__);
 
 out:
 	*steps_p = steps;
@@ -812,18 +874,51 @@ static int write_midx_incremental(struct repack_write_midx_opts *opts)
 	if (repack_make_midx_compaction_plan(opts, &steps, &steps_nr) < 0)
 		return error(_("unable to generate compaction plan"));
 
+	warning("%s:%d: === PLAN BEGIN ===", __FILE__, __LINE__);
+	for (size_t i = 0; i < steps_nr; i++) {
+		switch (steps[i].type) {
+		case MIDX_COMPACTION_STEP_COPY:
+			warning("%s:%d:   copy MIDX layer %s (base=%s)",
+				__FILE__, __LINE__,
+				midx_get_checksum_hex(steps[i].u.copy),
+				i + 1 < steps_nr ? midx_compaction_step_base(&steps[i+1]) : "none");
+
+			break;
+		case MIDX_COMPACTION_STEP_WRITE:
+			warning("%s:%d:   write new MIDX layer with %"PRIuMAX" pack(s) (base=%s)",
+				__FILE__, __LINE__, (uintmax_t)steps[i].u.write.nr,
+				i + 1 < steps_nr ? midx_compaction_step_base(&steps[i+1]) : "none");
+			break;
+		case MIDX_COMPACTION_STEP_COMPACT:
+			warning("%s:%d:   compact MIDX layers (%s, %s), base=%s",
+				__FILE__, __LINE__,
+				midx_get_checksum_hex(steps[i].u.compact.from),
+				midx_get_checksum_hex(steps[i].u.compact.to),
+				i + 1 < steps_nr ? midx_compaction_step_base(&steps[i+1]) : "none");
+			break;
+		case MIDX_COMPACTION_STEP_UNKNOWN:
+		default:
+			BUG("unhandled midx compaction step type %d",
+			    steps[i].type);
+		}
+	}
+	warning("%s:%d: === PLAN END ===", __FILE__, __LINE__);
+
 	for (size_t i = 0; i < steps_nr; i++) {
 		struct midx_compaction_step *step = &steps[i];
-		const char *base = NULL;
+		char *base = NULL;
 
 		if (i + 1 < steps_nr)
-			base = midx_compaction_step_base(&steps[i + 1]);
+			base = xstrdup(midx_compaction_step_base(&steps[i+1]));
 
 		if (midx_compaction_step_exec(step, opts, base) < 0) {
 			ret = error(_("unable to execute compaction step %"PRIuMAX),
 				    (uintmax_t)i);
+			free(base);
 			goto done;
 		}
+
+		free(base);
 	}
 
 	i = steps_nr;
@@ -833,6 +928,7 @@ static int write_midx_incremental(struct repack_write_midx_opts *opts)
 			BUG("missing result for compaction step %"PRIuMAX,
 			    (uintmax_t)i);
 		fprintf(get_lock_file_fp(&lf), "%s\n", step->csum);
+		warning("%s:%d: wrote %s", __FILE__, __LINE__, step->csum);
 	}
 
 	commit_lock_file(&lf);

@@ -358,14 +358,14 @@ dump_chain () {
 	tac $midx_chain | nl -w1 -v0 |
 	while read nr layer
 	do
-		echo -n "  MIDX #${nr}: "
+		echo -n "  \033[0;34mMIDX #${nr}: "
 		test-tool read-midx $objdir "$layer" | grep '\.idx$' >packs
 		for p in $(cat packs)
 		do
 			git show-index <"$packdir/$p" | wc -l
 			# echo "    $p $(git show-index <"$packdir/$p" | wc -l)"
 		done | sort -n | tr $'\n' ' ' &&
-		echo
+		echo "\033[0m"
 	done
 	# echo "==> $midx_chain <==" &&
 	# (

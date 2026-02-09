@@ -305,6 +305,8 @@ int cmd_repack(int argc,
 	if (geometry.split_factor) {
 		if (pack_everything)
 			die(_("options '%s' and '%s' cannot be used together"), "--geometric", "-A/-a");
+		if (write_midx == REPACK_WRITE_MIDX_INCREMENTAL)
+			geometry.midx_layer_threshold = config_ctx.midx_new_layer_threshold;
 		pack_geometry_init(&geometry, &existing, &po_args);
 		pack_geometry_split(&geometry);
 	}

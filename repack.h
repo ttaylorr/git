@@ -108,6 +108,8 @@ struct pack_geometry {
 	uint32_t promisor_pack_nr, promisor_pack_alloc;
 	uint32_t promisor_split;
 
+	uint32_t midx_layer_threshold;
+
 	int split_factor;
 	bool midx_tip_rewritten;
 };

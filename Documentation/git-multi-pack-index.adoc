@@ -12,6 +12,7 @@ SYNOPSIS
 'git multi-pack-index' [<options>] write [--preferred-pack=<pack>]
 		         [--[no-]bitmap] [--[no-]incremental] [--[no-]stdin-packs]
 		         [--refs-snapshot=<path>] [--[no-]checksum-only]
+			 [--base=<checksum>]
 'git multi-pack-index' [<options>] compact [--[no-]incremental]
 		         [--[no-]bitmap] [--base=<checksum>] [--[no-]checksum-only]
 			 <from> <to>
