@@ -19,6 +19,29 @@ export CCACHE_CPP2=1
 CFLAGS += -g -O$(O) -Wall
 LDFLAGS = -g
 
+# Relax compilation on a detached HEAD (which is probably
+# historical, and may contain compiler warnings that later
+# got fixed).
+#
+# From Peff's config.mak.
+head := $(shell git symbolic-ref HEAD 2>/dev/null)
+rebasing := $(shell test -d "`git rev-parse --git-dir`/"rebase-* && echo yes)
+private := $(shell grep -sq Meta/private "`git rev-parse --git-dir`/continue" && echo yes)
+strict = $(or $(rebasing), $(head), $(private))
+ifeq ($(strict),)
+  CFLAGS += -Wno-error
+  CFLAGS += -Wno-cpp
+  CFLAGS += -DCURLOPT_USE_SSL=CURLOPT_USE_SSL
+  CFLAGS += -std=c99
+  CFLAGS += -Wno-discarded-qualifiers
+imap-send.o: EXTRA_CPPFLAGS += -DNO_OPENSSL
+else
+  DEVELOPER = 1
+endif
+ifeq ($(filter-out %maint, $(head)),)
+  CFLAGS += -Wno-unused-value -Wno-strict-prototypes
+endif
+
 USE_LIBPCRE = YesPlease
 
 GIT_TEST_OPTS = --root=/var/ram/git-tests -x --verbose-log
