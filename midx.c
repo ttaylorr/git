@@ -12,6 +12,7 @@
 #include "chunk-format.h"
 #include "pack-bitmap.h"
 #include "pack-revindex.h"
+#include "strvec.h"
 
 #define MIDX_PACK_ERROR ((void *)(intptr_t)-1)
 
@@ -19,8 +20,7 @@ int midx_checksum_valid(struct multi_pack_index *m);
 void clear_midx_files_ext(struct odb_source *source, const char *ext,
 			  const char *keep_hash);
 void clear_incremental_midx_files_ext(struct odb_source *source, const char *ext,
-				      char **keep_hashes,
-				      uint32_t hashes_nr);
+				      const struct strvec *keep_hashes);
 int cmp_idx_or_pack_name(const char *idx_or_pack_name,
 			 const char *idx_name);
 
@@ -791,20 +791,20 @@ void clear_midx_files_ext(struct odb_source *source, const char *ext,
 }
 
 void clear_incremental_midx_files_ext(struct odb_source *source, const char *ext,
-				      char **keep_hashes,
-				      uint32_t hashes_nr)
+				      const struct strvec *keep_hashes)
 {
 	struct clear_midx_data data = {
 		.keep = STRING_LIST_INIT_NODUP,
 		.ext = ext,
 	};
-	uint32_t i;
 
-	for (i = 0; i < hashes_nr; i++)
-		string_list_append(&data.keep,
-				   xstrfmt("multi-pack-index-%s.%s",
-					   keep_hashes[i], ext));
-	string_list_sort(&data.keep);
+	if (keep_hashes) {
+		for (size_t i = 0; i < keep_hashes->nr; i++)
+			string_list_append(&data.keep,
+					   xstrfmt("multi-pack-index-%s.%s",
+						   keep_hashes->v[i], ext));
+		string_list_sort(&data.keep);
+	}
 
 	for_each_file_in_pack_subdir(source->path, "multi-pack-index.d",
 				     clear_midx_file_ext, &data);
