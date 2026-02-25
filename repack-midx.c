@@ -11,6 +11,7 @@
 #include "refs.h"
 #include "run-command.h"
 #include "tempfile.h"
+#include "trace2.h"
 
 struct midx_snapshot_ref_data {
 	struct repository *repo;
@@ -567,6 +568,9 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 	uint32_t i;
 	int ret = 0;
 
+	trace2_region_enter("repack", "make_midx_compaction_plan",
+			    opts->existing->repo);
+
 	odb_reprepare(opts->existing->repo->objects);
 	m = get_multi_pack_index(opts->existing->source);
 
@@ -577,6 +581,8 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 			goto out;
 		}
 	}
+
+	trace2_region_enter("repack", "steps:write", opts->existing->repo);
 
 	/*
 	 * The first MIDX in the resulting chain is always going to be
@@ -593,13 +599,16 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 	 * was *not* rewritten) or the old tip's base MIDX layer
 	 * (otherwise).
 	 */
-
 	step.type = MIDX_COMPACTION_STEP_WRITE;
 	string_list_init_nodup(&step.u.write);
 
 	for (i = 0; i < opts->names->nr; i++) {
 		strbuf_addf(&buf, "pack-%s.idx", opts->names->items[i].string);
 		string_list_append(&step.u.write, strbuf_detach(&buf, NULL));
+
+		trace2_data_string("repack", opts->existing->repo,
+				   "include:fresh",
+				   step.u.write.items[step.u.write.nr - 1].string);
 	}
 	for (i = 0; i < opts->geometry->split; i++) {
 		struct packed_git *p = opts->geometry->pack[i];
@@ -610,6 +619,9 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 
 		step.objects_nr += p->num_objects;
 	}
+	trace2_data_intmax("repack", opts->existing->repo,
+			   "include:fresh:objects_nr",
+			   (uintmax_t)step.objects_nr);
 
 	/*
 	 * Now handle any existing packs which were *not* rewritten.
@@ -638,8 +650,18 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 		strbuf_strip_suffix(&buf, ".pack");
 		strbuf_addstr(&buf, ".idx");
 
-		if (p->multi_pack_index && !opts->geometry->midx_tip_rewritten)
+		if (p->multi_pack_index &&
+		    !opts->geometry->midx_tip_rewritten) {
+			trace2_data_string("repack", opts->existing->repo,
+					   "exclude:unmodified", buf.buf);
 			continue;
+		}
+
+		trace2_data_string("repack", opts->existing->repo,
+				   "include:unmodified", buf.buf);
+		trace2_data_string("repack", opts->existing->repo,
+				   "include:unmodified:midx",
+				   p->multi_pack_index ? "true" : "false");
 
 		item = string_list_append(&step.u.write,
 					  strbuf_detach(&buf, NULL));
@@ -650,8 +672,12 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 			ret = error(_("too many objects in MIDX compaction step"));
 			goto out;
 		}
+
 		step.objects_nr += p->num_objects;
 	}
+	trace2_data_intmax("repack", opts->existing->repo,
+			   "include:unmodified:objects_nr",
+			   (uintmax_t)step.objects_nr);
 
 	/*
 	 * If the MIDX tip was rewritten, then we no longer consider it
@@ -661,6 +687,11 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 	if (opts->geometry->midx_tip_rewritten)
 		m = m->base_midx;
 
+	trace2_data_string("repack", opts->existing->repo, "midx:rewrote-tip",
+			   opts->geometry->midx_tip_rewritten ? "true" : "false");
+
+	trace2_region_enter("repack", "compact", opts->existing->repo);
+
 	/*
 	 * Compact additional MIDX layers into this proposed one until
 	 * the merging condition is violated.
@@ -668,12 +699,27 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 	while (m) {
 		uint32_t preferred_pack_idx;
 
+		trace2_data_string("repack", opts->existing->repo,
+				   "candidate", midx_get_checksum_hex(m));
+
 		if (step.objects_nr < m->num_objects / opts->midx_split_factor) {
 			/*
 			 * Stop compacting MIDX layer as soon as the
 			 * merged size is less than half the size of the
 			 * next layer in the chain.
 			 */
+			trace2_data_string("repack", opts->existing->repo,
+					   "compact", "violated");
+			trace2_data_intmax("repack", opts->existing->repo,
+					   "objects_nr",
+					   (uintmax_t)step.objects_nr);
+			trace2_data_intmax("repack", opts->existing->repo,
+					   "next_objects_nr",
+					   (uintmax_t)m->num_objects);
+			trace2_data_intmax("repack", opts->existing->repo,
+					   "split_factor",
+					   (uintmax_t)opts->midx_split_factor);
+
 			break;
 		}
 
@@ -692,6 +738,9 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 			strbuf_addstr(&buf, pack_basename(p));
 			strbuf_strip_suffix(&buf, ".pack");
 			strbuf_addstr(&buf, ".idx");
+
+			trace2_data_string("repack", opts->existing->repo,
+					   "midx:pack", buf.buf);
 
 			item = string_list_append(&step.u.write,
 						  strbuf_detach(&buf, NULL));
@@ -717,6 +766,16 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 		steps[steps_nr++] = step;
 	}
 
+	trace2_data_intmax("repack", opts->existing->repo,
+			   "step:objects_nr", (uintmax_t)step.objects_nr);
+	trace2_data_intmax("repack", opts->existing->repo,
+			   "step:packs_nr", (uintmax_t)step.u.write.nr);
+
+	trace2_region_leave("repack", "compact", opts->existing->repo);
+	trace2_region_leave("repack", "steps:write", opts->existing->repo);
+
+	trace2_region_enter("repack", "steps:rest", opts->existing->repo);
+
 	/*
 	 * Then start over, repeat, and either compact or keep as-is
 	 * each MIDX layer until we have exhausted the chain.
@@ -734,18 +793,29 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 		memset(&step, 0, sizeof(step));
 		step.type = MIDX_COMPACTION_STEP_UNKNOWN;
 
-		while (next) {
-			struct multi_pack_index *base = next->base_midx;
-			uint32_t proposed_objects_nr;
+		trace2_region_enter("repack", "step", opts->existing->repo);
 
+		trace2_data_string("repack", opts->existing->repo,
+				   "from", midx_get_checksum_hex(m));
+
+		while (next) {
+			uint32_t proposed_objects_nr;
 			if (unsigned_add_overflows(step.objects_nr, next->num_objects)) {
 				ret = error(_("too many objects in MIDX compaction step"));
+				trace2_region_leave("repack", "step", opts->existing->repo);
 				goto out;
 			}
 
 			proposed_objects_nr = step.objects_nr + next->num_objects;
 
-			if (!base) {
+			trace2_data_string("repack", opts->existing->repo,
+					   "proposed",
+					   midx_get_checksum_hex(next));
+			trace2_data_intmax("repack", opts->existing->repo,
+					   "proposed:objects_nr",
+					   (uintmax_t)next->num_objects);
+
+			if (!next->base_midx) {
 				/*
 				 * If we are at the end of the MIDX
 				 * chain, there is nothing to compact,
@@ -755,7 +825,7 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 				break;
 			}
 
-			if (proposed_objects_nr < base->num_objects / opts->midx_split_factor) {
+			if (proposed_objects_nr < next->base_midx->num_objects / opts->midx_split_factor) {
 				/*
 				 * If there is a MIDX following this
 				 * one, but our accumulated size is less
@@ -763,6 +833,13 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 				 * them would violate the merging
 				 * condition, so stop here.
 				 */
+
+				trace2_data_string("repack", opts->existing->repo,
+						   "compact:violated:at",
+						   midx_get_checksum_hex(next->base_midx));
+				trace2_data_intmax("repack", opts->existing->repo,
+						   "compact:violated:at:objects_nr",
+						   (uintmax_t)next->base_midx->num_objects);
 				break;
 			}
 
@@ -772,26 +849,42 @@ static int repack_make_midx_compaction_plan(struct repack_write_midx_opts *opts,
 			 * through the remainder of the chain.
 			 */
 			step.objects_nr = proposed_objects_nr;
-			next = base;
+			trace2_data_intmax("repack", opts->existing->repo,
+					   "step:objects_nr",
+					   (uintmax_t)step.objects_nr);
+			next = next->base_midx;
 		}
 
 		if (m == next) {
 			step.type = MIDX_COMPACTION_STEP_COPY;
 			step.u.copy = m;
+
+			trace2_data_string("repack", opts->existing->repo,
+					   "type", "copy");
 		} else {
 			step.type = MIDX_COMPACTION_STEP_COMPACT;
 			step.u.compact.from = next;
 			step.u.compact.to = m;
+
+			trace2_data_string("repack", opts->existing->repo,
+					   "to", midx_get_checksum_hex(m));
+			trace2_data_string("repack", opts->existing->repo,
+					   "type", "compact");
 		}
 
 		m = next->base_midx;
-
 		steps[steps_nr++] = step;
+		trace2_region_leave("repack", "step", opts->existing->repo);
 	}
+
+	trace2_region_leave("repack", "steps:rest", opts->existing->repo);
 
 out:
 	*steps_p = steps;
 	*steps_nr_p = steps_nr;
+
+	trace2_region_leave("repack", "make_midx_compaction_plan",
+			    opts->existing->repo);
 
 	return ret;
 }
@@ -801,6 +894,7 @@ static int write_midx_incremental(struct repack_write_midx_opts *opts)
 	struct midx_compaction_step *steps = NULL;
 	struct strbuf lock_name = STRBUF_INIT;
 	struct lock_file lf;
+	struct strvec keep_hashes = STRVEC_INIT;
 	size_t steps_nr = 0;
 	size_t i;
 	int ret = 0;
@@ -846,9 +940,12 @@ static int write_midx_incremental(struct repack_write_midx_opts *opts)
 			BUG("missing result for compaction step %"PRIuMAX,
 			    (uintmax_t)i);
 		fprintf(get_lock_file_fp(&lf), "%s\n", step->csum);
+		strvec_push(&keep_hashes, step->csum);
 	}
 
 	commit_lock_file(&lf);
+
+	clear_incremental_midx_files(opts->existing->repo, &keep_hashes);
 
 done:
 	strbuf_release(&lock_name);
