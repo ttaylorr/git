@@ -269,6 +269,8 @@ int cmd_repack(int argc,
 			die(_("options '%s' and '%s' cannot be used together"), "--geometric", "-A/-a");
 		pack_geometry_init(&geometry, &existing, &po_args);
 		pack_geometry_split(&geometry);
+
+		existing_packs_retain_from_geometry(&existing, &geometry);
 	}
 
 	prepare_pack_objects(&cmd, &po_args, packtmp);
