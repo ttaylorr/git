@@ -290,6 +290,7 @@ enum stdin_packs_mode {
 	STDIN_PACKS_MODE_NONE,
 	STDIN_PACKS_MODE_STANDARD,
 	STDIN_PACKS_MODE_FOLLOW,
+	STDIN_PACKS_MODE_FOLLOW_REACHABLE,
 };
 
 /**
@@ -3808,7 +3809,8 @@ static void show_object_pack_hint(struct object *object, const char *name,
 				  void *data)
 {
 	enum stdin_packs_mode mode = *(enum stdin_packs_mode *)data;
-	if (mode == STDIN_PACKS_MODE_FOLLOW) {
+	if (mode == STDIN_PACKS_MODE_FOLLOW ||
+	    mode == STDIN_PACKS_MODE_FOLLOW_REACHABLE) {
 		if (object->type == OBJ_BLOB &&
 		    !odb_has_object(the_repository->objects, &object->oid, 0))
 			return;
@@ -3839,7 +3841,8 @@ static void show_commit_pack_hint(struct commit *commit, void *data)
 {
 	enum stdin_packs_mode mode = *(enum stdin_packs_mode *)data;
 
-	if (mode == STDIN_PACKS_MODE_FOLLOW) {
+	if (mode == STDIN_PACKS_MODE_FOLLOW ||
+	    mode == STDIN_PACKS_MODE_FOLLOW_REACHABLE) {
 		show_object_pack_hint((struct object *)commit, "", data);
 		return;
 	}
@@ -3906,6 +3909,154 @@ static int stdin_packs_include_check(struct commit *commit, void *data)
 	return stdin_packs_include_check_obj((struct object *)commit, data);
 }
 
+/*
+ * Flag bit set on commits that belong to an included pack during
+ * '--stdin-packs=follow-reachable'. Used by the pre-walk to
+ * identify which reachable commits should be tips for the main
+ * object traversal.
+ */
+#define IN_INCLUDED_PACK (1u<<11)
+
+static int mark_included_pack_tip(const struct object_id *oid,
+				  struct packed_git *p,
+				  uint32_t pos,
+				  void *data)
+{
+	struct rev_info *main_revs = data;
+	off_t ofs = nth_packed_object_offset(p, pos);
+	enum object_type type;
+	struct object_info oi = OBJECT_INFO_INIT;
+	struct object *obj;
+
+	oi.typep = &type;
+	if (packed_object_info(p, ofs, &oi) < 0)
+		return 0;
+	if (type != OBJ_COMMIT && type != OBJ_TAG)
+		return 0;
+
+	obj = parse_object(the_repository, oid);
+	if (!obj)
+		return 0;
+
+	obj->flags |= IN_INCLUDED_PACK;
+
+	if (type == OBJ_TAG && main_revs)
+		add_pending_object(main_revs, obj, "");
+	return 0;
+}
+
+static int mark_loose_object_tip(const struct object_id *oid,
+				 struct object_info *oi UNUSED,
+				 void *data)
+{
+	struct rev_info *main_revs = data;
+	struct object *obj;
+	enum object_type type;
+
+	type = odb_read_object_info(the_repository->objects, oid, NULL);
+	if (type != OBJ_COMMIT && type != OBJ_TAG)
+		return 0;
+
+	obj = parse_object(the_repository, oid);
+	if (!obj)
+		return 0;
+
+	obj->flags |= IN_INCLUDED_PACK;
+
+	if (type == OBJ_TAG && main_revs)
+		add_pending_object(main_revs, obj, "");
+
+	return 0;
+}
+
+static int add_ref_to_pending(const struct reference *ref, void *cb_data)
+{
+	struct rev_info *revs = cb_data;
+	struct object *object;
+
+	object = parse_object(the_repository, ref->oid);
+	if (!object)
+		return 0;
+
+	add_pending_object(revs, object, "");
+	return 0;
+}
+
+static void stdin_packs_add_reachable_pack_entries(struct string_list *keys,
+						   struct rev_info *revs)
+{
+	struct rev_info pre_walk;
+	struct commit *commit;
+	struct string_list_item *item;
+
+	/*
+	 * Phase 1: mark commits in included packs, then walk from
+	 * ref tips to discover which of them are reachable. The walk
+	 * halts at excluded-closed packs (via no_kept_objects) and
+	 * continues through excluded-open ones.
+	 *
+	 * Also set include_check on the outer revs so that phase 2
+	 * (the main object traversal) halts at closed packs.
+	 */
+	revs->include_check = stdin_packs_include_check;
+	revs->include_check_obj = stdin_packs_include_check_obj;
+
+	for_each_string_list_item(item, keys) {
+		struct stdin_pack_info *info = item->util;
+		if (info->kind & STDIN_PACK_INCLUDE)
+			for_each_object_in_pack(info->p,
+						mark_included_pack_tip,
+						revs,
+						ODB_FOR_EACH_OBJECT_PACK_ORDER);
+	}
+
+	if (rev_list_unpacked) {
+		/*
+		 * With '--stdin-packs=follow-reachable', specifying
+		 * '--unpacked' instructs pack-objects to pack any loose
+		 * objects which are reachable.
+		 *
+		 * Pretend as if all loose objects are in an included
+		 * pack in order to make them eligible for packing.
+		 */
+		struct odb_source *source = revs->repo->objects->sources;
+		for (; source; source = source->next) {
+			unsigned flags = 0;
+			if (local)
+				flags |= ODB_FOR_EACH_OBJECT_LOCAL_ONLY;
+
+			odb_source_loose_for_each_object(source, NULL,
+							 mark_loose_object_tip,
+							 revs, flags);
+		}
+	}
+
+	repo_init_revisions(the_repository, &pre_walk, NULL);
+	pre_walk.no_kept_objects = 1;
+	pre_walk.keep_pack_cache_flags |= KEPT_PACK_IN_CORE;
+	pre_walk.ignore_missing_links = 1;
+
+	refs_for_each_ref(get_main_ref_store(the_repository),
+			  add_ref_to_pending, &pre_walk);
+
+	if (prepare_revision_walk(&pre_walk))
+		die(_("revision walk setup failed"));
+
+	/*
+	 * Phase 2 tips: every reachable commit that is in an
+	 * included pack becomes a starting point for the main
+	 * object traversal.
+	 */
+	while ((commit = get_revision(&pre_walk)) != NULL) {
+		if (commit->object.flags & IN_INCLUDED_PACK)
+			add_pending_oid(revs, NULL,
+					&commit->object.oid, 0);
+	}
+
+	reset_revision_walk();
+	release_revisions(&pre_walk);
+}
+
 static void stdin_packs_add_all_pack_entries(struct string_list *keys,
 					     struct rev_info *revs)
 {
@@ -3957,7 +4108,10 @@ static void stdin_packs_add_pack_entries(struct strmap *packs,
 	 */
 	QSORT(keys.items, keys.nr, pack_mtime_cmp);
 
-	stdin_packs_add_all_pack_entries(&keys, revs);
+	if (mode == STDIN_PACKS_MODE_FOLLOW_REACHABLE)
+		stdin_packs_add_reachable_pack_entries(&keys, revs);
+	else
+		stdin_packs_add_all_pack_entries(&keys, revs);
 
 	string_list_clear(&keys, 0);
 }
@@ -3978,7 +4132,9 @@ static void stdin_packs_read_input(struct rev_info *revs,
 			continue;
 		else if (*key == '^')
 			kind = STDIN_PACK_EXCLUDE_CLOSED;
-		else if (*key == '!' && mode == STDIN_PACKS_MODE_FOLLOW)
+		else if (*key == '!' &&
+			 (mode == STDIN_PACKS_MODE_FOLLOW ||
+			  mode == STDIN_PACKS_MODE_FOLLOW_REACHABLE))
 			kind = STDIN_PACK_EXCLUDE_OPEN;
 
 		if (kind != STDIN_PACK_INCLUDE)
@@ -4083,7 +4239,8 @@ static void read_stdin_packs(enum stdin_packs_mode mode, int rev_list_unpacked)
 
 	/* avoids adding objects in excluded packs */
 	ignore_packed_keep_in_core = 1;
-	if (mode == STDIN_PACKS_MODE_FOLLOW) {
+	if (mode == STDIN_PACKS_MODE_FOLLOW ||
+	    mode == STDIN_PACKS_MODE_FOLLOW_REACHABLE) {
 		/*
 		 * In '--stdin-packs=follow' mode, additionally ignore
 		 * objects in excluded-open packs to prevent them from
@@ -4092,7 +4249,7 @@ static void read_stdin_packs(enum stdin_packs_mode mode, int rev_list_unpacked)
 		ignore_packed_keep_in_core_open = 1;
 	}
 	stdin_packs_read_input(&revs, mode);
-	if (rev_list_unpacked)
+	if (rev_list_unpacked && mode != STDIN_PACKS_MODE_FOLLOW_REACHABLE)
 		add_unreachable_loose_objects(&revs);
 
 	if (prepare_revision_walk(&revs))
@@ -4989,6 +5146,8 @@ static int parse_stdin_packs_mode(const struct option *opt, const char *arg,
 		*mode = STDIN_PACKS_MODE_STANDARD;
 	else if (!strcmp(arg, "follow"))
 		*mode = STDIN_PACKS_MODE_FOLLOW;
+	else if (!strcmp(arg, "follow-reachable"))
+		*mode = STDIN_PACKS_MODE_FOLLOW_REACHABLE;
 	else
 		die(_("invalid value for '%s': '%s'"), opt->long_name, arg);
 
