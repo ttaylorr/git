@@ -485,7 +485,7 @@ test_expect_success 'test-tool bitmap write' '
 	)
 '
 
-test_expect_failure 'apply pseudo-merges during fill-in traversal' '
+test_expect_success 'apply pseudo-merges during fill-in traversal' '
 	git init pseudo-merge-fill-in-traversal &&
 	test_when_finished "rm -fr pseudo-merge-fill-in-traversal" &&
 
