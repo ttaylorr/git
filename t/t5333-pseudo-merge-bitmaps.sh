@@ -462,4 +462,27 @@ test_expect_success 'use pseudo-merge in boundary traversal' '
 	)
 '
 
+test_expect_success 'test-tool bitmap write' '
+	git init bitmap-write-helper &&
+	(
+		cd bitmap-write-helper &&
+
+		test_commit_bulk 64 &&
+		git repack -ad &&
+
+		pack=$(ls .git/objects/pack/pack-*.pack) &&
+
+		git rev-parse HEAD >commits &&
+		test-tool bitmap write "$(basename $pack)" <commits &&
+
+		test-tool bitmap list-commits | sort >actual &&
+		sort commits >expect &&
+		test_cmp expect actual &&
+
+		git rev-list --count --objects --use-bitmap-index HEAD >actual &&
+		git rev-list --count --objects HEAD >expect &&
+		test_cmp expect actual
+	)
+'
+
 test_done
