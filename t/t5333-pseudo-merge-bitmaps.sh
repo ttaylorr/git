@@ -485,4 +485,141 @@ test_expect_success 'test-tool bitmap write' '
 	)
 '
 
+test_expect_failure 'apply pseudo-merges during fill-in traversal' '
+	git init pseudo-merge-fill-in-traversal &&
+	test_when_finished "rm -fr pseudo-merge-fill-in-traversal" &&
+
+	(
+		cd pseudo-merge-fill-in-traversal &&
+
+		git config bitmapPseudoMerge.test.pattern refs/tags/ &&
+		git config bitmapPseudoMerge.test.maxMerges 1 &&
+		git config bitmapPseudoMerge.test.stableThreshold never &&
+
+		test_commit_bulk 64 &&
+		tag_everything &&
+		git repack -ad &&
+
+		pack=$(ls .git/objects/pack/pack-*.pack) &&
+		git rev-parse HEAD~63 |
+		test-tool bitmap write "$(basename $pack)" &&
+
+		test_pseudo_merges >merges &&
+		test_line_count = 1 merges &&
+
+		git commit --allow-empty -m stale &&
+
+		git rev-list --count --objects HEAD >expect &&
+
+		: >trace2.txt &&
+		GIT_TRACE2_EVENT=$PWD/trace2.txt \
+			git rev-list --count --objects --use-bitmap-index HEAD >actual &&
+		test_pseudo_merges_satisfied 1 <trace2.txt &&
+
+		test_cmp expect actual
+	)
+'
+
+test_expect_failure 'apply pseudo-merges from multiple groups during fill-in' '
+	git init pseudo-merge-fill-in-multi &&
+	test_when_finished "rm -fr pseudo-merge-fill-in-multi" &&
+
+	(
+		cd pseudo-merge-fill-in-multi &&
+
+		test_commit base &&
+		base=$(git rev-parse HEAD) &&
+
+		git checkout -b branch-a &&
+		test_commit_bulk --id=a 64 &&
+		git rev-list --no-object-names HEAD --not $base |
+		while read oid
+		do
+			echo "create refs/group-a/$oid $oid" || return 1
+		done | git update-ref --stdin &&
+
+		git checkout $base &&
+		git checkout -b branch-b &&
+		test_commit_bulk --id=b 64 &&
+		git rev-list --no-object-names HEAD --not $base |
+		while read oid
+		do
+			echo "create refs/group-b/$oid $oid" || return 1
+		done | git update-ref --stdin &&
+
+		git checkout branch-a &&
+		git merge --no-edit branch-b &&
+		git repack -ad &&
+
+		pack=$(ls .git/objects/pack/pack-*.pack) &&
+
+		git config bitmapPseudoMerge.a.pattern "refs/group-a/" &&
+		git config bitmapPseudoMerge.a.maxMerges 1 &&
+		git config bitmapPseudoMerge.a.stableThreshold never &&
+		git config bitmapPseudoMerge.b.pattern "refs/group-b/" &&
+		git config bitmapPseudoMerge.b.maxMerges 1 &&
+		git config bitmapPseudoMerge.b.stableThreshold never &&
+
+		git rev-parse $base >in &&
+		test-tool bitmap write "$(basename $pack)" <in &&
+
+		test_pseudo_merges >merges &&
+		test_line_count = 2 merges &&
+
+		test_commit stale &&
+
+		git rev-list --count --objects HEAD >expect &&
+
+		: >trace2.txt &&
+		GIT_TRACE2_EVENT=$PWD/trace2.txt \
+			git rev-list --count --objects --use-bitmap-index HEAD >actual &&
+		test_pseudo_merges_satisfied 2 <trace2.txt &&
+
+		test_cmp expect actual
+	)
+'
+
+test_expect_failure 'apply pseudo-merges with overlapping groups during fill-in' '
+	test_when_finished "rm -fr pseudo-merge-fill-in-overlap" &&
+	git init pseudo-merge-fill-in-overlap &&
+
+	(
+		cd pseudo-merge-fill-in-overlap &&
+
+		test_commit_bulk 64 &&
+		tag_everything &&
+		git repack -ad &&
+
+		pack=$(ls .git/objects/pack/pack-*.pack) &&
+
+		# Use two pseudo-merge group patterns that both match
+		# refs/tags/, so every tagged commit belongs to both
+		# groups. This exercises the extended lookup table
+		# path in apply_pseudo_merges_for_commit().
+		git config bitmapPseudoMerge.all.pattern "refs/tags/" &&
+		git config bitmapPseudoMerge.all.maxMerges 1 &&
+		git config bitmapPseudoMerge.all.stableThreshold never &&
+		git config bitmapPseudoMerge.tags.pattern "refs/tags/" &&
+		git config bitmapPseudoMerge.tags.maxMerges 1 &&
+		git config bitmapPseudoMerge.tags.stableThreshold never &&
+
+		git rev-parse HEAD~63 |
+		test-tool bitmap write "$(basename $pack)" &&
+
+		test_pseudo_merges >merges &&
+		test_line_count = 2 merges &&
+
+		git commit --allow-empty -m stale &&
+
+		git rev-list --count --objects HEAD >expect &&
+
+		: >trace2.txt &&
+		GIT_TRACE2_EVENT=$PWD/trace2.txt \
+			git rev-list --count --objects --use-bitmap-index HEAD >actual &&
+		test_pseudo_merges_satisfied 2 <trace2.txt &&
+
+		test_cmp expect actual
+	)
+'
+
 test_done
