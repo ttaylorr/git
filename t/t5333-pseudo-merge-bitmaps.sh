@@ -530,36 +530,30 @@ test_expect_failure 'apply pseudo-merges from multiple groups during fill-in' '
 		test_commit base &&
 		base=$(git rev-parse HEAD) &&
 
-		git checkout -b branch-a &&
-		test_commit_bulk --id=a 64 &&
-		git rev-list --no-object-names HEAD --not $base |
-		while read oid
+		for side in left right
 		do
-			echo "create refs/group-a/$oid $oid" || return 1
-		done | git update-ref --stdin &&
+			git checkout -B $side base &&
 
-		git checkout $base &&
-		git checkout -b branch-b &&
-		test_commit_bulk --id=b 64 &&
-		git rev-list --no-object-names HEAD --not $base |
-		while read oid
-		do
-			echo "create refs/group-b/$oid $oid" || return 1
-		done | git update-ref --stdin &&
+			test_commit_bulk --id=$side 64 &&
+			git rev-list --no-object-names HEAD --not $base >in &&
+			while read oid
+			do
+				echo "create refs/group-$side/$oid $oid" || return 1
+			done <in | git update-ref --stdin || return 1
+		done &&
 
-		git checkout branch-a &&
-		git merge --no-edit branch-b &&
+		git checkout left &&
+		git merge --no-edit right &&
 		git repack -ad &&
 
+		git config bitmapPseudoMerge.left.pattern "refs/group-left/" &&
+		git config bitmapPseudoMerge.left.maxMerges 1 &&
+		git config bitmapPseudoMerge.left.stableThreshold never &&
+		git config bitmapPseudoMerge.right.pattern "refs/group-right/" &&
+		git config bitmapPseudoMerge.right.maxMerges 1 &&
+		git config bitmapPseudoMerge.right.stableThreshold never &&
+
 		pack=$(ls .git/objects/pack/pack-*.pack) &&
-
-		git config bitmapPseudoMerge.a.pattern "refs/group-a/" &&
-		git config bitmapPseudoMerge.a.maxMerges 1 &&
-		git config bitmapPseudoMerge.a.stableThreshold never &&
-		git config bitmapPseudoMerge.b.pattern "refs/group-b/" &&
-		git config bitmapPseudoMerge.b.maxMerges 1 &&
-		git config bitmapPseudoMerge.b.stableThreshold never &&
-
 		git rev-parse $base >in &&
 		test-tool bitmap write "$(basename $pack)" <in &&
 
