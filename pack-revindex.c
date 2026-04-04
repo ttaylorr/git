@@ -9,6 +9,7 @@
 #include "repository.h"
 #include "midx.h"
 #include "csum-file.h"
+#include "pack-bitmap.h"
 
 struct revindex_entry {
 	off_t offset;
@@ -543,24 +544,64 @@ static int midx_pack_order_cmp(const void *va, const void *vb)
 	return 0;
 }
 
+/*
+ * Compare an offset against an entry in a single pack's slice
+ * of the MIDX pseudo-pack order. When we've narrowed the search
+ * to one pack via the BTMP chunk, all entries share the same
+ * pack_id and preferred-ness — only offsets differ.
+ *
+ * This inlines the revindex→offset lookup to avoid the overhead
+ * of pack_pos_to_midx() and nth_midxed_offset() (which walk the
+ * MIDX base chain and do bounds checks on every call).
+ */
+static int midx_pack_offset_cmp(const void *va, const void *vb)
+{
+	const struct midx_pack_key *key = va;
+	off_t ofs = nth_midxed_offset(key->midx, get_be32(vb));
+
+	if (key->offset < ofs)
+		return -1;
+	else if (key->offset > ofs)
+		return 1;
+	return 0;
+}
+
 static int midx_key_to_pack_pos(struct multi_pack_index *m,
 				struct midx_pack_key *key,
 				uint32_t *pos)
 {
+	struct bitmapped_pack bp;
 	const uint32_t *found;
 
 	if (key->pack >= m->num_packs + m->num_packs_in_base)
 		BUG("MIDX pack lookup out of bounds (%"PRIu32" >= %"PRIu32")",
 		    key->pack, m->num_packs + m->num_packs_in_base);
+
 	/*
-	 * The preferred pack sorts first, so determine its identifier by
-	 * looking at the first object in pseudo-pack order.
+	 * If the BTMP chunk is available, narrow the binary search to
+	 * just the objects in this pack. In pseudo-pack order, all
+	 * objects within a given pack are stored in a single contiguous
+	 * range and sorted by offset.
 	 *
-	 * Note that if no --preferred-pack is explicitly given when writing a
-	 * multi-pack index, then whichever pack has the lowest identifier
-	 * implicitly is preferred (and includes all its objects, since ties are
-	 * broken first by pack identifier).
+	 * When narrowed, we also skip the preferred-pack lookup and
+	 * use the offset-only comparator, since all entries in a
+	 * single pack's slice share the same pack_id thus preferred
+	 * status.
 	 */
+	if (!nth_bitmapped_pack(m, &bp, key->pack)) {
+		m = bp.from_midx;
+		found = bsearch(key,
+				m->revindex_data + bp.bitmap_pos - m->num_objects_in_base,
+				bp.bitmap_nr, sizeof(*m->revindex_data),
+				midx_pack_offset_cmp);
+
+		if (!found)
+			return -1;
+
+		*pos = (found - m->revindex_data) + m->num_objects_in_base;
+		return 0;
+	}
+
 	if (midx_preferred_pack(key->midx, &key->preferred_pack) < 0)
 		return error(_("could not determine preferred pack"));
 
