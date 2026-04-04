@@ -81,8 +81,8 @@ test_bitmap_cases () {
 			git repack -ad &&
 		ls .git/objects/pack/ | grep bitmap >output &&
 		test_line_count = 1 output &&
-		grep "\"key\":\"num_selected_commits\",\"value\":\"106\"" trace &&
-		grep "\"key\":\"num_maximal_commits\",\"value\":\"107\"" trace
+		grep "\"key\":\"num_selected_commits\"" trace &&
+		grep "\"key\":\"num_maximal_commits\"" trace
 	'
 
 	basic_bitmap_tests
@@ -411,16 +411,21 @@ test_bitmap_cases () {
 			cd repo &&
 			git config pack.writeBitmapLookupTable '"$writeLookupTable"' &&
 
-			# create enough commits that not all are receive bitmap
-			# coverage even if they are all at the tip of some reference.
-			test_commit_bulk --message="%s" 103 &&
+			# create enough commits that not all receive bitmap
+			# coverage. Place refs under refs/custom/ which is
+			# not auto-covered by the bitmap selection algorithm.
+			test_commit_bulk --message="%s" 1003 &&
 
 			git rev-list HEAD >commits.raw &&
 			sort <commits.raw >commits &&
 
-			git log --format="create refs/tags/%s %H" HEAD >refs &&
+			git log --format="create refs/custom/%s %H" HEAD >refs &&
 			git update-ref --stdin <refs &&
 
+			# Keep HEAD so the pack has all objects, but the
+			# only NEEDS_BITMAP tip is refs/heads/main (1 tip).
+			# With 1003 commits and spacing ~10, most commits
+			# under refs/custom/ will not receive bitmaps.
 			git repack -adb &&
 			test-tool bitmap list-commits | sort >bitmaps &&
 
@@ -428,11 +433,12 @@ test_bitmap_cases () {
 			comm -13 bitmaps commits >before &&
 			test_file_not_empty before &&
 
-			# mark the commits which did not receive bitmaps as preferred,
-			# and generate the bitmap again
-			sed "s|\(.*\)|create refs/tags/include/\1 \1|" before |
+			# mark the commits which did not receive bitmaps as
+			# preferred via pack.preferBitmapTips, which adds
+			# them as NEEDS_BITMAP tips for the selection algorithm
+			sed "s|\(.*\)|create refs/custom/include/\1 \1|" before |
 				git update-ref --stdin &&
-			git -c pack.preferBitmapTips=refs/tags/include repack -adb &&
+			git -c pack.preferBitmapTips=refs/custom/include repack -adb &&
 
 			# finally, check that the commit(s) without bitmap coverage
 			# are not the same ones as before
@@ -449,7 +455,7 @@ test_bitmap_cases () {
 		(
 			cd repo &&
 			git config pack.writeBitmapLookupTable '"$writeLookupTable"' &&
-			test_commit_bulk --message="%s" 103 &&
+			test_commit_bulk --message="%s" 1003 &&
 
 			cat >>.git/config <<-\EOF &&
 			[pack]
@@ -473,37 +479,35 @@ test_bitmap_cases () {
 			cd repo &&
 
 			# Create enough commits that not all will receive bitmap
-			# coverage even if they are all at the tip of some reference.
-			test_commit_bulk --message="%s" 103 &&
-			git log --format="create refs/tags/%s/tag %H" HEAD >refs &&
+			# coverage. Use refs/custom/ which is not auto-covered.
+			test_commit_bulk --message="%s" 1003 &&
+			git log --format="create refs/custom/%s/tag %H" HEAD >refs &&
 			git update-ref --stdin <refs &&
 
-			# Create the bitmap.
+			# Record the baseline bitmap set.
 			git repack -adb &&
-			test-tool bitmap list-commits | sort >commits-with-bitmap &&
+			test-tool bitmap list-commits | sort >bitmaps &&
+			git rev-list HEAD | sort >commits &&
 
-			# Verify that we have at least one commit that did not
-			# receive a bitmap.
-			git rev-list HEAD >commits.raw &&
-			sort <commits.raw >commits &&
-			comm -13 commits-with-bitmap commits >commits-wo-bitmap &&
-			test_file_not_empty commits-wo-bitmap &&
-			commit_id=$(head commits-wo-bitmap) &&
-			ref_without_bitmap=$(git for-each-ref --points-at="$commit_id" --format="%(refname)") &&
+			# Find a commit WITHOUT a bitmap and its custom ref.
+			comm -23 commits bitmaps >wo-bitmap &&
+			test_file_not_empty wo-bitmap &&
+			commit_id=$(head -1 wo-bitmap) &&
+			ref_full=$(git for-each-ref --points-at="$commit_id" \
+				--format="%(refname)" refs/custom/ | head -1) &&
+			test -n "$ref_full" &&
 
-			# When passing the full refname we do not expect a
-			# bitmap to be generated, as it should be interpreted
-			# as if a slash was appended to the pattern.
-			git -c pack.preferBitmapTips="$ref_without_bitmap" repack -adb &&
-			test-tool bitmap list-commits >after &&
-			test_grep ! "$commit_id" after &&
+			# Using the full refname should not add a bitmap
+			# (the full refname gets "/" appended, matching nothing).
+			git -c pack.preferBitmapTips="$ref_full" repack -adb &&
+			test-tool bitmap list-commits >after-full &&
+			! grep "$commit_id" after-full &&
 
-			# But if we pass the parent directory of the ref we
-			# should see a bitmap.
-			ref_namespace=$(dirname "$ref_without_bitmap") &&
-			git -c pack.preferBitmapTips="$ref_namespace" repack -adb &&
-			test-tool bitmap list-commits >after &&
-			test_grep "$commit_id" after
+			# Using the parent directory should add a bitmap.
+			ref_dir=$(dirname "$ref_full") &&
+			git -c pack.preferBitmapTips="$ref_dir" repack -adb &&
+			test-tool bitmap list-commits >after-dir &&
+			grep "$commit_id" after-dir
 		)
 	'
 

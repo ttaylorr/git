@@ -4563,6 +4563,26 @@ static void record_recent_commit(struct commit *commit, void *data UNUSED)
 	oid_array_append(&recent_objects, &commit->object.oid);
 }
 
+static int mark_bitmap_ref_tip(const struct reference *ref, void *data UNUSED)
+{
+	const struct object_id *maybe_peeled = ref->oid;
+	struct object_id peeled;
+	struct object *object;
+
+	if (!starts_with(ref->name, "refs/heads/") &&
+	    !starts_with(ref->name, "refs/tags/"))
+		return 0;
+
+	if (!reference_get_peeled_oid(the_repository, ref, &peeled))
+		maybe_peeled = &peeled;
+
+	object = parse_object_or_die(the_repository, maybe_peeled, ref->name);
+	if (object->type == OBJ_COMMIT)
+		object->flags |= NEEDS_BITMAP;
+
+	return 0;
+}
+
 static int mark_bitmap_preferred_tip(const struct reference *ref, void *data UNUSED)
 {
 	const struct object_id *maybe_peeled = ref->oid;
@@ -4718,9 +4738,12 @@ static void get_object_list(struct rev_info *revs, struct strvec *argv)
 	if (use_delta_islands)
 		load_delta_islands(the_repository, progress);
 
-	if (write_bitmap_index)
+	if (write_bitmap_index) {
+		refs_for_each_ref(get_main_ref_store(the_repository),
+				  mark_bitmap_ref_tip, NULL);
 		for_each_preferred_bitmap_tip(the_repository, mark_bitmap_preferred_tip,
 					      NULL);
+	}
 
 	if (!fn_show_object)
 		fn_show_object = show_object;

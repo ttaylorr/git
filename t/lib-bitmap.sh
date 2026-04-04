@@ -188,9 +188,10 @@ rev_list_tests () {
 
 basic_bitmap_tests () {
 	tip="$1"
-	test_expect_success 'rev-list --test-bitmap verifies bitmaps' "
-		git rev-list --test-bitmap "${tip:-HEAD}"
-	"
+	test_expect_success 'rev-list --test-bitmap verifies bitmaps' '
+		bitmapped=$(test-tool bitmap list-commits | head -n1) &&
+		git rev-list --test-bitmap "$bitmapped"
+	'
 
 	rev_list_tests 'full bitmap'
 
@@ -299,7 +300,7 @@ midx_bitmap_core () {
 		test_path_is_file $midx-$(midx_checksum $objdir).bitmap
 	'
 
-	test_rev_exists HEAD "$rev_kind"
+	test_rev_exists $(test-tool bitmap list-commits | head -n1) "$rev_kind"
 
 	basic_bitmap_tests
 
@@ -329,7 +330,7 @@ midx_bitmap_core () {
 		test_path_is_file $midx-$(midx_checksum $objdir).bitmap
 	'
 
-	test_rev_exists HEAD "$rev_kind"
+	test_rev_exists $(test-tool bitmap list-commits | head -n1) "$rev_kind"
 
 	basic_bitmap_tests
 
@@ -443,7 +444,7 @@ midx_bitmap_partial_tests () {
 		test_path_is_file $midx-$(midx_checksum $objdir).bitmap
 	'
 
-	test_rev_exists HEAD~ "$rev_kind"
+	test_rev_exists $(test-tool bitmap list-commits | sed -n '2p') "$rev_kind"
 
-	basic_bitmap_tests HEAD~
+	basic_bitmap_tests
 }

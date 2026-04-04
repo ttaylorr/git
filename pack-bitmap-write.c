@@ -682,33 +682,6 @@ int bitmap_writer_build(struct bitmap_writer *writer)
 	return closed ? 0 : -1;
 }
 
-/**
- * Select the commits that will be bitmapped
- */
-static inline unsigned int next_commit_index(unsigned int idx)
-{
-	static const unsigned int MIN_COMMITS = 100;
-	static const unsigned int MAX_COMMITS = 5000;
-
-	static const unsigned int MUST_REGION = 100;
-	static const unsigned int MIN_REGION = 20000;
-
-	unsigned int offset, next;
-
-	if (idx <= MUST_REGION)
-		return 0;
-
-	if (idx <= MIN_REGION) {
-		offset = idx - MUST_REGION;
-		return (offset < MIN_COMMITS) ? offset : MIN_COMMITS;
-	}
-
-	offset = idx - MIN_REGION;
-	next = (offset < MAX_COMMITS) ? offset : MAX_COMMITS;
-
-	return (next > MIN_COMMITS) ? next : MIN_COMMITS;
-}
-
 static int date_compare(const void *_a, const void *_b)
 {
 	struct commit *a = *(struct commit **)_a;
@@ -716,20 +689,60 @@ static int date_compare(const void *_a, const void *_b)
 	return (long)b->date - (long)a->date;
 }
 
+static int uint64_cmp(const void *_a, const void *_b)
+{
+	uint64_t a = *(const uint64_t *)_a;
+	uint64_t b = *(const uint64_t *)_b;
+	return (a > b) - (a < b);
+}
+
+#define BITMAP_SELECTED (1u<<23)
+#define BITMAP_WALKED (1u<<24)
+
+/**
+ * Select commits for bitmaps using graph-distance-aware placement.
+ *
+ * Walk first-parent from each NEEDS_BITMAP tip to build the "first-parent
+ * tree" — the union of all first-parent chains. Measure each tip's unique
+ * chain length (the segment not shared with any previously-walked tip).
+ * Sort tips by unique chain length, longest first.
+ *
+ * Then walk tips in that order, placing bitmaps at uniform spacing along
+ * each chain. The spacing is computed from the total tree length and a
+ * fixed budget. The budget check stops selection once enough bitmaps are
+ * placed.
+ *
+ * Processing longest chains first ensures that:
+ *   - The trunk (longest path) gets the densest coverage, maximizing
+ *     coverage for the most tips.
+ *   - Long-lived release branches get proportional coverage.
+ *   - Short feature branches are processed last; if their unique segment
+ *     is shorter than the spacing, they get no dedicated bitmaps, but their
+ *     fill-in walk cost is bounded by (branch_length + spacing).
+ *
+ * Depths are assigned globally from root via a hash table, so bitmaps on
+ * shared ancestry align across all branches. This avoids the date-sorted
+ * algorithm's fundamental flaw of conflating temporal proximity with graph
+ * proximity.
+ */
 void bitmap_writer_select_commits(struct bitmap_writer *writer,
 				  struct commit **indexed_commits,
 				  unsigned int indexed_commits_nr)
 {
-	unsigned int i = 0, j, next;
-
-	QSORT(indexed_commits, indexed_commits_nr, date_compare);
+	unsigned int i;
+	unsigned int budget, selected_nr = 0;
+	unsigned int total_tree_length = 0;
+	unsigned int spacing;
+	struct commit **tips = NULL;
+	unsigned int tips_nr = 0, tips_alloc = 0;
+	unsigned int *tip_chain_lengths = NULL;
+	unsigned int *order = NULL;
+	kh_oid_pos_t *depths = NULL;
 
 	if (indexed_commits_nr < 100) {
 		for (i = 0; i < indexed_commits_nr; ++i)
 			bitmap_writer_push_commit(writer, indexed_commits[i], 0);
-
 		select_pseudo_merges(writer);
-
 		return;
 	}
 
@@ -737,38 +750,197 @@ void bitmap_writer_select_commits(struct bitmap_writer *writer,
 		writer->progress = start_progress(writer->repo,
 						  "Selecting bitmap commits", 0);
 
-	for (;;) {
-		struct commit *chosen = NULL;
+	budget = indexed_commits_nr / 10;
+	if (budget > 5000)
+		budget = 5000;
+	if (budget < 100)
+		budget = 100;
 
-		next = next_commit_index(i);
+	/* Collect NEEDS_BITMAP tips */
+	for (i = 0; i < indexed_commits_nr; i++) {
+		struct commit *c = indexed_commits[i];
+		if (c->object.flags & NEEDS_BITMAP) {
+			ALLOC_GROW(tips, tips_nr + 1, tips_alloc);
+			tips[tips_nr++] = c;
+		}
+	}
 
-		if (i + next >= indexed_commits_nr)
-			break;
+	trace2_data_intmax("pack-bitmap-write", writer->repo,
+			   "bitmap_tips_found", tips_nr);
 
-		if (next == 0) {
-			chosen = indexed_commits[i];
-		} else {
-			chosen = indexed_commits[i + next];
+	if (!tips_nr) {
+		/* No tips: fall back to uniform date-sorted spacing */
+		spacing = indexed_commits_nr / budget;
+		if (spacing < 1)
+			spacing = 1;
+		QSORT(indexed_commits, indexed_commits_nr, date_compare);
+		for (i = 0; i < indexed_commits_nr; i += spacing) {
+			bitmap_writer_push_commit(writer, indexed_commits[i], 0);
+			display_progress(writer->progress, i);
+		}
+		goto done;
+	}
 
-			for (j = 0; j <= next; ++j) {
-				struct commit *cm = indexed_commits[i + j];
+	/*
+	 * Phase 1: Measure each tip's unique first-parent chain length.
+	 *
+	 * Walk first-parent from each tip until we hit a commit already
+	 * visited by a prior tip's walk (BITMAP_WALKED). The unique
+	 * segment length tells us how "long" each branch is — long
+	 * branches need their own bitmaps, short ones don't.
+	 *
+	 * The sum of unique lengths = total first-parent tree size.
+	 */
+	CALLOC_ARRAY(tip_chain_lengths, tips_nr);
+	for (i = 0; i < tips_nr; i++) {
+		struct commit *c = tips[i];
+		unsigned int len = 0;
+		while (c) {
+			if (c->object.flags & BITMAP_WALKED)
+				break;
+			c->object.flags |= BITMAP_WALKED;
+			len++;
+			if (!c->parents)
+				break;
+			parse_commit_or_die(c->parents->item);
+			c = c->parents->item;
+		}
+		tip_chain_lengths[i] = len;
+		total_tree_length += len;
+	}
 
-				if ((cm->object.flags & NEEDS_BITMAP) != 0) {
-					chosen = cm;
-					break;
-				}
+	/* Reset walk flags for Phase 2 */
+	for (i = 0; i < indexed_commits_nr; i++)
+		indexed_commits[i]->object.flags &= ~BITMAP_WALKED;
 
-				if (cm->parents && cm->parents->next)
-					chosen = cm;
+	spacing = total_tree_length / budget;
+	if (spacing < 1)
+		spacing = 1;
+
+	/*
+	 * Phase 2: Sort tips by unique chain length, longest first.
+	 *
+	 * This ensures the trunk (and other long-lived branches) get
+	 * bitmap coverage before the budget is consumed by many short
+	 * branches.
+	 */
+	CALLOC_ARRAY(order, tips_nr);
+	{
+		uint64_t *sort_keys;
+		CALLOC_ARRAY(sort_keys, tips_nr);
+		for (i = 0; i < tips_nr; i++)
+			sort_keys[i] = ((uint64_t)(UINT32_MAX - tip_chain_lengths[i]) << 32) | i;
+		QSORT(sort_keys, tips_nr, uint64_cmp);
+		for (i = 0; i < tips_nr; i++)
+			order[i] = (unsigned int)(sort_keys[i] & 0xFFFFFFFF);
+		free(sort_keys);
+	}
+
+	/*
+	 * Phase 3: Walk tips longest-first, placing bitmaps at uniform
+	 * spacing measured from the root.
+	 *
+	 * Each tip's first-parent walk builds a chain of unvisited
+	 * commits until it converges on a previously-walked ancestor.
+	 * The ancestor's depth (stored in 'depths' hash table) anchors
+	 * the new chain's depth assignment.
+	 *
+	 * Bitmaps are placed at commits where depth % spacing == 0.
+	 * This creates a coherent global grid: trunk bitmaps are shared
+	 * by all branches forking from trunk.
+	 */
+	depths = kh_init_oid_pos();
+	for (i = 0; i < tips_nr; i++) {
+		unsigned int tip_idx = order[i];
+		struct commit *c = tips[tip_idx];
+		struct commit **chain = NULL;
+		unsigned int chain_len = 0, chain_alloc = 0;
+		unsigned int base_depth = 0;
+		unsigned int j;
+
+		/* Walk to root/convergence, collecting unique chain */
+		while (c) {
+			if (c->object.flags & BITMAP_WALKED)
+				break;
+			c->object.flags |= BITMAP_WALKED;
+			ALLOC_GROW(chain, chain_len + 1, chain_alloc);
+			chain[chain_len++] = c;
+			if (!c->parents)
+				break;
+			parse_commit_or_die(c->parents->item);
+			c = c->parents->item;
+		}
+
+		if (!chain_len) {
+			/*
+			 * This tip converged immediately on an
+			 * already-walked chain. If the tip itself has
+			 * NEEDS_BITMAP, force-select it even if budget
+			 * is exhausted. This handles the
+			 * pack.preferBitmapTips case where specific
+			 * commits need bitmaps regardless of the grid.
+			 */
+			if ((tips[tip_idx]->object.flags & NEEDS_BITMAP) &&
+			    !(tips[tip_idx]->object.flags & BITMAP_SELECTED)) {
+				tips[tip_idx]->object.flags |= BITMAP_SELECTED;
+				selected_nr++;
+			}
+			free(chain);
+			continue;
+		}
+
+		/* Inherit depth from convergence point */
+		if (c && c != chain[chain_len - 1]) {
+			khiter_t pos = kh_get_oid_pos(depths, c->object.oid);
+			if (pos < kh_end(depths))
+				base_depth = kh_value(depths, pos) + 1;
+		}
+
+		/* Assign depths root-to-tip, select at grid boundaries */
+		for (j = chain_len; j > 0 && selected_nr < budget; j--) {
+			unsigned int depth = base_depth + (chain_len - j);
+			int ret;
+			khiter_t pos = kh_put_oid_pos(depths,
+						      chain[j - 1]->object.oid,
+						      &ret);
+			kh_value(depths, pos) = depth;
+
+			if (depth % spacing == 0 &&
+			    !(chain[j - 1]->object.flags & BITMAP_SELECTED)) {
+				chain[j - 1]->object.flags |= BITMAP_SELECTED;
+				selected_nr++;
 			}
 		}
 
-		bitmap_writer_push_commit(writer, chosen, 0);
+		free(chain);
+	}
 
-		i += next + 1;
+	kh_destroy_oid_pos(depths);
+
+	/* Push selected commits in date order (expected by bitmap_builder_init) */
+	QSORT(indexed_commits, indexed_commits_nr, date_compare);
+	for (i = 0; i < indexed_commits_nr; i++) {
+		struct commit *c = indexed_commits[i];
+		if (c->object.flags & BITMAP_SELECTED)
+			bitmap_writer_push_commit(writer, c, 0);
 		display_progress(writer->progress, i);
 	}
 
+	/* Clear flags */
+	for (i = 0; i < indexed_commits_nr; i++)
+		indexed_commits[i]->object.flags &= ~(BITMAP_WALKED | BITMAP_SELECTED);
+
+	trace2_data_intmax("pack-bitmap-write", writer->repo,
+			   "bitmap_tips_nr", tips_nr);
+	trace2_data_intmax("pack-bitmap-write", writer->repo,
+			   "first_parent_tree_length", total_tree_length);
+	trace2_data_intmax("pack-bitmap-write", writer->repo,
+			   "spacing", spacing);
+
+done:
+	free(tips);
+	free(tip_chain_lengths);
+	free(order);
 	stop_progress(&writer->progress);
 
 	select_pseudo_merges(writer);

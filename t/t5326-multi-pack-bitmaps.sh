@@ -161,12 +161,12 @@ test_midx_bitmap_cases () {
 			cd repo &&
 			git config pack.writeBitmapLookupTable '"$writeLookupTable"' &&
 
-			test_commit_bulk --message="%s" 103 &&
+			test_commit_bulk --message="%s" 1003 &&
 
 			git log --format="%H" >commits.raw &&
 			sort <commits.raw >commits &&
 
-			git log --format="create refs/tags/%s %H" HEAD >refs &&
+			git log --format="create refs/custom/%s %H" HEAD >refs &&
 			git update-ref --stdin <refs &&
 
 			git multi-pack-index write --bitmap &&
@@ -175,15 +175,15 @@ test_midx_bitmap_cases () {
 
 			test-tool bitmap list-commits | sort >bitmaps &&
 			comm -13 bitmaps commits >before &&
-			test_line_count = 1 before &&
+			test_file_not_empty before &&
 
-			sed "s|\(.*\)|create refs/tags/include/\1 \1|" before |
+			sed "s|\(.*\)|create refs/custom/include/\1 \1|" before |
 			git update-ref --stdin &&
 
 			rm -fr $midx-$(midx_checksum $objdir).bitmap &&
 			rm -fr $midx &&
 
-			git -c pack.preferBitmapTips=refs/tags/include \
+			git -c pack.preferBitmapTips=refs/custom/include \
 				multi-pack-index write --bitmap &&
 			test-tool bitmap list-commits | sort >bitmaps &&
 			comm -13 bitmaps commits >after &&

@@ -772,7 +772,9 @@ static int add_ref_to_pending(const struct reference *ref, void *cb_data)
 		return 0;
 
 	add_pending_object(revs, object, "");
-	if (bitmap_is_preferred_refname(revs->repo, ref->name))
+	if (bitmap_is_preferred_refname(revs->repo, ref->name) ||
+	    starts_with(ref->name, "refs/heads/") ||
+	    starts_with(ref->name, "refs/tags/"))
 		object->flags |= NEEDS_BITMAP;
 	return 0;
 }
