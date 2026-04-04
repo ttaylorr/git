@@ -77,7 +77,8 @@ static const char rev_list_usage[] =
 "  special purpose:\n"
 "    --bisect\n"
 "    --bisect-vars\n"
-"    --bisect-all"
+"    --bisect-all\n"
+"    --show-bitmap-walk-info"
 ;
 
 static struct progress *progress;
@@ -569,7 +570,7 @@ static int try_bitmap_count(struct rev_info *revs,
 	 */
 	max_count = revs->max_count;
 
-	bitmap_git = prepare_bitmap_walk(revs, filter_provided_objects);
+	bitmap_git = prepare_bitmap_walk(revs, filter_provided_objects, 0);
 	if (!bitmap_git)
 		return -1;
 
@@ -604,7 +605,7 @@ static int try_bitmap_traversal(struct rev_info *revs,
 	if (revs->left_right)
 		return -1;
 
-	bitmap_git = prepare_bitmap_walk(revs, filter_provided_objects);
+	bitmap_git = prepare_bitmap_walk(revs, filter_provided_objects, 0);
 	if (!bitmap_git)
 		return -1;
 
@@ -622,12 +623,40 @@ static int try_bitmap_disk_usage(struct rev_info *revs,
 	if (!show_disk_usage)
 		return -1;
 
-	bitmap_git = prepare_bitmap_walk(revs, filter_provided_objects);
+	bitmap_git = prepare_bitmap_walk(revs, filter_provided_objects, 0);
 	if (!bitmap_git)
 		return -1;
 
 	size_from_bitmap = get_disk_usage_from_bitmap(bitmap_git, revs);
 	print_disk_usage(size_from_bitmap);
+
+	free_bitmap_index(bitmap_git);
+	return 0;
+}
+
+static int show_bitmap_walk_info;
+
+static int try_bitmap_walk_info(struct rev_info *revs,
+				int filter_provided_objects)
+{
+	struct bitmap_index *bitmap_git;
+	struct bitmap_tip_walk_info *info;
+	size_t i, nr;
+
+	if (!show_bitmap_walk_info)
+		return -1;
+
+	bitmap_git = prepare_bitmap_walk(revs, filter_provided_objects, 1);
+	if (!bitmap_git)
+		return -1;
+
+	nr = get_bitmap_tip_walk_info(bitmap_git, &info);
+	for (i = 0; i < nr; i++)
+		printf("%c %"PRIuMAX" %"PRIuMAX" %s\n",
+		       info[i].stop_reason,
+		       (uintmax_t)info[i].commits_walked,
+		       (uintmax_t)info[i].objects_walked,
+		       oid_to_hex(&info[i].oid));
 
 	free_bitmap_index(bitmap_git);
 	return 0;
@@ -744,6 +773,11 @@ int cmd_rev_list(int argc,
 		}
 		if (!strcmp(arg, "--use-bitmap-index")) {
 			use_bitmap_index = 1;
+			continue;
+		}
+		if (!strcmp(arg, "--show-bitmap-walk-info")) {
+			use_bitmap_index = 1;
+			show_bitmap_walk_info = 1;
 			continue;
 		}
 		if (!strcmp(arg, "--test-bitmap")) {
@@ -865,6 +899,8 @@ int cmd_rev_list(int argc,
 						  show_progress, 0);
 
 	if (use_bitmap_index) {
+		if (!try_bitmap_walk_info(&revs, filter_provided_objects))
+			goto cleanup;
 		if (!try_bitmap_count(&revs, filter_provided_objects))
 			goto cleanup;
 		if (!try_bitmap_disk_usage(&revs, filter_provided_objects))

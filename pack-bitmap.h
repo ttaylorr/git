@@ -111,7 +111,19 @@ void for_each_preferred_bitmap_tip(struct repository *repo,
 	"GIT_TEST_PACK_USE_BITMAP_BOUNDARY_TRAVERSAL"
 
 struct bitmap_index *prepare_bitmap_walk(struct rev_info *revs,
-					 int filter_provided_objects);
+					 int filter_provided_objects,
+					 int tip_walk_info);
+
+struct bitmap_tip_walk_info {
+	struct object_id oid;
+	size_t commits_walked;
+	size_t objects_walked;
+	char stop_reason;
+};
+
+void enable_bitmap_tip_walk_info(struct bitmap_index *);
+size_t get_bitmap_tip_walk_info(struct bitmap_index *,
+				struct bitmap_tip_walk_info **info);
 void reuse_partial_packfile_from_bitmap(struct bitmap_index *bitmap_git,
 					struct bitmapped_pack **packs_out,
 					size_t *packs_nr_out,
