@@ -501,7 +501,7 @@ int nth_bitmapped_pack(struct multi_pack_index *m,
 	uint32_t local_pack_int_id = midx_for_pack(&m, pack_int_id);
 
 	if (!m->chunk_bitmapped_packs)
-		return error(_("MIDX does not contain the BTMP chunk"));
+		return -1;
 
 	if (prepare_midx_pack(m, pack_int_id))
 		return error(_("could not load bitmapped pack %"PRIu32), pack_int_id);
