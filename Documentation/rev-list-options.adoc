@@ -362,6 +362,38 @@ ifdef::git-rev-list[]
 	one is available). Note that when traversing with `--objects`,
 	trees and blobs will not have their associated path printed.
 
+`--show-bitmap-walk-info`::
+
+	For each tip given on the command line, show how many commits
+	and objects had to be walked during the fill-in traversal to
+	reach bitmap coverage, along with an annotation indicating how
+	the walk terminated, followed by the object ID of the tip.
+	Implies `--use-bitmap-index`.
++
+The output is one line per tip, in the format:
++
+-----------------------------------------------------------------------
+<stop-reason> SP <commits-walked> SP <objects-walked> SP <oid> LF
+-----------------------------------------------------------------------
++
+Where `<stop-reason>` is one of:
++
+--
+`+`:: The walk terminated by finding a stored bitmap (either directly
+      on the tip, or during the fill-in traversal).
+`*`:: The walk terminated because the tip (or all frontier commits
+      during fill-in) was already covered by accumulated bitmap
+      results from other tips.
+--
++
+When `--objects` is given, `<objects-walked>` includes trees and blobs
+discovered during the fill-in traversal.  Without `--objects`, this
+field is 0.
++
+This is a diagnostic tool for understanding which refs are
+furthest from bitmap coverage and contribute the most to
+traversal cost.
+
 `--progress=<header>`::
 	Show progress reports on stderr as objects are considered. The
 	`<header>` text will be printed with each progress update.

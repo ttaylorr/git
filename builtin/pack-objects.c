@@ -4517,7 +4517,7 @@ static int pack_options_allow_reuse(void)
 
 static int get_object_list_from_bitmap(struct rev_info *revs)
 {
-	if (!(bitmap_git = prepare_bitmap_walk(revs, 0)))
+	if (!(bitmap_git = prepare_bitmap_walk(revs, 0, 0)))
 		return -1;
 
 	/*

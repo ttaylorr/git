@@ -627,6 +627,40 @@ test_expect_success 'left-right count not confused by bitmap-index' '
 	test_cmp expect actual
 '
 
+test_expect_success 'show-bitmap-walk-info outputs all roots' '
+	git rev-list --show-bitmap-walk-info --branches >walk_info &&
+	# every branch tip should appear in the output
+	git rev-list --no-walk --branches >all_tips &&
+	sort all_tips >all_tips_sorted &&
+	awk "{print \$4}" walk_info | sort >walk_info_sorted &&
+	test_cmp all_tips_sorted walk_info_sorted
+'
+
+test_expect_success 'show-bitmap-walk-info counts are non-negative integers' '
+	git rev-list --show-bitmap-walk-info --all >walk_info &&
+	# every line should be "<stop> <commits> <objects> <hex-oid>"
+	! grep -v "^[+*] [0-9][0-9]* [0-9][0-9]* [0-9a-f]\{40,\}$" walk_info
+'
+
+test_expect_success 'show-bitmap-walk-info bitmapped tip reports zero' '
+	bitmapped=$(test-tool bitmap list-commits | head -n1) &&
+	git rev-list --show-bitmap-walk-info $bitmapped >walk_info &&
+	echo "+ 0 0 $bitmapped" >expect &&
+	test_cmp expect walk_info
+'
+
+test_expect_success 'show-bitmap-walk-info --objects shows object counts' '
+	git rev-list --show-bitmap-walk-info --objects --all >walk_info &&
+	# at least one root should have walked some objects
+	awk "\$3 > 0 { found=1 } END { exit !found }" walk_info
+'
+
+test_expect_success 'show-bitmap-walk-info reports fill-in traversed via trace2' '
+	GIT_TRACE2_EVENT=1 git rev-list --show-bitmap-walk-info --all \
+		>/dev/null 2>trace2 &&
+	grep "\"key\":\"bitmap/fill_in_traversed\"" trace2
+'
+
 test_bitmap_cases "pack.writeBitmapLookupTable"
 
 test_expect_success 'verify writing bitmap lookup table when enabled' '

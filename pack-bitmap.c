@@ -141,6 +141,19 @@ struct bitmap_index {
 
 	/* Version of the bitmap index */
 	unsigned int version;
+
+	/*
+	 * Per-tip walk info (populated when tip_walk_info_enabled is set).
+	 *
+	 * Records, for each root processed in find_objects(), whether
+	 * the root had an existing bitmap (or was already covered) and
+	 * how many commits were traversed during fill-in to reach
+	 * bitmap coverage.
+	 */
+	struct bitmap_tip_walk_info *tip_walk_info;
+	size_t tip_walk_info_nr;
+	size_t tip_walk_info_alloc;
+	unsigned tip_walk_info_enabled : 1;
 };
 
 static int pseudo_merges_satisfied_nr;
@@ -149,6 +162,9 @@ static int existing_bitmaps_hits_nr;
 static int existing_bitmaps_misses_nr;
 static int roots_with_bitmaps_nr;
 static int roots_without_bitmaps_nr;
+static size_t fill_in_traversed_nr;
+static size_t fill_in_objects_nr;
+static size_t fill_in_bitmap_hits_nr;
 
 static struct ewah_bitmap *lookup_stored_bitmap(struct stored_bitmap *st)
 {
@@ -1149,11 +1165,13 @@ static void show_object(struct object *object, const char *name, void *data_)
 						  name);
 
 	bitmap_set(data->base, bitmap_pos);
+	fill_in_objects_nr++;
 }
 
 static void show_commit(struct commit *commit UNUSED,
 			void *data UNUSED)
 {
+	fill_in_traversed_nr++;
 }
 
 static unsigned apply_pseudo_merges_for_commit_1(struct bitmap_index *bitmap_git,
@@ -1193,6 +1211,7 @@ static int add_to_include_set(struct bitmap_index *bitmap_git,
 	partial = bitmap_for_commit(bitmap_git, commit);
 	if (partial) {
 		existing_bitmaps_hits_nr++;
+		fill_in_bitmap_hits_nr++;
 
 		bitmap_or_ewah(data->base, partial);
 		return 0;
@@ -1511,6 +1530,27 @@ static void unsatisfy_all_pseudo_merges(struct bitmap_index *bitmap_git)
 		bitmap_git->pseudo_merges.v[i].satisfied = 0;
 }
 
+static void record_tip_walk_info(struct bitmap_index *bitmap_git,
+				 const struct object_id *oid,
+				 size_t commits_walked,
+				 size_t objects_walked,
+				 char stop_reason)
+{
+	struct bitmap_tip_walk_info *entry;
+
+	ALLOC_GROW(bitmap_git->tip_walk_info,
+		   bitmap_git->tip_walk_info_nr + 1,
+		   bitmap_git->tip_walk_info_alloc);
+
+	entry = &bitmap_git->tip_walk_info[bitmap_git->tip_walk_info_nr];
+	oidcpy(&entry->oid, oid);
+	entry->commits_walked = commits_walked;
+	entry->objects_walked = objects_walked;
+	entry->stop_reason = stop_reason;
+
+	bitmap_git->tip_walk_info_nr++;
+}
+
 static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 				   struct rev_info *revs,
 				   struct object_list *roots,
@@ -1554,6 +1594,7 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 	 */
 	while (roots) {
 		struct object *object = roots->item;
+		char stop_reason = 0;
 
 		roots = roots->next;
 
@@ -1561,7 +1602,8 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 			int pos = bitmap_position(bitmap_git, &object->oid);
 			if (pos > 0 && bitmap_get(base, pos)) {
 				object->flags |= SEEN;
-				continue;
+				stop_reason = '*';
+				goto roots_covered;
 			}
 		}
 
@@ -1569,10 +1611,17 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 		    add_commit_to_bitmap(bitmap_git, &base, (struct commit *)object)) {
 			object->flags |= SEEN;
 			existing_bitmaps = 1;
-			continue;
+			stop_reason = '+';
+			goto roots_covered;
 		}
 
 		object_list_insert(object, &not_mapped);
+		continue;
+
+roots_covered:
+		if (bitmap_git->tip_walk_info_enabled)
+			record_tip_walk_info(bitmap_git, &object->oid,
+					    0, 0, stop_reason);
 	}
 
 	/*
@@ -1606,10 +1655,32 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 		if (pos < 0 || base == NULL || !bitmap_get(base, pos)) {
 			object->flags &= ~UNINTERESTING;
 			add_pending_object(revs, object, "");
-			needs_walk = 1;
+
+			if (bitmap_git->tip_walk_info_enabled) {
+				size_t before_commits = fill_in_traversed_nr;
+				size_t before_objects = fill_in_objects_nr;
+				size_t before_bitmap_hits = fill_in_bitmap_hits_nr;
+
+				base = fill_in_bitmap(bitmap_git, revs, base,
+						      seen);
+
+				record_tip_walk_info(bitmap_git, &object->oid,
+						    fill_in_traversed_nr - before_commits,
+						    fill_in_objects_nr - before_objects,
+						    fill_in_bitmap_hits_nr > before_bitmap_hits
+							? '+' : '*');
+
+				reset_revision_walk();
+			} else {
+				needs_walk = 1;
+			}
 
 			roots_without_bitmaps_nr++;
 		} else {
+			if (bitmap_git->tip_walk_info_enabled)
+				record_tip_walk_info(bitmap_git, &object->oid,
+						    0, 0, '*');
+
 			object->flags |= SEEN;
 
 			roots_with_bitmaps_nr++;
@@ -2101,7 +2172,8 @@ out:
 }
 
 struct bitmap_index *prepare_bitmap_walk(struct rev_info *revs,
-					 int filter_provided_objects)
+					 int filter_provided_objects,
+					 int tip_walk_info)
 {
 	unsigned int i;
 	int use_boundary_traversal;
@@ -2129,6 +2201,8 @@ struct bitmap_index *prepare_bitmap_walk(struct rev_info *revs,
 	/* try to open a bitmapped pack, but don't parse it yet
 	 * because we may not need to use it */
 	CALLOC_ARRAY(bitmap_git, 1);
+	if (tip_walk_info)
+		bitmap_git->tip_walk_info_enabled = 1;
 	if (open_bitmap(revs->repo, bitmap_git) < 0)
 		goto cleanup;
 
@@ -2246,6 +2320,8 @@ struct bitmap_index *prepare_bitmap_walk(struct rev_info *revs,
 			   roots_with_bitmaps_nr);
 	trace2_data_intmax("bitmap", repo, "bitmap/roots_without_bitmap",
 			   roots_without_bitmaps_nr);
+	trace2_data_intmax("bitmap", repo, "bitmap/fill_in_traversed",
+			   fill_in_traversed_nr);
 
 	return bitmap_git;
 
@@ -2586,6 +2662,19 @@ int bitmap_walk_contains(struct bitmap_index *bitmap_git,
 
 	idx = bitmap_position(bitmap_git, oid);
 	return idx >= 0 && bitmap_get(bitmap, idx);
+}
+
+void enable_bitmap_tip_walk_info(struct bitmap_index *bitmap_git)
+{
+	bitmap_git->tip_walk_info_enabled = 1;
+}
+
+size_t get_bitmap_tip_walk_info(struct bitmap_index *bitmap_git,
+				struct bitmap_tip_walk_info **info)
+{
+	if (info)
+		*info = bitmap_git->tip_walk_info;
+	return bitmap_git->tip_walk_info_nr;
 }
 
 void traverse_bitmap_commit_list(struct bitmap_index *bitmap_git,
@@ -3193,6 +3282,7 @@ void free_bitmap_index(struct bitmap_index *b)
 		close_midx_revindex(b->midx);
 	}
 	free_pseudo_merge_map(&b->pseudo_merges);
+	free(b->tip_walk_info);
 	free_bitmap_index(b->base);
 	free(b);
 }
