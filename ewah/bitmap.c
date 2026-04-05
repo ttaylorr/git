@@ -101,19 +101,31 @@ struct ewah_bitmap *bitmap_to_ewah(struct bitmap *bitmap)
 
 struct bitmap *ewah_to_bitmap(struct ewah_bitmap *ewah)
 {
-	struct bitmap *bitmap = bitmap_new();
-	struct ewah_iterator it;
-	eword_t blowup;
-	size_t i = 0;
+	struct bitmap *bitmap;
+	size_t final_size = (ewah->bit_size / BITS_IN_EWORD) + 1;
+	size_t pos = 0;
+	struct ewah_block_iterator it;
+	struct ewah_block blk;
 
-	ewah_iterator_init(&it, ewah);
+	bitmap = bitmap_word_alloc(final_size);
 
-	while (ewah_iterator_next(&blowup, &it)) {
-		ALLOC_GROW(bitmap->words, i + 1, bitmap->word_alloc);
-		bitmap->words[i++] = blowup;
+	ewah_block_iterator_init(&it, ewah);
+	while (ewah_block_iterator_next(&blk, &it)) {
+		switch (blk.type) {
+		case EWAH_BLOCK_RUN:
+			if (blk.u.run.bit)
+				memset(bitmap->words + pos, 0xFF,
+				       blk.u.run.len * sizeof(eword_t));
+			pos += blk.u.run.len;
+			break;
+		case EWAH_BLOCK_LITERAL:
+			memcpy(bitmap->words + pos, blk.u.literal.words,
+			       blk.u.literal.nr * sizeof(eword_t));
+			pos += blk.u.literal.nr;
+			break;
+		}
 	}
 
-	bitmap->word_alloc = i;
 	return bitmap;
 }
 
@@ -139,44 +151,35 @@ void bitmap_or(struct bitmap *self, const struct bitmap *other)
 
 int ewah_bitmap_is_subset(struct ewah_bitmap *self, struct bitmap *other)
 {
-	struct ewah_iterator it;
-	eword_t word;
-	size_t i;
+	size_t pos = 0;
+	struct ewah_block_iterator it;
+	struct ewah_block blk;
 
-	ewah_iterator_init(&it, self);
+	ewah_block_iterator_init(&it, self);
+	while (ewah_block_iterator_next(&blk, &it)) {
+		size_t j;
 
-	for (i = 0; i < other->word_alloc; i++) {
-		if (!ewah_iterator_next(&word, &it)) {
-			/*
-			 * If we reached the end of `self`, and haven't
-			 * rejected `self` as a possible subset of
-			 * `other` yet, then we are done and `self` is
-			 * indeed a subset of `other`.
-			 */
-			return 1;
-		}
-		if (word & ~other->words[i]) {
-			/*
-			 * Otherwise, compare the next two pairs of
-			 * words. If the word from `self` has bit(s) not
-			 * in the word from `other`, `self` is not a
-			 * subset of `other`.
-			 */
-			return 0;
+		switch (blk.type) {
+		case EWAH_BLOCK_RUN:
+			if (blk.u.run.bit) {
+				for (j = 0; j < blk.u.run.len; j++, pos++)
+					if (pos >= other->word_alloc ||
+					    ~other->words[pos])
+						return 0;
+			} else {
+				pos += blk.u.run.len;
+			}
+			break;
+		case EWAH_BLOCK_LITERAL:
+			for (j = 0; j < blk.u.literal.nr; j++, pos++)
+				if (blk.u.literal.words[j] &
+				    ~(pos < other->word_alloc ?
+				      other->words[pos] : 0))
+					return 0;
+			break;
 		}
 	}
 
-	/*
-	 * If we got to this point, there may be zero or more words
-	 * remaining in `self`, with no remaining words left in `other`.
-	 * If there are any bits set in the remaining word(s) in `self`,
-	 * then `self` is not a subset of `other`.
-	 */
-	while (ewah_iterator_next(&word, &it))
-		if (word)
-			return 0;
-
-	/* `self` is definitely a subset of `other` */
 	return 1;
 }
 
@@ -184,9 +187,9 @@ void bitmap_or_ewah(struct bitmap *self, struct ewah_bitmap *other)
 {
 	size_t original_size = self->word_alloc;
 	size_t other_final = (other->bit_size / BITS_IN_EWORD) + 1;
-	size_t i = 0;
-	struct ewah_iterator it;
-	eword_t word;
+	size_t pos = 0;
+	struct ewah_block_iterator it;
+	struct ewah_block blk;
 
 	if (self->word_alloc < other_final) {
 		self->word_alloc = other_final;
@@ -195,10 +198,24 @@ void bitmap_or_ewah(struct bitmap *self, struct ewah_bitmap *other)
 			      self->word_alloc - original_size);
 	}
 
-	ewah_iterator_init(&it, other);
+	ewah_block_iterator_init(&it, other);
+	while (ewah_block_iterator_next(&blk, &it)) {
+		size_t j;
 
-	while (ewah_iterator_next(&word, &it))
-		self->words[i++] |= word;
+		switch (blk.type) {
+		case EWAH_BLOCK_RUN:
+			if (blk.u.run.bit)
+				memset(self->words + pos, 0xFF,
+				       blk.u.run.len * sizeof(eword_t));
+			pos += blk.u.run.len;
+			break;
+		case EWAH_BLOCK_LITERAL:
+			for (j = 0; j < blk.u.literal.nr; j++)
+				self->words[pos + j] |= blk.u.literal.words[j];
+			pos += blk.u.literal.nr;
+			break;
+		}
+	}
 }
 
 size_t bitmap_popcount(struct bitmap *self)
@@ -213,14 +230,26 @@ size_t bitmap_popcount(struct bitmap *self)
 
 size_t ewah_bitmap_popcount(struct ewah_bitmap *self)
 {
-	struct ewah_iterator it;
-	eword_t word;
+	struct ewah_block_iterator it;
+	struct ewah_block blk;
 	size_t count = 0;
 
-	ewah_iterator_init(&it, self);
-
-	while (ewah_iterator_next(&word, &it))
-		count += ewah_bit_popcount64(word);
+	ewah_block_iterator_init(&it, self);
+	while (ewah_block_iterator_next(&blk, &it)) {
+		switch (blk.type) {
+		case EWAH_BLOCK_RUN:
+			if (blk.u.run.bit)
+				count += blk.u.run.len * BITS_IN_EWORD;
+			break;
+		case EWAH_BLOCK_LITERAL:
+		{
+			size_t j;
+			for (j = 0; j < blk.u.literal.nr; j++)
+				count += ewah_bit_popcount64(blk.u.literal.words[j]);
+			break;
+		}
+		}
+	}
 
 	return count;
 }
@@ -262,18 +291,36 @@ int bitmap_equals(struct bitmap *self, struct bitmap *other)
 
 int bitmap_equals_ewah(struct bitmap *self, struct ewah_bitmap *other)
 {
-	struct ewah_iterator it;
-	eword_t word;
-	size_t i = 0;
+	struct ewah_block_iterator it;
+	struct ewah_block blk;
+	size_t pos = 0;
 
-	ewah_iterator_init(&it, other);
+	ewah_block_iterator_init(&it, other);
+	while (ewah_block_iterator_next(&blk, &it)) {
+		size_t j;
 
-	while (ewah_iterator_next(&word, &it))
-		if (word != (i < self->word_alloc ? self->words[i++] : 0))
-			return 0;
+		switch (blk.type) {
+		case EWAH_BLOCK_RUN:
+		{
+			eword_t expected = blk.u.run.bit ? (eword_t)(~0) : 0;
+			for (j = 0; j < blk.u.run.len; j++, pos++)
+				if ((pos < self->word_alloc ?
+				     self->words[pos] : 0) != expected)
+					return 0;
+			break;
+		}
+		case EWAH_BLOCK_LITERAL:
+			for (j = 0; j < blk.u.literal.nr; j++, pos++)
+				if ((pos < self->word_alloc ?
+				     self->words[pos] : 0) !=
+				    blk.u.literal.words[j])
+					return 0;
+			break;
+		}
+	}
 
-	for (; i < self->word_alloc; i++)
-		if (self->words[i])
+	for (; pos < self->word_alloc; pos++)
+		if (self->words[pos])
 			return 0;
 
 	return 1;
