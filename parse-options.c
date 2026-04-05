@@ -127,6 +127,13 @@ static int signed_int_fits(intmax_t value, size_t precision)
 	return lower_bound <= value && value <= upper_bound;
 }
 
+static int unsigned_int_fits(uintmax_t value, size_t precision)
+{
+	size_t bits = precision * CHAR_BIT;
+	uintmax_t upper_bound = UINTMAX_MAX >> (bitsizeof(uintmax_t) - bits);
+	return value <= upper_bound;
+}
+
 static enum parse_opt_result do_get_value(struct parse_opt_ctx_t *p,
 					  const struct option *opt,
 					  enum opt_parsed flags,
@@ -279,11 +286,10 @@ static enum parse_opt_result do_get_value(struct parse_opt_ctx_t *p,
 
 			return error(_("%s expects an integer value with an optional k/m/g suffix"),
 				     optname(opt, flags));
-		}
-
-		if (value < lower_bound)
+		} else if (value < lower_bound) {
 			return error(_("value %s for %s not in range [%"PRIdMAX",%"PRIdMAX"]"),
 				     arg, optname(opt, flags), (intmax_t)lower_bound, (intmax_t)upper_bound);
+		}
 
 		return set_int_value(opt, flags, value);
 	}
@@ -691,6 +697,16 @@ static void parse_options_check(const struct option *opts)
 				optbug(opts, "OPTION_CALLBACK needs one callback");
 			else if (opts->callback && opts->ll_callback)
 				optbug(opts, "OPTION_CALLBACK can't have two callbacks");
+			break;
+		case OPTION_INTEGER:
+			if ((opts->flags & PARSE_OPT_OPTARG) &&
+			    !signed_int_fits(opts->defval, opts->precision))
+				optbug(opts, "OPTARG default value exceeds integer precision");
+			break;
+		case OPTION_UNSIGNED:
+			if ((opts->flags & PARSE_OPT_OPTARG) &&
+			    !unsigned_int_fits(opts->defval, opts->precision))
+				optbug(opts, "OPTARG default value exceeds unsigned precision");
 			break;
 		case OPTION_LOWLEVEL_CALLBACK:
 			if (!opts->ll_callback)
