@@ -23,6 +23,7 @@ struct odb_source;
 #define MIDX_CHUNKID_PACKNAMES 0x504e414d /* "PNAM" */
 #define MIDX_CHUNKID_BITMAPPEDPACKS 0x42544d50 /* "BTMP" */
 #define MIDX_CHUNKID_OIDFANOUT 0x4f494446 /* "OIDF" */
+#define MIDX_CHUNKID_OIDFANOUT2 0x4f444632 /* "ODF2" */
 #define MIDX_CHUNKID_OIDLOOKUP 0x4f49444c /* "OIDL" */
 #define MIDX_CHUNKID_OBJECTOFFSETS 0x4f4f4646 /* "OOFF" */
 #define MIDX_CHUNKID_LARGEOFFSETS 0x4c4f4646 /* "LOFF" */
@@ -61,6 +62,8 @@ struct multi_pack_index {
 	const uint32_t *chunk_bitmapped_packs;
 	size_t chunk_bitmapped_packs_len;
 	const uint32_t *chunk_oid_fanout;
+	const unsigned char *chunk_oid_fanout2;
+	size_t chunk_oid_fanout2_len;
 	const unsigned char *chunk_oid_lookup;
 	const unsigned char *chunk_object_offsets;
 	const unsigned char *chunk_large_offsets;

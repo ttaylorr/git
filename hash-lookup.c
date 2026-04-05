@@ -104,14 +104,10 @@ int oid_pos(const struct object_id *oid, const void *table, size_t nr,
 	return index_pos_to_insert_pos(lo);
 }
 
-int bsearch_hash(const unsigned char *hash, const uint32_t *fanout_nbo,
-		 const unsigned char *table, size_t stride, uint32_t *result)
+int bsearch_hash_range(const unsigned char *hash, uint32_t lo, uint32_t hi,
+		       const unsigned char *table, size_t stride,
+		       uint32_t *result)
 {
-	uint32_t hi, lo;
-
-	hi = ntohl(fanout_nbo[*hash]);
-	lo = ((*hash == 0x0) ? 0 : ntohl(fanout_nbo[*hash - 1]));
-
 	while (lo < hi) {
 		unsigned mi = lo + (hi - lo) / 2;
 		int cmp = hashcmp(table + mi * stride, hash,
@@ -131,4 +127,15 @@ int bsearch_hash(const unsigned char *hash, const uint32_t *fanout_nbo,
 	if (result)
 		*result = lo;
 	return 0;
+}
+
+int bsearch_hash(const unsigned char *hash, const uint32_t *fanout_nbo,
+		 const unsigned char *table, size_t stride, uint32_t *result)
+{
+	uint32_t hi, lo;
+
+	hi = ntohl(fanout_nbo[*hash]);
+	lo = ((*hash == 0x0) ? 0 : ntohl(fanout_nbo[*hash - 1]));
+
+	return bsearch_hash_range(hash, lo, hi, table, stride, result);
 }

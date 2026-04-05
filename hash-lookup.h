@@ -29,4 +29,8 @@ int oid_pos(const struct object_id *oid,
  */
 int bsearch_hash(const unsigned char *hash, const uint32_t *fanout_nbo,
 		 const unsigned char *table, size_t stride, uint32_t *result);
+
+int bsearch_hash_range(const unsigned char *hash, uint32_t lo, uint32_t hi,
+		       const unsigned char *table, size_t stride,
+		       uint32_t *result);
 #endif

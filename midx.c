@@ -179,6 +179,8 @@ static struct multi_pack_index *load_multi_pack_index_one(struct odb_source *sou
 		die(_("multi-pack-index required pack-name chunk missing or corrupted"));
 	if (read_chunk(cf, MIDX_CHUNKID_OIDFANOUT, midx_read_oid_fanout, m))
 		die(_("multi-pack-index required OID fanout chunk missing or corrupted"));
+	pair_chunk(cf, MIDX_CHUNKID_OIDFANOUT2,
+		   &m->chunk_oid_fanout2, &m->chunk_oid_fanout2_len);
 	if (read_chunk(cf, MIDX_CHUNKID_OIDLOOKUP, midx_read_oid_lookup, m))
 		die(_("multi-pack-index required OID lookup chunk missing or corrupted"));
 	if (read_chunk(cf, MIDX_CHUNKID_OBJECTOFFSETS, midx_read_object_offsets, m))
@@ -524,10 +526,23 @@ int nth_bitmapped_pack(struct multi_pack_index *m,
 int bsearch_one_midx(const struct object_id *oid, struct multi_pack_index *m,
 		     uint32_t *result)
 {
-	int ret = bsearch_hash(oid->hash, m->chunk_oid_fanout,
-			       m->chunk_oid_lookup,
-			       m->source->odb->repo->hash_algo->rawsz,
-			       result);
+	int ret;
+	size_t stride = m->source->odb->repo->hash_algo->rawsz;
+
+	if (m->chunk_oid_fanout2) {
+		uint32_t hi, lo;
+		uint32_t prefix = ((unsigned)oid->hash[0] << 8) | oid->hash[1];
+
+		hi = get_be32(m->chunk_oid_fanout2 + prefix * sizeof(uint32_t));
+		lo = prefix ? get_be32(m->chunk_oid_fanout2 + (prefix - 1) * sizeof(uint32_t)) : 0;
+
+		ret = bsearch_hash_range(oid->hash, lo, hi,
+					 m->chunk_oid_lookup, stride, result);
+	} else {
+		ret = bsearch_hash(oid->hash, m->chunk_oid_fanout,
+				   m->chunk_oid_lookup, stride, result);
+	}
+
 	if (result)
 		*result += m->num_objects_in_base;
 	return ret;

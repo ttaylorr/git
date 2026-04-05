@@ -21,6 +21,7 @@
 #define PACK_EXPIRED UINT_MAX
 #define BITMAP_POS_UNKNOWN (~((uint32_t)0))
 #define MIDX_CHUNK_FANOUT_SIZE (sizeof(uint32_t) * 256)
+#define MIDX_CHUNK_FANOUT2_SIZE (sizeof(uint32_t) * 65536)
 #define MIDX_CHUNK_LARGE_OFFSET_WIDTH (sizeof(uint64_t))
 #define NO_PREFERRED_PACK (~((uint32_t)0))
 
@@ -529,6 +530,27 @@ static int write_midx_oid_fanout(struct hashfile *f,
 
 		hashwrite_be32(f, count);
 		list = next;
+	}
+
+	return 0;
+}
+
+static int write_midx_oid_fanout2(struct hashfile *f, void *data)
+{
+	struct write_midx_context *ctx = data;
+	struct pack_midx_entry *list = ctx->entries;
+	struct pack_midx_entry *last = ctx->entries + ctx->entries_nr;
+	uint32_t count = 0;
+	uint32_t i;
+
+	for (i = 0; i < 65536; i++) {
+		while (list < last &&
+		       list->oid.hash[0] == (i >> 8) &&
+		       list->oid.hash[1] == (i & 0xff)) {
+			count++;
+			list++;
+		}
+		hashwrite_be32(f, count);
 	}
 
 	return 0;
@@ -1684,6 +1706,9 @@ static int write_midx_internal(struct write_midx_opts *opts)
 			  bitmapped_packs_concat_len,
 			  write_midx_bitmapped_packs);
 	}
+
+	add_chunk(cf, MIDX_CHUNKID_OIDFANOUT2, MIDX_CHUNK_FANOUT2_SIZE,
+		  write_midx_oid_fanout2);
 
 	write_midx_header(r->hash_algo, f, get_num_chunks(cf),
 			  ctx.nr - dropped_packs, ctx.version);
