@@ -527,7 +527,7 @@ int bsearch_one_midx(const struct object_id *oid, struct multi_pack_index *m,
 		     uint32_t *result)
 {
 	int ret;
-	size_t stride = m->source->odb->repo->hash_algo->rawsz;
+	const struct git_hash_algo *algop = m->source->odb->repo->hash_algo;
 
 	if (m->chunk_oid_fanout2) {
 		uint32_t hi, lo;
@@ -537,10 +537,12 @@ int bsearch_one_midx(const struct object_id *oid, struct multi_pack_index *m,
 		lo = prefix ? get_be32(m->chunk_oid_fanout2 + (prefix - 1) * sizeof(uint32_t)) : 0;
 
 		ret = bsearch_hash_range(oid->hash, lo, hi,
-					 m->chunk_oid_lookup, stride, result);
+					 m->chunk_oid_lookup, algop->rawsz,
+					 algop, result);
 	} else {
 		ret = bsearch_hash(oid->hash, m->chunk_oid_fanout,
-				   m->chunk_oid_lookup, stride, result);
+				   m->chunk_oid_lookup, algop->rawsz,
+				   result);
 	}
 
 	if (result)
