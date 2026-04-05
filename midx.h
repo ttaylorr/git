@@ -27,6 +27,7 @@ struct odb_source;
 #define MIDX_CHUNKID_OBJECTOFFSETS 0x4f4f4646 /* "OOFF" */
 #define MIDX_CHUNKID_LARGEOFFSETS 0x4c4f4646 /* "LOFF" */
 #define MIDX_CHUNKID_REVINDEX 0x52494458 /* "RIDX" */
+#define MIDX_CHUNKID_REVINDEX_POS 0x52504f53 /* "RPOS" */
 #define MIDX_CHUNKID_BASE 0x42415345 /* "BASE" */
 #define MIDX_CHUNK_OFFSET_WIDTH (2 * sizeof(uint32_t))
 #define MIDX_LARGE_OFFSET_NEEDED 0x80000000
@@ -66,6 +67,8 @@ struct multi_pack_index {
 	size_t chunk_large_offsets_len;
 	const unsigned char *chunk_revindex;
 	size_t chunk_revindex_len;
+	const unsigned char *chunk_revindex_pos;
+	size_t chunk_revindex_pos_len;
 
 	struct multi_pack_index *base_midx;
 	uint32_t num_objects_in_base;

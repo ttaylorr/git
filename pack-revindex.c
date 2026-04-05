@@ -630,6 +630,16 @@ int midx_to_pack_pos(struct multi_pack_index *m, uint32_t at, uint32_t *pos)
 	if (m->num_objects + m->num_objects_in_base <= at)
 		BUG("midx_to_pack_pos: out-of-bounds object at %"PRIu32, at);
 
+	/*
+	 * If the RPOS chunk is available, the forward mapping from
+	 * MIDX position to pseudo-pack position is a direct lookup.
+	 */
+	if (m->chunk_revindex_pos) {
+		*pos = get_be32(m->chunk_revindex_pos +
+				(at - m->num_objects_in_base) * sizeof(uint32_t));
+		return 0;
+	}
+
 	key.pack = nth_midxed_pack_int_id(m, at);
 	key.offset = nth_midxed_offset(m, at);
 	key.midx = m;

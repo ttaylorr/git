@@ -636,6 +636,35 @@ static int write_midx_revindex(struct hashfile *f,
 	return 0;
 }
 
+static int write_midx_revindex_pos(struct hashfile *f,
+				   void *data)
+{
+	struct write_midx_context *ctx = data;
+	uint32_t i, nr_base;
+	uint32_t *inverse;
+
+	if (ctx->incremental && ctx->base_midx)
+		nr_base = ctx->base_midx->num_objects +
+			ctx->base_midx->num_objects_in_base;
+	else
+		nr_base = 0;
+
+	/*
+	 * Compute the inverse of pack_order: for each MIDX position,
+	 * store its pseudo-pack position. pack_order[pseudo_pos] = midx_pos,
+	 * so inverse[midx_pos] = pseudo_pos.
+	 */
+	CALLOC_ARRAY(inverse, ctx->entries_nr);
+	for (i = 0; i < ctx->entries_nr; i++)
+		inverse[ctx->pack_order[i]] = i + nr_base;
+
+	for (i = 0; i < ctx->entries_nr; i++)
+		hashwrite_be32(f, inverse[i]);
+
+	free(inverse);
+	return 0;
+}
+
 struct midx_pack_order_data {
 	uint32_t nr;
 	uint32_t pack;
@@ -1648,6 +1677,9 @@ static int write_midx_internal(struct write_midx_opts *opts)
 		add_chunk(cf, MIDX_CHUNKID_REVINDEX,
 			  st_mult(ctx.entries_nr, sizeof(uint32_t)),
 			  write_midx_revindex);
+		add_chunk(cf, MIDX_CHUNKID_REVINDEX_POS,
+			  st_mult(ctx.entries_nr, sizeof(uint32_t)),
+			  write_midx_revindex_pos);
 		add_chunk(cf, MIDX_CHUNKID_BITMAPPEDPACKS,
 			  bitmapped_packs_concat_len,
 			  write_midx_bitmapped_packs);
