@@ -148,6 +148,61 @@ void ewah_iterator_init(struct ewah_iterator *it, struct ewah_bitmap *parent);
  */
 int ewah_iterator_next(eword_t *next, struct ewah_iterator *it);
 
+/*
+ * Block-level iterator for EWAH bitmaps.
+ *
+ * Instead of yielding one decompressed word at a time, this yields
+ * entire EWAH blocks — either a compressed run (all-zeros or all-ones)
+ * or a sequence of literal words.
+ *
+ * E.g.
+ *
+ *		struct ewah_block_iterator bit;
+ *		struct ewah_block blk;
+ *
+ *		ewah_block_iterator_init(&bit, bitmap);
+ *		while (ewah_block_iterator_next(&blk, &bit)) {
+ *			switch (blk.type) {
+ *			case EWAH_BLOCK_RUN:
+ *				// blk.u.run.len words, all value blk.u.run.bit
+ *				break;
+ *			case EWAH_BLOCK_LITERAL:
+ *				// blk.u.literal.words[0..blk.u.literal.nr)
+ *				break;
+ *			}
+ *		}
+ */
+struct ewah_block {
+	enum {
+		EWAH_BLOCK_RUN,
+		EWAH_BLOCK_LITERAL,
+	} type;
+	union {
+		struct {
+			eword_t len;	/* number of compressed words */
+			unsigned bit:1;	/* 0 or 1 */
+		} run;
+		struct {
+			const eword_t *words;	/* pointer into EWAH buffer */
+			eword_t nr;		/* number of literal words */
+		} literal;
+	} u;
+};
+
+struct ewah_block_iterator {
+	const eword_t *buffer;
+	size_t buffer_size;
+	size_t ptr;
+	/* pending literal block from the current RLW */
+	const eword_t *pending_lit;
+	eword_t pending_lw;
+};
+
+void ewah_block_iterator_init(struct ewah_block_iterator *it,
+			      struct ewah_bitmap *parent);
+int ewah_block_iterator_next(struct ewah_block *blk,
+			     struct ewah_block_iterator *it);
+
 struct ewah_or_iterator {
 	struct ewah_iterator *its;
 	size_t nr;

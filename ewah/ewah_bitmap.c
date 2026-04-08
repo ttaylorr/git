@@ -371,6 +371,69 @@ void ewah_iterator_init(struct ewah_iterator *it, struct ewah_bitmap *parent)
 		read_new_rlw(it);
 }
 
+void ewah_block_iterator_init(struct ewah_block_iterator *it,
+			      struct ewah_bitmap *parent)
+{
+	it->buffer = parent->buffer;
+	it->buffer_size = parent->buffer_size;
+	it->ptr = 0;
+	it->pending_lit = NULL;
+	it->pending_lw = 0;
+}
+
+int ewah_block_iterator_next(struct ewah_block *blk,
+			     struct ewah_block_iterator *it)
+{
+	for (;;) {
+		const eword_t *rlw;
+		eword_t rl, lw;
+
+		/* Yield pending literal block from previous RLW */
+		if (it->pending_lw) {
+			blk->type = EWAH_BLOCK_LITERAL;
+			blk->u.literal.words = it->pending_lit;
+			blk->u.literal.nr = it->pending_lw;
+			it->ptr += it->pending_lw;
+			it->pending_lw = 0;
+			return 1;
+		}
+
+		if (it->ptr >= it->buffer_size)
+			return 0;
+
+		rlw = &it->buffer[it->ptr];
+		rl = rlw_get_running_len(rlw);
+		lw = rlw_get_literal_words(rlw);
+
+		/* Stash the literal portion for the next call */
+		it->pending_lit = &it->buffer[it->ptr + 1];
+		it->pending_lw = lw;
+
+		if (rl) {
+			/* Yield the run block; literals come next call */
+			blk->type = EWAH_BLOCK_RUN;
+			blk->u.run.len = rl;
+			blk->u.run.bit = rlw_get_run_bit(rlw);
+			it->ptr++;
+			return 1;
+		}
+
+		if (lw) {
+			/* No run — yield the literal block directly */
+			blk->type = EWAH_BLOCK_LITERAL;
+			blk->u.literal.words = it->pending_lit;
+			blk->u.literal.nr = lw;
+			it->ptr += 1 + lw;
+			it->pending_lw = 0;
+			return 1;
+		}
+
+		/* Empty RLW — skip and try next */
+		it->ptr++;
+		it->pending_lw = 0;
+	}
+}
+
 void ewah_or_iterator_init(struct ewah_or_iterator *it,
 			   struct ewah_bitmap **parents, size_t nr)
 {
