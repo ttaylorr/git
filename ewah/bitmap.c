@@ -184,9 +184,9 @@ void bitmap_or_ewah(struct bitmap *self, struct ewah_bitmap *other)
 {
 	size_t original_size = self->word_alloc;
 	size_t other_final = (other->bit_size / BITS_IN_EWORD) + 1;
-	size_t i = 0;
-	struct ewah_iterator it;
-	eword_t word;
+	size_t pos = 0;
+	struct ewah_block_iterator it;
+	struct ewah_block blk;
 
 	if (self->word_alloc < other_final) {
 		self->word_alloc = other_final;
@@ -195,10 +195,24 @@ void bitmap_or_ewah(struct bitmap *self, struct ewah_bitmap *other)
 			      self->word_alloc - original_size);
 	}
 
-	ewah_iterator_init(&it, other);
+	ewah_block_iterator_init(&it, other);
+	while (ewah_block_iterator_next(&blk, &it)) {
+		size_t j;
 
-	while (ewah_iterator_next(&word, &it))
-		self->words[i++] |= word;
+		switch (blk.type) {
+		case EWAH_BLOCK_RUN:
+			if (blk.u.run.bit)
+				memset(self->words + pos, 0xFF,
+				       blk.u.run.len * sizeof(eword_t));
+			pos += blk.u.run.len;
+			break;
+		case EWAH_BLOCK_LITERAL:
+			for (j = 0; j < blk.u.literal.nr; j++)
+				self->words[pos + j] |= blk.u.literal.words[j];
+			pos += blk.u.literal.nr;
+			break;
+		}
+	}
 }
 
 size_t bitmap_popcount(struct bitmap *self)
