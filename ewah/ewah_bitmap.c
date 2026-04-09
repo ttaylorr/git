@@ -434,37 +434,137 @@ int ewah_block_iterator_next(struct ewah_block *blk,
 	}
 }
 
+static size_t ewah_or_block_remaining(const struct ewah_block *blk, size_t off)
+{
+	size_t len = blk->type == EWAH_BLOCK_RUN
+		? blk->u.run.len : blk->u.literal.nr;
+	return len > off ? len - off : 0;
+}
+
+static int ewah_or_iterator_refill(struct ewah_or_iterator *it)
+{
+	size_t i, min_remaining = SIZE_MAX;
+	int any_alive = 0, any_one_run = 0, all_runs = 1;
+
+	for (i = 0; i < it->nr; i++) {
+		size_t rem;
+
+		if (it->exhausted[i])
+			continue;
+
+		rem = ewah_or_block_remaining(&it->blks[i], it->blk_off[i]);
+		if (!rem) {
+			it->blk_off[i] = 0;
+			if (!ewah_block_iterator_next(&it->blks[i], &it->its[i])) {
+				it->exhausted[i] = 1;
+				continue;
+			}
+			rem = ewah_or_block_remaining(&it->blks[i], 0);
+		}
+
+		any_alive = 1;
+		if (rem < min_remaining)
+			min_remaining = rem;
+		if (it->blks[i].type == EWAH_BLOCK_RUN && it->blks[i].u.run.bit)
+			any_one_run = 1;
+		if (it->blks[i].type != EWAH_BLOCK_RUN)
+			all_runs = 0;
+	}
+
+	if (!any_alive)
+		return 0;
+
+	if (any_one_run) {
+		it->run_remaining = min_remaining;
+		it->run_word = ~(eword_t)0;
+		for (i = 0; i < it->nr; i++)
+			if (!it->exhausted[i])
+				it->blk_off[i] += min_remaining;
+		return 1;
+	}
+
+	if (all_runs) {
+		it->run_remaining = min_remaining;
+		it->run_word = 0;
+		for (i = 0; i < it->nr; i++)
+			if (!it->exhausted[i])
+				it->blk_off[i] += min_remaining;
+		return 1;
+	}
+
+	/* Mix of literals and zero-runs — OR into scratch buffer */
+	ALLOC_GROW(it->or_buf, min_remaining, it->or_nr);
+	memset(it->or_buf, 0, min_remaining * sizeof(eword_t));
+
+	for (i = 0; i < it->nr; i++) {
+		size_t j;
+
+		if (it->exhausted[i])
+			continue;
+		if (it->blks[i].type == EWAH_BLOCK_RUN) {
+			it->blk_off[i] += min_remaining;
+			continue;
+		}
+
+		for (j = 0; j < min_remaining; j++)
+			it->or_buf[j] |= it->blks[i].u.literal.words[it->blk_off[i] + j];
+		it->blk_off[i] += min_remaining;
+	}
+
+	it->or_pos = 0;
+	it->or_nr = min_remaining;
+	it->run_remaining = 0;
+	return 1;
+}
+
 void ewah_or_iterator_init(struct ewah_or_iterator *it,
 			   struct ewah_bitmap **parents, size_t nr)
 {
 	size_t i;
 
 	memset(it, 0, sizeof(*it));
+	it->nr = nr;
 
 	ALLOC_ARRAY(it->its, nr);
-	for (i = 0; i < nr; i++)
-		ewah_iterator_init(&it->its[it->nr++], parents[i]);
+	ALLOC_ARRAY(it->blks, nr);
+	CALLOC_ARRAY(it->blk_off, nr);
+	CALLOC_ARRAY(it->exhausted, nr);
+
+	for (i = 0; i < nr; i++) {
+		ewah_block_iterator_init(&it->its[i], parents[i]);
+		it->blk_off[i] = 0;
+		if (!ewah_block_iterator_next(&it->blks[i], &it->its[i]))
+			it->exhausted[i] = 1;
+	}
 }
 
 int ewah_or_iterator_next(eword_t *next, struct ewah_or_iterator *it)
 {
-	eword_t buf, out = 0;
-	size_t i;
-	int ret = 0;
+	if (it->run_remaining) {
+		*next = it->run_word;
+		it->run_remaining--;
+		return 1;
+	}
 
-	for (i = 0; i < it->nr; i++)
-		if (ewah_iterator_next(&buf, &it->its[i])) {
-			out |= buf;
-			ret = 1;
-		}
+	if (it->or_pos < it->or_nr) {
+		*next = it->or_buf[it->or_pos++];
+		return 1;
+	}
 
-	*next = out;
-	return ret;
+	if (!ewah_or_iterator_refill(it))
+		return 0;
+
+	/* Refill set up either a run or a buffer — recurse once */
+	return ewah_or_iterator_next(next, it);
 }
 
 void ewah_or_iterator_release(struct ewah_or_iterator *it)
 {
 	free(it->its);
+	free(it->blks);
+	free(it->blk_off);
+	free(it->exhausted);
+	free(it->or_buf);
 }
 
 void ewah_xor(

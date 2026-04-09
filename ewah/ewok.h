@@ -204,8 +204,20 @@ int ewah_block_iterator_next(struct ewah_block *blk,
 			     struct ewah_block_iterator *it);
 
 struct ewah_or_iterator {
-	struct ewah_iterator *its;
+	struct ewah_block_iterator *its;
+	struct ewah_block *blks;
+	size_t *blk_off;
+	int *exhausted;
 	size_t nr;
+
+	/* Cached run: when >0, yield run_word without consulting inputs */
+	size_t run_remaining;
+	eword_t run_word;
+
+	/* Scratch buffer for OR'ing literal words */
+	eword_t *or_buf;
+	size_t or_pos;
+	size_t or_nr;
 };
 
 void ewah_or_iterator_init(struct ewah_or_iterator *it,
