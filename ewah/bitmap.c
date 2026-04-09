@@ -300,18 +300,36 @@ int bitmap_equals(struct bitmap *self, struct bitmap *other)
 
 int bitmap_equals_ewah(struct bitmap *self, struct ewah_bitmap *other)
 {
-	struct ewah_iterator it;
-	eword_t word;
-	size_t i = 0;
+	struct ewah_block_iterator it;
+	struct ewah_block blk;
+	size_t pos = 0;
 
-	ewah_iterator_init(&it, other);
+	ewah_block_iterator_init(&it, other);
+	while (ewah_block_iterator_next(&blk, &it)) {
+		size_t j;
 
-	while (ewah_iterator_next(&word, &it))
-		if (word != (i < self->word_alloc ? self->words[i++] : 0))
-			return 0;
+		switch (blk.type) {
+		case EWAH_BLOCK_RUN:
+		{
+			eword_t expected = blk.u.run.bit ? ~(eword_t)0 : 0;
+			for (j = 0; j < blk.u.run.len; j++, pos++)
+				if ((pos < self->word_alloc
+				     ? self->words[pos] : 0) != expected)
+					return 0;
+			break;
+		}
+		case EWAH_BLOCK_LITERAL:
+			for (j = 0; j < blk.u.literal.nr; j++, pos++)
+				if ((pos < self->word_alloc
+				     ? self->words[pos] : 0) !=
+				    blk.u.literal.words[j])
+					return 0;
+			break;
+		}
+	}
 
-	for (; i < self->word_alloc; i++)
-		if (self->words[i])
+	for (; pos < self->word_alloc; pos++)
+		if (self->words[pos])
 			return 0;
 
 	return 1;
