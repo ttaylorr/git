@@ -101,19 +101,31 @@ struct ewah_bitmap *bitmap_to_ewah(struct bitmap *bitmap)
 
 struct bitmap *ewah_to_bitmap(struct ewah_bitmap *ewah)
 {
-	struct bitmap *bitmap = bitmap_new();
-	struct ewah_iterator it;
-	eword_t blowup;
-	size_t i = 0;
+	struct bitmap *bitmap;
+	size_t final_size = (ewah->bit_size / BITS_IN_EWORD) + 1;
+	size_t pos = 0;
+	struct ewah_block_iterator it;
+	struct ewah_block blk;
 
-	ewah_iterator_init(&it, ewah);
+	bitmap = bitmap_word_alloc(final_size);
 
-	while (ewah_iterator_next(&blowup, &it)) {
-		ALLOC_GROW(bitmap->words, i + 1, bitmap->word_alloc);
-		bitmap->words[i++] = blowup;
+	ewah_block_iterator_init(&it, ewah);
+	while (ewah_block_iterator_next(&blk, &it)) {
+		switch (blk.type) {
+		case EWAH_BLOCK_RUN:
+			if (blk.u.run.bit)
+				memset(bitmap->words + pos, 0xFF,
+				       blk.u.run.len * sizeof(eword_t));
+			pos += blk.u.run.len;
+			break;
+		case EWAH_BLOCK_LITERAL:
+			memcpy(bitmap->words + pos, blk.u.literal.words,
+			       blk.u.literal.nr * sizeof(eword_t));
+			pos += blk.u.literal.nr;
+			break;
+		}
 	}
 
-	bitmap->word_alloc = i;
 	return bitmap;
 }
 
