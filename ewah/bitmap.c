@@ -151,44 +151,37 @@ void bitmap_or(struct bitmap *self, const struct bitmap *other)
 
 int ewah_bitmap_is_subset(struct ewah_bitmap *self, struct bitmap *other)
 {
-	struct ewah_iterator it;
-	eword_t word;
-	size_t i;
+	struct ewah_block_iterator it;
+	struct ewah_block blk;
+	size_t pos = 0;
 
-	ewah_iterator_init(&it, self);
+	ewah_block_iterator_init(&it, self);
+	while (ewah_block_iterator_next(&blk, &it)) {
+		size_t j;
 
-	for (i = 0; i < other->word_alloc; i++) {
-		if (!ewah_iterator_next(&word, &it)) {
-			/*
-			 * If we reached the end of `self`, and haven't
-			 * rejected `self` as a possible subset of
-			 * `other` yet, then we are done and `self` is
-			 * indeed a subset of `other`.
-			 */
-			return 1;
-		}
-		if (word & ~other->words[i]) {
-			/*
-			 * Otherwise, compare the next two pairs of
-			 * words. If the word from `self` has bit(s) not
-			 * in the word from `other`, `self` is not a
-			 * subset of `other`.
-			 */
-			return 0;
+		switch (blk.type) {
+		case EWAH_BLOCK_RUN:
+			if (blk.u.run.bit) {
+				for (j = 0; j < blk.u.run.len; j++, pos++) {
+					if (pos >= other->word_alloc ||
+					    ~other->words[pos])
+						return 0;
+				}
+			} else {
+				pos += blk.u.run.len;
+			}
+			break;
+		case EWAH_BLOCK_LITERAL:
+			for (j = 0; j < blk.u.literal.nr; j++, pos++) {
+				if (blk.u.literal.words[j] &
+				    ~(pos < other->word_alloc
+				      ? other->words[pos] : 0))
+					return 0;
+			}
+			break;
 		}
 	}
 
-	/*
-	 * If we got to this point, there may be zero or more words
-	 * remaining in `self`, with no remaining words left in `other`.
-	 * If there are any bits set in the remaining word(s) in `self`,
-	 * then `self` is not a subset of `other`.
-	 */
-	while (ewah_iterator_next(&word, &it))
-		if (word)
-			return 0;
-
-	/* `self` is definitely a subset of `other` */
 	return 1;
 }
 
