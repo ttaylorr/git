@@ -239,14 +239,26 @@ size_t bitmap_popcount(struct bitmap *self)
 
 size_t ewah_bitmap_popcount(struct ewah_bitmap *self)
 {
-	struct ewah_iterator it;
-	eword_t word;
+	struct ewah_block_iterator it;
+	struct ewah_block blk;
 	size_t count = 0;
 
-	ewah_iterator_init(&it, self);
-
-	while (ewah_iterator_next(&word, &it))
-		count += ewah_bit_popcount64(word);
+	ewah_block_iterator_init(&it, self);
+	while (ewah_block_iterator_next(&blk, &it)) {
+		switch (blk.type) {
+		case EWAH_BLOCK_RUN:
+			if (blk.u.run.bit)
+				count += blk.u.run.len * BITS_IN_EWORD;
+			break;
+		case EWAH_BLOCK_LITERAL:
+		{
+			size_t j;
+			for (j = 0; j < blk.u.literal.nr; j++)
+				count += ewah_bit_popcount64(blk.u.literal.words[j]);
+			break;
+		}
+		}
+	}
 
 	return count;
 }
