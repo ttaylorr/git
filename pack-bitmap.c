@@ -1511,12 +1511,109 @@ static void unsatisfy_all_pseudo_merges(struct bitmap_index *bitmap_git)
 		bitmap_git->pseudo_merges.v[i].satisfied = 0;
 }
 
+/*
+ * Like bitmap_position(), but only searches within the pack/MIDX,
+ * not the extended index. Useful for objects known to be in the
+ * pack (e.g., ref tips, bitmapped commits).
+ */
+static int bitmap_position_pack(struct bitmap_index *bitmap_git,
+				const struct object_id *oid)
+{
+	if (bitmap_is_midx(bitmap_git))
+		return bitmap_position_midx(bitmap_git, oid);
+	return bitmap_position_packfile(bitmap_git, oid);
+}
+
+static void bit_pos_to_object_id(struct bitmap_index *bitmap_git,
+				 uint32_t bit_pos,
+				 struct object_id *oid);
+
+/*
+ * Build a flat bitmap with bits set for each root's pack/MIDX position.
+ * Pre-allocates to the full pack size to avoid repeated growth.
+ */
+static struct bitmap *bitmap_for_roots(struct bitmap_index *bitmap_git,
+				       struct object_list *roots)
+{
+	uint32_t objects_nr = bitmap_num_objects_total(bitmap_git);
+	struct bitmap *result = bitmap_word_alloc(objects_nr / BITS_IN_EWORD + 1);
+
+	for (; roots; roots = roots->next) {
+		int pos = bitmap_position_pack(bitmap_git, &roots->item->oid);
+		if (pos < 0)
+			continue;
+		bitmap_set(result, pos);
+	}
+
+	return result;
+}
+
+/*
+ * Build a flat bitmap with bits set at each bitmapped commit's
+ * pack-order position, across all layers of the bitmap index.
+ */
+static void bitmap_for_selected_1(struct bitmap_index *bitmap_git,
+				   struct bitmap *selected)
+{
+	uint32_t j;
+
+	if (bitmap_git->table_lookup) {
+		for (j = 0; j < bitmap_git->entry_count; j++) {
+			struct bitmap_lookup_table_triplet triplet;
+			struct object_id oid;
+			int pos;
+
+			if (bitmap_lookup_table_get_triplet(bitmap_git, j,
+							    &triplet) < 0)
+				continue;
+			if (nth_bitmap_object_oid(bitmap_git, &oid,
+						  triplet.commit_pos) < 0)
+				continue;
+
+			pos = bitmap_position_pack(bitmap_git, &oid);
+			if (pos >= 0)
+				bitmap_set(selected, pos);
+		}
+	} else {
+		khint_t k;
+
+		for (k = kh_begin(bitmap_git->bitmaps);
+		     k != kh_end(bitmap_git->bitmaps); k++) {
+			struct object_id oid;
+			int pos;
+
+			if (!kh_exist(bitmap_git->bitmaps, k))
+				continue;
+			oid = kh_key(bitmap_git->bitmaps, k);
+
+			pos = bitmap_position_pack(bitmap_git, &oid);
+			if (pos >= 0)
+				bitmap_set(selected, pos);
+		}
+	}
+}
+
+static struct bitmap *bitmap_for_selected(struct bitmap_index *bitmap_git)
+{
+	uint32_t objects_nr = bitmap_num_objects_total(bitmap_git);
+	struct bitmap *selected = bitmap_word_alloc(objects_nr / BITS_IN_EWORD + 1);
+
+	while (bitmap_git) {
+		bitmap_for_selected_1(bitmap_git, selected);
+		bitmap_git = bitmap_git->base;
+	}
+
+	return selected;
+}
+
 static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 				   struct rev_info *revs,
 				   struct object_list *roots,
 				   struct bitmap *seen)
 {
 	struct bitmap *base = NULL;
+	struct bitmap *roots_bitmap;
+	struct bitmap *selected_bitmap;
 	int needs_walk = 0;
 	unsigned existing_bitmaps = 0;
 
@@ -1524,63 +1621,85 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 
 	unsatisfy_all_pseudo_merges(bitmap_git);
 
+	roots_bitmap = bitmap_for_roots(bitmap_git, roots);
+	selected_bitmap = bitmap_for_selected(bitmap_git);
+
 	if (bitmap_git->pseudo_merges.nr) {
-		struct bitmap *roots_bitmap = bitmap_new();
-		struct object_list *objects = NULL;
-
-		for (objects = roots; objects; objects = objects->next) {
-			struct object *object = objects->item;
-			int pos;
-
-			pos = bitmap_position(bitmap_git, &object->oid);
-			if (pos < 0)
-				continue;
-
-			bitmap_set(roots_bitmap, pos);
-		}
-
 		base = bitmap_new();
 		cascade_pseudo_merges_1(bitmap_git, base, roots_bitmap);
-		bitmap_free(roots_bitmap);
 	}
 
 	/*
-	 * Go through all the roots for the walk. The ones that have bitmaps
-	 * on the bitmap index will be `or`ed together to form an initial
-	 * global reachability analysis.
+	 * AND the roots bitmap with the selected-commits bitmap to
+	 * find positions that are both roots and have bitmaps. Then
+	 * iterate the set bits, look up each commit by position, and
+	 * OR its reachability bitmap into base.
 	 *
-	 * The ones without bitmaps in the index will be stored in the
-	 * `not_mapped_list` for further processing.
+	 * This avoids per-commit bitmap_position() lookups in the
+	 * inner loop — the position is known from the bit index.
 	 */
-	while (roots) {
-		struct object *object = roots->item;
+	{
+		size_t word_count = (roots_bitmap->word_alloc < selected_bitmap->word_alloc)
+			? roots_bitmap->word_alloc : selected_bitmap->word_alloc;
+		size_t i;
 
-		roots = roots->next;
+		for (i = 0; i < word_count; i++) {
+			eword_t word = roots_bitmap->words[i] & selected_bitmap->words[i];
 
-		if (base) {
-			int pos = bitmap_position(bitmap_git, &object->oid);
-			if (pos > 0 && bitmap_get(base, pos)) {
-				object->flags |= SEEN;
-				continue;
+			while (word) {
+				uint32_t bit_pos = i * BITS_IN_EWORD + ewah_bit_ctz64(word);
+				struct object_id oid;
+				struct commit *commit;
+				struct ewah_bitmap *bm;
+
+				bit_pos_to_object_id(bitmap_git, bit_pos, &oid);
+
+				commit = lookup_commit(revs->repo, &oid);
+				if (!commit)
+					goto next;
+				commit->object.flags |= SEEN;
+
+				if (base && bitmap_get(base, bit_pos))
+					goto next;
+
+				bm = bitmap_for_commit(bitmap_git, commit);
+				if (!bm)
+					goto next;
+
+				if (!base)
+					base = ewah_to_bitmap(bm);
+				else
+					bitmap_or_ewah(base, bm);
+				existing_bitmaps_hits_nr++;
+				existing_bitmaps = 1;
+
+			next:
+				word &= word - 1; /* clear lowest set bit */
 			}
 		}
 
-		if (object->type == OBJ_COMMIT &&
-		    add_commit_to_bitmap(bitmap_git, &base, (struct commit *)object)) {
-			object->flags |= SEEN;
-			existing_bitmaps = 1;
-			continue;
-		}
+		while (roots) {
+			struct object *object = roots->item;
+			roots = roots->next;
 
-		object_list_insert(object, &not_mapped);
+			if (object->flags & SEEN)
+				continue;
+
+			if (object->type == OBJ_COMMIT)
+				existing_bitmaps_misses_nr++;
+
+			object_list_insert(object, &not_mapped);
+		}
 	}
+
+	bitmap_free(selected_bitmap);
 
 	/*
 	 * Best case scenario: We found bitmaps for all the roots,
 	 * so the resulting `or` bitmap has the full reachability analysis
 	 */
 	if (!not_mapped)
-		return base;
+		goto done;
 
 	roots = not_mapped;
 
@@ -1632,6 +1751,8 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 		base = fill_in_bitmap(bitmap_git, revs, base, seen);
 	}
 
+done:
+	bitmap_free(roots_bitmap);
 	object_list_free(&not_mapped);
 
 	return base;
