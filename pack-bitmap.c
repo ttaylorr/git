@@ -1053,6 +1053,80 @@ struct ewah_bitmap *bitmap_for_commit(struct bitmap_index *bitmap_git,
 	return find_bitmap_for_commit(bitmap_git, commit, NULL);
 }
 
+/*
+ * Find the stored_bitmap for a commit without resolving XOR chains.
+ * Returns NULL if the commit doesn't have a bitmap.
+ */
+static struct stored_bitmap *find_stored_bitmap(
+	struct bitmap_index *bitmap_git, struct commit *commit)
+{
+	khiter_t hash_pos;
+	if (!bitmap_git)
+		return NULL;
+
+	hash_pos = kh_get_oid_map(bitmap_git->bitmaps, commit->object.oid);
+	if (hash_pos >= kh_end(bitmap_git->bitmaps)) {
+		if (!bitmap_git->table_lookup)
+			return find_stored_bitmap(bitmap_git->base, commit);
+		return lazy_bitmap_for_commit(bitmap_git, commit);
+	}
+	return kh_value(bitmap_git->bitmaps, hash_pos);
+}
+
+static int bitmap_position(struct bitmap_index *bitmap_git,
+			   const struct object_id *oid);
+
+/*
+ * OR a stored bitmap into a flat accumulator, exploiting XOR chain
+ * structure to avoid full decompression when possible.
+ *
+ * When a bitmap B is stored as XOR delta against base A (i.e.,
+ * B.root = B.resolved XOR A.resolved), and A's commit is already
+ * covered by the accumulator, we know A.resolved is a subset of the
+ * accumulator (bitmaps are closed under reachability). Therefore:
+ *
+ *   accum |= B.resolved
+ *        = accum | (B.root XOR A.resolved)
+ *        = accum | B.root | A.resolved    [since XOR with subset = OR]
+ *        = accum | B.root                 [since A.resolved ⊆ accum]
+ *
+ * This is valid because for reachability bitmaps B ⊇ A (B is a
+ * superset of A), so their XOR B.root contains only the bits in B
+ * but not in A — i.e., the delta is purely additive.
+ *
+ * For the general case where A is not an ancestor of B, the XOR
+ * could flip bits in either direction. We detect this by checking
+ * whether A's commit position is in the accumulator; if not, we
+ * fall back to full resolution via lookup_stored_bitmap().
+ */
+static void or_bitmap_for_commit(struct bitmap_index *bitmap_git,
+				 struct bitmap *base,
+				 struct stored_bitmap *st)
+{
+	while (st->xor) {
+		int xor_pos = bitmap_position(bitmap_git, &st->xor->oid);
+
+		if (xor_pos < 0 || !bitmap_get(base, xor_pos)) {
+			/*
+			 * XOR base is not covered by the accumulator.
+			 * Fall back to full resolution.
+			 */
+			bitmap_or_ewah(base, lookup_stored_bitmap(st));
+			return;
+		}
+
+		/*
+		 * XOR base IS covered: OR just the delta, then
+		 * move to the next level of the chain.
+		 */
+		bitmap_or_ewah(base, st->root);
+		st = st->xor;
+	}
+
+	/* Bottom of chain — OR the base bitmap */
+	bitmap_or_ewah(base, st->root);
+}
+
 static inline int bitmap_position_extended(struct bitmap_index *bitmap_git,
 					   const struct object_id *oid)
 {
@@ -1650,7 +1724,7 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 				uint32_t bit_pos = i * BITS_IN_EWORD + ewah_bit_ctz64(word);
 				struct object_id oid;
 				struct commit *commit;
-				struct ewah_bitmap *bm;
+				struct stored_bitmap *st;
 
 				bit_pos_to_object_id(bitmap_git, bit_pos, &oid);
 
@@ -1662,14 +1736,13 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 				if (base && bitmap_get(base, bit_pos))
 					goto next;
 
-				bm = bitmap_for_commit(bitmap_git, commit);
-				if (!bm)
+				st = find_stored_bitmap(bitmap_git, commit);
+				if (!st)
 					goto next;
 
 				if (!base)
-					base = ewah_to_bitmap(bm);
-				else
-					bitmap_or_ewah(base, bm);
+					base = bitmap_new();
+				or_bitmap_for_commit(bitmap_git, base, st);
 				existing_bitmaps_hits_nr++;
 				existing_bitmaps = 1;
 
