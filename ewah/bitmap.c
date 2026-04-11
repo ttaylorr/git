@@ -18,6 +18,7 @@
  */
 #include "git-compat-util.h"
 #include "ewok.h"
+#include "ewok_rlw.h"
 
 #define EWAH_MASK(x) ((eword_t)1 << (x % BITS_IN_EWORD))
 #define EWAH_BLOCK(x) (x / BITS_IN_EWORD)
@@ -70,6 +71,35 @@ int bitmap_get(struct bitmap *self, size_t pos)
 	size_t block = EWAH_BLOCK(pos);
 	return block < self->word_alloc &&
 		(self->words[block] & EWAH_MASK(pos)) != 0;
+}
+
+int ewah_bitmap_get(struct ewah_bitmap *self, size_t pos)
+{
+	size_t block = EWAH_BLOCK(pos);
+	size_t offset = pos % BITS_IN_EWORD;
+	size_t ptr = 0;
+	size_t word_pos = 0;
+
+	if (pos >= self->bit_size)
+		return 0;
+
+	while (ptr < self->buffer_size) {
+		eword_t rlw = self->buffer[ptr++];
+		size_t run_len = rlw_get_running_len(&rlw);
+		size_t lit_len = rlw_get_literal_words(&rlw);
+
+		if (block < word_pos + run_len)
+			return rlw_get_run_bit(&rlw);
+		word_pos += run_len;
+
+		if (block < word_pos + lit_len)
+			return !!(self->buffer[ptr + block - word_pos] &
+				  ((eword_t)1 << offset));
+		word_pos += lit_len;
+		ptr += lit_len;
+	}
+
+	return 0;
 }
 
 struct ewah_bitmap *bitmap_to_ewah(struct bitmap *bitmap)

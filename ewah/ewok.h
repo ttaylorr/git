@@ -114,6 +114,12 @@ void ewah_each_bit(struct ewah_bitmap *self, ewah_callback callback, void *paylo
  */
 void ewah_set(struct ewah_bitmap *self, size_t i);
 
+/**
+ * Test whether bit `pos` is set in the EWAH bitmap, without
+ * decompressing. Returns 1 if set, 0 otherwise.
+ */
+int ewah_bitmap_get(struct ewah_bitmap *self, size_t pos);
+
 struct ewah_iterator {
 	const eword_t *buffer;
 	size_t buffer_size;
