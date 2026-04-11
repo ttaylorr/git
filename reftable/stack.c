@@ -371,7 +371,7 @@ static int reftable_stack_reload_maybe_reuse(struct reftable_stack *st,
 	char **names = NULL, **names_after = NULL;
 	uint64_t deadline;
 	int64_t delay = 0;
-	int tries = 0, err;
+	int tries = 0, err = 0;
 	int fd = -1;
 
 	deadline = reftable_time_ms() + 3000;
