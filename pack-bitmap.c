@@ -1506,9 +1506,13 @@ done:
 
 static void unsatisfy_all_pseudo_merges(struct bitmap_index *bitmap_git)
 {
-	uint32_t i;
-	for (i = 0; i < bitmap_git->pseudo_merges.nr; i++)
-		bitmap_git->pseudo_merges.v[i].satisfied = 0;
+	struct bitmap_index *curr = bitmap_git;
+	while (curr) {
+		uint32_t i;
+		for (i = 0; i < curr->pseudo_merges.nr; i++)
+			curr->pseudo_merges.v[i].satisfied = 0;
+		curr = curr->base;
+	}
 }
 
 static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
