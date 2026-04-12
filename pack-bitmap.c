@@ -1481,7 +1481,7 @@ struct ewah_bitmap *pseudo_merge_bitmap_for_commit(struct bitmap_index *bitmap_g
 
 	for (p = commit->parents; p; p = p->next) {
 		int pos = bitmap_position(bitmap_git, &p->item->object.oid);
-		if (pos < 0 || pos >= bitmap_num_objects(bitmap_git))
+		if (pos < 0 || pos >= bitmap_num_objects_total(bitmap_git))
 			goto done;
 
 		/*
