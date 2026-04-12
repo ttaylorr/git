@@ -97,6 +97,7 @@ struct write_midx_context {
 	struct multi_pack_index *base_midx;
 	struct progress *progress;
 	unsigned pack_paths_checked;
+	bool show_progress;
 
 	struct pack_midx_entry *entries;
 	size_t entries_nr;
@@ -416,6 +417,10 @@ static void compute_sorted_entries(struct write_midx_context *ctx,
 	ALLOC_ARRAY(ctx->entries, alloc_objects);
 	ctx->entries_nr = 0;
 
+	if (ctx->show_progress)
+		ctx->progress = start_delayed_progress(ctx->repo,
+			_("Sorting objects"), 0);
+
 	for (cur_fanout = 0; cur_fanout < 256; cur_fanout++) {
 		fanout.nr = 0;
 
@@ -445,7 +450,11 @@ static void compute_sorted_entries(struct write_midx_context *ctx,
 			       sizeof(struct pack_midx_entry));
 			ctx->entries_nr++;
 		}
+
+		display_progress(ctx->progress, ctx->entries_nr);
 	}
+
+	stop_progress(&ctx->progress);
 
 	free(fanout.entries);
 }
@@ -542,6 +551,10 @@ static int write_midx_oid_lookup(struct hashfile *f,
 	struct pack_midx_entry *list = ctx->entries;
 	uint32_t i;
 
+	if (ctx->show_progress)
+		ctx->progress = start_progress(ctx->repo,
+			_("Writing OID lookup"), ctx->entries_nr);
+
 	for (i = 0; i < ctx->entries_nr; i++) {
 		struct pack_midx_entry *obj = list++;
 
@@ -554,7 +567,10 @@ static int write_midx_oid_lookup(struct hashfile *f,
 		}
 
 		hashwrite(f, obj->oid.hash, (int)hash_len);
+		display_progress(ctx->progress, i + 1);
 	}
+
+	stop_progress(&ctx->progress);
 
 	return 0;
 }
@@ -565,6 +581,10 @@ static int write_midx_object_offsets(struct hashfile *f,
 	struct write_midx_context *ctx = data;
 	struct pack_midx_entry *list = ctx->entries;
 	uint32_t i, nr_large_offset = 0;
+
+	if (ctx->show_progress)
+		ctx->progress = start_progress(ctx->repo,
+			_("Writing object offsets"), ctx->entries_nr);
 
 	for (i = 0; i < ctx->entries_nr; i++) {
 		struct pack_midx_entry *obj = list++;
@@ -584,7 +604,11 @@ static int write_midx_object_offsets(struct hashfile *f,
 			    obj->offset);
 		else
 			hashwrite_be32(f, (uint32_t)obj->offset);
+
+		display_progress(ctx->progress, i + 1);
 	}
+
+	stop_progress(&ctx->progress);
 
 	return 0;
 }
@@ -630,8 +654,16 @@ static int write_midx_revindex(struct hashfile *f,
 	else
 		nr_base = 0;
 
-	for (i = 0; i < ctx->entries_nr; i++)
+	if (ctx->show_progress)
+		ctx->progress = start_progress(ctx->repo,
+			_("Writing reverse index"), ctx->entries_nr);
+
+	for (i = 0; i < ctx->entries_nr; i++) {
 		hashwrite_be32(f, ctx->pack_order[i] + nr_base);
+		display_progress(ctx->progress, i + 1);
+	}
+
+	stop_progress(&ctx->progress);
 
 	return 0;
 }
@@ -681,7 +713,13 @@ static uint32_t *midx_pack_order(struct write_midx_context *ctx)
 		data[i].offset = e->offset;
 	}
 
+	if (ctx->show_progress)
+		ctx->progress = start_delayed_progress(ctx->repo,
+			_("Sorting objects by pack order"),
+			0);
 	QSORT(data, ctx->entries_nr, midx_pack_order_cmp);
+	display_progress(ctx->progress, ctx->entries_nr);
+	stop_progress(&ctx->progress);
 
 	for (i = 0; i < ctx->entries_nr; i++) {
 		struct pack_midx_entry *e = &ctx->entries[data[i].nr];
@@ -1281,6 +1319,7 @@ static int write_midx_internal(struct write_midx_opts *opts)
 
 	ctx.incremental = !!(opts->flags & MIDX_WRITE_INCREMENTAL);
 	ctx.compact = !!(opts->flags & MIDX_WRITE_COMPACT);
+	ctx.show_progress = !!(opts->flags & MIDX_PROGRESS);
 
 	if (ctx.compact) {
 		if (ctx.version != MIDX_VERSION_V2)
@@ -1355,7 +1394,7 @@ static int write_midx_internal(struct write_midx_opts *opts)
 	start_pack = ctx.nr;
 
 	ctx.pack_paths_checked = 0;
-	if (opts->flags & MIDX_PROGRESS)
+	if (ctx.show_progress)
 		ctx.progress = start_delayed_progress(r,
 						      _("Adding packfiles to multi-pack-index"), 0);
 	else

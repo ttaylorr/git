@@ -182,8 +182,12 @@ test_expect_success 'write progress off for redirected stderr' '
 '
 
 test_expect_success 'write force progress on for stderr' '
+	rm -f $objdir/pack/multi-pack-index &&
 	GIT_PROGRESS_DELAY=0 git multi-pack-index --object-dir=$objdir write --progress 2>err &&
-	test_file_not_empty err
+	test_grep "Adding packfiles to multi-pack-index" err &&
+	test_grep "Sorting objects" err &&
+	test_grep "Writing OID lookup" err &&
+	test_grep "Writing object offsets" err
 '
 
 test_expect_success 'write with the --no-progress option' '
