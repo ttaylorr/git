@@ -14,6 +14,7 @@
 #include "alloc.h"
 #include "progress.h"
 #include "hex.h"
+#include "midx.h"
 
 #define DEFAULT_PSEUDO_MERGE_DECAY 1.0
 #define DEFAULT_PSEUDO_MERGE_MAX_MERGES 64
@@ -241,7 +242,8 @@ static int find_pseudo_merge_group_for_ref(const struct reference *ref, void *_d
 		return 0;
 	if (repo_parse_commit(the_repository, c))
 		return 0;
-	if (!packlist_find(writer->to_pack, maybe_peeled))
+	if (!packlist_find(writer->to_pack, maybe_peeled) &&
+	    !(writer->midx && bsearch_midx(maybe_peeled, writer->midx, NULL)))
 		return 0;
 
 	has_bitmap = bitmap_writer_has_bitmapped_object_id(writer, maybe_peeled);

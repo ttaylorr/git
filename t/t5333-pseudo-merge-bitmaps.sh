@@ -715,4 +715,94 @@ test_expect_success 'duplicate pseudo-merge pattern does not leak' '
 	)
 '
 
+test_expect_success 'pseudo-merges span incremental MIDX layers' '
+	git init pseudo-merge-midx-cross-layer &&
+	test_when_finished "rm -fr pseudo-merge-midx-cross-layer" &&
+
+	(
+		cd pseudo-merge-midx-cross-layer &&
+		git config set maintenance.auto false &&
+
+		test_commit_bulk 128 &&
+		tag_everything &&
+		git repack -ad &&
+
+		# Write a base MIDX layer WITHOUT pseudo-merges.
+		git multi-pack-index write --bitmap --incremental &&
+
+		test_commit more &&
+		git repack -d &&
+
+		# Write a top layer WITH pseudo-merges. The pattern
+		# matches refs/tags/ which point at commits in the
+		# base layer. With the cross-layer change, these
+		# commits are accepted as pseudo-merge parents even
+		# though they are not in the top layer'\''s pack.
+		git \
+		    -c bitmapPseudoMerge.test.pattern="refs/tags/" \
+		    -c bitmapPseudoMerge.test.maxMerges=1 \
+		    -c bitmapPseudoMerge.test.threshold=now \
+		    -c bitmapPseudoMerge.test.stableThreshold=never \
+		    multi-pack-index write --bitmap --incremental &&
+
+		test_pseudo_merges >merges &&
+		test_line_count = 1 merges &&
+
+		git commit --allow-empty -m stale &&
+
+		git rev-list --count --objects --all >expect &&
+
+		: >trace2.txt &&
+		GIT_TRACE2_EVENT=$PWD/trace2.txt \
+			git rev-list --count --objects \
+				--use-bitmap-index --all >actual &&
+		test_pseudo_merges_satisfied 1 <trace2.txt &&
+
+		test_cmp expect actual
+	)
+'
+
+test_expect_success 'pseudo-merges cascade across incremental MIDX layers' '
+	git init pseudo-merge-midx-cascade &&
+	test_when_finished "rm -fr pseudo-merge-midx-cascade" &&
+
+	(
+		cd pseudo-merge-midx-cascade &&
+		git config set maintenance.auto false &&
+
+		test_commit_bulk 128 &&
+		tag_everything &&
+		git repack -ad &&
+
+		# Write a base layer with pseudo-merges.
+		git \
+		    -c bitmapPseudoMerge.test.pattern="refs/tags/" \
+		    -c bitmapPseudoMerge.test.maxMerges=1 \
+		    -c bitmapPseudoMerge.test.threshold=now \
+		    -c bitmapPseudoMerge.test.stableThreshold=never \
+		    multi-pack-index write --bitmap --incremental &&
+
+		test_commit more &&
+		git repack -d &&
+
+		# Write a second layer WITHOUT pseudo-merges.
+		git multi-pack-index write --bitmap --incremental &&
+
+		git commit --allow-empty -m stale &&
+
+		git rev-list --count --objects --all >expect &&
+
+		# The pseudo-merge lives in the base layer. The
+		# cascade should find and apply it across the layer
+		# boundary.
+		: >trace2.txt &&
+		GIT_TRACE2_EVENT=$PWD/trace2.txt \
+			git rev-list --count --objects \
+				--use-bitmap-index --all >actual &&
+		test_pseudo_merges_satisfied 1 <trace2.txt &&
+
+		test_cmp expect actual
+	)
+'
+
 test_done

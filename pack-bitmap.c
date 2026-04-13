@@ -1338,14 +1338,30 @@ static unsigned cascade_pseudo_merges_1(struct bitmap_index *bitmap_git,
 					struct bitmap *result,
 					struct bitmap *roots)
 {
-	int ret = cascade_pseudo_merges(&bitmap_git->pseudo_merges,
-					result, roots);
+	struct bitmap_index *curr = bitmap_git;
+	int ret = 0;
+
+	while (curr) {
+		ret += cascade_pseudo_merges(&curr->pseudo_merges,
+					     result, roots);
+		curr = curr->base;
+	}
+
 	if (ret) {
 		pseudo_merges_cascades_nr++;
 		pseudo_merges_satisfied_nr += ret;
 	}
 
 	return ret;
+}
+
+static int has_pseudo_merges(struct bitmap_index *bitmap_git)
+{
+	struct bitmap_index *curr;
+	for (curr = bitmap_git; curr; curr = curr->base)
+		if (curr->pseudo_merges.nr)
+			return 1;
+	return 0;
 }
 
 static struct bitmap *find_boundary_objects(struct bitmap_index *bitmap_git,
@@ -1368,7 +1384,7 @@ static struct bitmap *find_boundary_objects(struct bitmap_index *bitmap_git,
 
 	revs->ignore_missing_links = 1;
 
-	if (bitmap_git->pseudo_merges.nr) {
+	if (has_pseudo_merges(bitmap_git)) {
 		struct bitmap *roots_bitmap = bitmap_new();
 		struct object_list *objects = NULL;
 
@@ -1528,7 +1544,7 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 
 	unsatisfy_all_pseudo_merges(bitmap_git);
 
-	if (bitmap_git->pseudo_merges.nr) {
+	if (has_pseudo_merges(bitmap_git)) {
 		struct bitmap *roots_bitmap = bitmap_new();
 		struct object_list *objects = NULL;
 
