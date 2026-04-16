@@ -1890,7 +1890,7 @@ int write_midx_file_compact(struct odb_source *source,
 		.compact_from = from,
 		.compact_to = to,
 		.incremental_base = incremental_base,
-		.flags = flags | MIDX_WRITE_COMPACT,
+		.flags = flags | MIDX_WRITE_COMPACT | MIDX_WRITE_INCREMENTAL,
 	};
 
 	return write_midx_internal(&opts);

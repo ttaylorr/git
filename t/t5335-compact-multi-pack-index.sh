@@ -403,4 +403,34 @@ test_expect_success 'MIDX compaction with bogus --base checksum' '
 	)
 '
 
+test_expect_success 'MIDX compaction preserves surviving tip layers' '
+	test_when_finished "rm -fr surviving-tip" &&
+	git init surviving-tip &&
+	(
+		cd surviving-tip &&
+		git config maintenance.auto false &&
+
+		write_packs A B C &&
+
+		test_line_count = 3 $midx_chain &&
+		from="$(nth_line 1 "$midx_chain")" &&
+		to="$(nth_line 2 "$midx_chain")" &&
+		tip="$(nth_line 3 "$midx_chain")" &&
+
+		# "compact" is inherently an incremental-chain operation:
+		# without --incremental the resulting compacted MIDX is
+		# written as a flat pack/multi-pack-index and
+		# pack/multi-pack-index.d/ (including the surviving tip
+		# layer) is torn down.
+		git multi-pack-index compact "$from" "$to" &&
+
+		test_path_is_missing "$packdir/multi-pack-index" &&
+		test_path_is_file "$midxdir/multi-pack-index-$tip.midx" &&
+		test_line_count = 2 $midx_chain &&
+		grep "^$tip\$" $midx_chain &&
+
+		git multi-pack-index verify
+	)
+'
+
 test_done
