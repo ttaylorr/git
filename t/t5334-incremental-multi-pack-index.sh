@@ -302,4 +302,43 @@ test_expect_success 'cat-file --batch-all-objects --filter covers full chain' '
 	)
 '
 
+test_expect_success 'open_midx_bitmap_1 reports correct pack name on failure' '
+	git init missing-base-pack &&
+	test_when_finished "rm -fr missing-base-pack" &&
+	(
+		cd missing-base-pack &&
+		git config maintenance.auto false &&
+
+		for i in 1 2 3
+		do
+			test_commit "c$i" &&
+			git repack -dq || exit 1
+		done &&
+		git multi-pack-index write --bitmap --incremental &&
+
+		test_commit tip &&
+		git repack -dq &&
+		git multi-pack-index write --bitmap --incremental &&
+
+		# Create an additional pack containing all reachable
+		# objects (without -d, so the MIDX-referenced packs
+		# stay on disk). After we delete one of the
+		# MIDX-referenced base packs, objects remain available
+		# through this "spare" pack -- exercising the bitmap
+		# open path far enough to hit prepare_midx_pack().
+		git repack -aq &&
+
+		tip_pack=$(ls -t $packdir/pack-*.pack | head -1) &&
+		# Prefer a pack that is not the tip pack nor the spare
+		# we just created.
+		spare_pack=$(ls -t $packdir/pack-*.pack | sed -n 1p) &&
+		doomed=$(ls $packdir/pack-*.pack | grep -v "$spare_pack" | head -1) &&
+		doomed_hash=$(echo "$doomed" | sed -e "s,.*/pack-,," -e "s,\\.pack$,,") &&
+		rm -f "$doomed" &&
+
+		git rev-list --use-bitmap-index --count --all 2>err &&
+		grep "pack-$doomed_hash" err
+	)
+'
+
 test_done
