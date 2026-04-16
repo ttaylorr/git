@@ -274,4 +274,32 @@ test_expect_success 'bitmapped rev-list survives missing base-layer bitmap' '
 	)
 '
 
+test_expect_success 'cat-file --batch-all-objects --filter covers full chain' '
+	git init batch-filter &&
+	test_when_finished "rm -fr batch-filter" &&
+	(
+		cd batch-filter &&
+		git config maintenance.auto false &&
+
+		for i in 1 2 3
+		do
+			test_commit "base-$i" || exit 1
+		done &&
+		git repack -adq &&
+		git multi-pack-index write --bitmap --incremental &&
+
+		for i in 1 2
+		do
+			test_commit "tip-$i" || exit 1
+		done &&
+		git repack -dq &&
+		git multi-pack-index write --bitmap --incremental &&
+
+		git cat-file --batch-all-objects --batch-check >expect &&
+		git cat-file --batch-all-objects --batch-check \
+			--filter=blob:limit=1m >actual &&
+		test_cmp expect actual
+	)
+'
+
 test_done
