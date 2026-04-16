@@ -753,8 +753,12 @@ int prepare_multi_pack_index_one(struct odb_source *source)
 
 int midx_checksum_valid(struct multi_pack_index *m)
 {
-	return hashfile_checksum_valid(m->source->odb->repo->hash_algo,
-				       m->data, m->data_len);
+	for (; m; m = m->base_midx) {
+		if (!hashfile_checksum_valid(m->source->odb->repo->hash_algo,
+					     m->data, m->data_len))
+			return 0;
+	}
+	return 1;
 }
 
 struct clear_midx_data {
@@ -972,14 +976,18 @@ int verify_midx_file(struct odb_source *source, unsigned flags)
 	if (flags & MIDX_PROGRESS)
 		progress = start_sparse_progress(r,
 						 _("Verifying OID order in multi-pack-index"),
-						 m->num_objects - 1);
+						 m->num_objects + m->num_objects_in_base);
 
 	for (curr = m; curr; curr = curr->base_midx) {
-		for (i = 0; i < m->num_objects - 1; i++) {
+		if (curr->num_objects == 0)
+			continue;
+		for (i = 0; i < curr->num_objects - 1; i++) {
 			struct object_id oid1, oid2;
 
-			nth_midxed_object_oid(&oid1, m, m->num_objects_in_base + i);
-			nth_midxed_object_oid(&oid2, m, m->num_objects_in_base + i + 1);
+			nth_midxed_object_oid(&oid1, curr,
+					      curr->num_objects_in_base + i);
+			nth_midxed_object_oid(&oid2, curr,
+					      curr->num_objects_in_base + i + 1);
 
 			if (oidcmp(&oid1, &oid2) >= 0)
 				midx_report(_("oid lookup out of order: oid[%d] = %s >= %s = oid[%d]"),
@@ -1005,15 +1013,16 @@ int verify_midx_file(struct odb_source *source, unsigned flags)
 	if (flags & MIDX_PROGRESS)
 		progress = start_sparse_progress(r,
 						 _("Sorting objects by packfile"),
-						 m->num_objects);
+						 m->num_objects + m->num_objects_in_base);
 	display_progress(progress, 0); /* TODO: Measure QSORT() progress */
-	QSORT(pairs, m->num_objects, compare_pair_pos_vs_id);
+	QSORT(pairs, m->num_objects + m->num_objects_in_base,
+	      compare_pair_pos_vs_id);
 	stop_progress(&progress);
 
 	if (flags & MIDX_PROGRESS)
 		progress = start_sparse_progress(r,
 						 _("Verifying object offsets"),
-						 m->num_objects);
+						 m->num_objects + m->num_objects_in_base);
 	for (i = 0; i < m->num_objects + m->num_objects_in_base; i++) {
 		struct object_id oid;
 		struct pack_entry e;

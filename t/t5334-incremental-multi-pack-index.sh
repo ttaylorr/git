@@ -4,6 +4,7 @@ test_description='incremental multi-pack-index'
 
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-midx.sh
+. "$TEST_DIRECTORY"/lib-chunk.sh
 
 GIT_TEST_MULTI_PACK_INDEX=0
 export GIT_TEST_MULTI_PACK_INDEX
@@ -192,6 +193,61 @@ test_expect_success 'non-incremental write with existing incremental chain' '
 		write_midx_layer &&
 
 		git multi-pack-index write
+	)
+'
+
+test_expect_success 'verify detects corrupted base layer checksum' '
+	git init verify-base-checksum &&
+	test_when_finished "rm -fr verify-base-checksum" &&
+	(
+		cd verify-base-checksum &&
+		git config set maintenance.auto false &&
+
+		for i in 1 2 3
+		do
+			test_commit c$i &&
+			git repack -d &&
+			git multi-pack-index write --incremental || return 1
+		done &&
+
+		base_hash=$(sed -n 1p "$midx_chain") &&
+		base_midx="$midxdir/multi-pack-index-$base_hash.midx" &&
+		chmod u+w "$base_midx" &&
+		size=$(test_file_size "$base_midx") &&
+		seek=$((size - 1)) &&
+		printf "\\xff" |
+			dd of="$base_midx" bs=1 count=1 conv=notrunc seek=$seek &&
+
+		test_must_fail git multi-pack-index verify 2>err &&
+		grep "incorrect checksum" err
+	)
+'
+
+test_expect_success 'verify detects out-of-order OIDs in base layer' '
+	git init verify-base-oid-order &&
+	test_when_finished "rm -fr verify-base-oid-order" &&
+	(
+		cd verify-base-oid-order &&
+		git config set maintenance.auto false &&
+
+		for i in 1 2 3
+		do
+			test_commit c$i &&
+			git repack -d &&
+			git multi-pack-index write --incremental || return 1
+		done &&
+
+		# Corrupt the first byte of the OID lookup chunk of the
+		# base layer. Since the base layer has >= 2 OIDs in
+		# sorted order, flipping the high bits of oid[0] makes
+		# it sort above oid[1].
+		base_hash=$(sed -n 1p "$midx_chain") &&
+		base_midx="$midxdir/multi-pack-index-$base_hash.midx" &&
+		chmod u+w "$base_midx" &&
+		corrupt_chunk_file "$base_midx" OIDL 0 ff &&
+
+		test_must_fail git multi-pack-index verify 2>err &&
+		grep "oid lookup out of order" err
 	)
 '
 
