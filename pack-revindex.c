@@ -600,10 +600,19 @@ int midx_to_pack_pos(struct multi_pack_index *m, uint32_t at, uint32_t *pos)
 int midx_pair_to_pack_pos(struct multi_pack_index *m, uint32_t pack_int_id,
 			  off_t ofs, uint32_t *pos)
 {
-	struct midx_pack_key key = {
-		.pack = pack_int_id,
-		.offset = ofs,
-		.midx = m,
-	};
+	struct midx_pack_key key;
+
+	while (m && pack_int_id < m->num_packs_in_base)
+		m = m->base_midx;
+	if (!m)
+		BUG("NULL multi-pack-index for pack ID: %"PRIu32, pack_int_id);
+	if (pack_int_id >= m->num_packs + m->num_packs_in_base)
+		BUG("midx_pair_to_pack_pos: out-of-bounds pack %"PRIu32,
+		    pack_int_id);
+
+	key.pack = pack_int_id;
+	key.offset = ofs;
+	key.midx = m;
+
 	return midx_key_to_pack_pos(m, &key, pos);
 }
