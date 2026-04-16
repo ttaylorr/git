@@ -405,6 +405,7 @@ void close_midx(struct multi_pack_index *m)
 
 	close_midx(m->base_midx);
 
+	close_midx_revindex(m);
 	munmap((unsigned char *)m->data, m->data_len);
 
 	for (i = 0; i < m->num_packs; i++) {
