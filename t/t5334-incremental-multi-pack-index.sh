@@ -251,4 +251,27 @@ test_expect_success 'verify detects out-of-order OIDs in base layer' '
 	)
 '
 
+test_expect_success 'bitmapped rev-list survives missing base-layer bitmap' '
+	git init missing-base-bitmap &&
+	test_when_finished "rm -fr missing-base-bitmap" &&
+	(
+		cd missing-base-bitmap &&
+		git config maintenance.auto false &&
+
+		test_commit base &&
+		git repack -adq &&
+		git multi-pack-index write --bitmap --incremental &&
+
+		test_commit tip &&
+		git repack -dq &&
+		git multi-pack-index write --bitmap --incremental &&
+
+		base_hash=$(sed -n 1p "$midx_chain") &&
+		rm -f "$midxdir/multi-pack-index-$base_hash.bitmap" &&
+
+		git rev-list --use-bitmap-index --count --all >out 2>err &&
+		test_line_count = 1 out
+	)
+'
+
 test_done
