@@ -476,15 +476,17 @@ static int midx_compaction_step_exec_write(struct midx_compaction_step *step,
 		strbuf_release(&buf);
 	}
 
+	if (opts->refs_snapshot)
+		strvec_pushf(&cmd.args, "--refs-snapshot=%s",
+			     opts->refs_snapshot);
+
 	ret = repack_fill_midx_stdin_packs(&cmd, &step->u.write, &hash);
 	if (hash.nr != 1) {
 		ret = error(_("expected exactly one line during MIDX write, "
 			      "got: %"PRIuMAX),
 			    (uintmax_t)hash.nr);
 		goto out;
-	}
-
-	step->csum = xstrdup(hash.items[0].string);
+	}	step->csum = xstrdup(hash.items[0].string);
 
 out:
 	string_list_clear(&hash, 0);
@@ -504,6 +506,10 @@ static int midx_compaction_step_exec_compact(struct midx_compaction_step *step,
 	strvec_pushl(&cmd.args, "--incremental", "--no-write-chain-file",
 		     midx_get_checksum_hex(step->u.compact.from),
 		     midx_get_checksum_hex(step->u.compact.to), NULL);
+
+	if (opts->refs_snapshot)
+		strvec_pushf(&cmd.args, "--refs-snapshot=%s",
+			     opts->refs_snapshot);
 
 	cmd.out = -1;
 

@@ -22,7 +22,7 @@
 #define BUILTIN_MIDX_COMPACT_USAGE \
 	N_("git multi-pack-index [<options>] compact [--[no-]incremental]\n" \
 	   "  [--[no-]bitmap] [--base=<checksum>] [--[no-]write-chain-file]\n" \
-	   "  <from> <to>")
+	   "  [--refs-snapshot=<path>] <from> <to>")
 
 #define BUILTIN_MIDX_VERIFY_USAGE \
 	N_("git multi-pack-index [<options>] verify")
@@ -251,6 +251,8 @@ static int cmd_multi_pack_index_compact(int argc, const char **argv,
 		OPT_NEGBIT(0, "write-chain-file", &opts.flags,
 			N_("write the multi-pack-index chain file"),
 			MIDX_WRITE_NO_CHAIN),
+		OPT_FILENAME(0, "refs-snapshot", &opts.refs_snapshot,
+			     N_("refs snapshot for selecting bitmap commits")),
 		OPT_END(),
 	};
 
@@ -306,8 +308,10 @@ static int cmd_multi_pack_index_compact(int argc, const char **argv,
 	}
 
 	ret = write_midx_file_compact(source, from_midx, to_midx,
-				      opts.incremental_base, opts.flags);
+				      opts.incremental_base,
+				      opts.refs_snapshot, opts.flags);
 
+	free(opts.refs_snapshot);
 	return ret;
 }
 

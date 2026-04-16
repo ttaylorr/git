@@ -1883,6 +1883,7 @@ int write_midx_file_compact(struct odb_source *source,
 			    struct multi_pack_index *from,
 			    struct multi_pack_index *to,
 			    const char *incremental_base,
+			    const char *refs_snapshot,
 			    unsigned flags)
 {
 	struct write_midx_opts opts = {
@@ -1890,6 +1891,7 @@ int write_midx_file_compact(struct odb_source *source,
 		.compact_from = from,
 		.compact_to = to,
 		.incremental_base = incremental_base,
+		.refs_snapshot = refs_snapshot,
 		.flags = flags | MIDX_WRITE_COMPACT | MIDX_WRITE_INCREMENTAL,
 	};
 

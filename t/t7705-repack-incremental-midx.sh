@@ -488,4 +488,23 @@ test_expect_success 'repack -ad --write-midx=incremental is safe' '
 	)
 '
 
+test_expect_success 'incremental MIDX write passes --refs-snapshot' '
+	git init refs-snapshot-passed &&
+	(
+		cd refs-snapshot-passed &&
+
+		git config maintenance.auto false &&
+
+		test_commit first &&
+		test_commit second &&
+
+		GIT_TRACE2_EVENT="$(pwd)/trace.json" \
+			git repack --geometric=2 -d \
+				--write-midx=incremental \
+				--write-bitmap-index &&
+
+		grep -F -- "--refs-snapshot=" trace.json
+	)
+'
+
 test_done
