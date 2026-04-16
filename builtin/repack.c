@@ -565,8 +565,11 @@ int cmd_repack(int argc,
 				       packtmp);
 	/* End of pack replacement. */
 
-	if (delete_redundant && pack_everything & ALL_INTO_ONE)
+	if (delete_redundant && pack_everything & ALL_INTO_ONE) {
+		if (write_midx == REPACK_WRITE_MIDX_INCREMENTAL)
+			existing_packs_retain_midx_packs(&existing);
 		existing_packs_mark_for_deletion(&existing, &names);
+	}
 
 	if (write_midx != REPACK_WRITE_MIDX_NONE) {
 		struct repack_write_midx_opts opts = {

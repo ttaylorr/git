@@ -458,4 +458,34 @@ test_expect_success 'repack -ad removes stale incremental chain' '
 	)
 '
 
+test_expect_success 'repack -ad --write-midx=incremental is safe' '
+	git init ad-incremental-midx &&
+	(
+		cd ad-incremental-midx &&
+
+		git config maintenance.auto false &&
+
+		# Build a MIDX chain with multiple layers referencing
+		# distinct packs.
+		test_commit first &&
+		git repack -d &&
+
+		test_commit second &&
+		git repack -d --write-midx=incremental &&
+
+		git multi-pack-index verify &&
+		test_line_count = 1 $midx_chain &&
+
+		# Now do a full -ad repack. The new pack contains all
+		# objects, but any retained MIDX layers still reference
+		# the now-deleted packs.
+		test_commit third &&
+		git repack -ad --write-midx=incremental &&
+
+		git multi-pack-index verify &&
+		git fsck &&
+		git rev-list --all --objects >/dev/null
+	)
+'
+
 test_done

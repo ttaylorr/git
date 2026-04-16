@@ -254,6 +254,41 @@ void existing_packs_mark_for_deletion(struct existing_packs *existing,
 					   &existing->cruft_packs);
 }
 
+/*
+ * Mark every pack that is referenced by the existing MIDX chain as
+ * retained, so that a subsequent call to
+ * existing_packs_mark_for_deletion() will not mark them for deletion.
+ *
+ * This is used when writing an incremental MIDX layer on top of an
+ * existing chain: retained layers continue to reference the same
+ * packs on disk, so those packs must not be unlinked even if the
+ * freshly-written pack supersedes them.
+ */
+void existing_packs_retain_midx_packs(struct existing_packs *existing)
+{
+	struct string_list_item *item;
+	struct strbuf buf = STRBUF_INIT;
+
+	for_each_string_list_item(item, &existing->midx_packs) {
+		struct string_list_item *found;
+
+		strbuf_reset(&buf);
+		strbuf_addstr(&buf, item->string);
+		strbuf_strip_suffix(&buf, ".pack");
+		strbuf_strip_suffix(&buf, ".idx");
+
+		found = string_list_lookup(&existing->non_kept_packs, buf.buf);
+		if (found)
+			existing_packs_mark_retained(found);
+
+		found = string_list_lookup(&existing->cruft_packs, buf.buf);
+		if (found)
+			existing_packs_mark_retained(found);
+	}
+
+	strbuf_release(&buf);
+}
+
 static void remove_redundant_packs_1(struct repository *repo,
 				     struct string_list *packs,
 				     const char *packdir,
