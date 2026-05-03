@@ -404,9 +404,10 @@ will be automatically changed to version `1`.
 +
 Incompatible with `--delta-islands`. Path-walk supports
 the `--filter=<spec>` forms `blob:none`, `blob:limit=<n>`,
-`sparse:oid=<blob>`, and `tree:0`. Other filter forms fall back to the
-regular object traversal. The `--use-bitmap-index` option will be
-ignored in the presence of `--path-walk`.
+`sparse:oid=<blob>`, `tree:0`, and `object:type=<type>`. Other filter
+forms fall back to the regular object traversal. The
+`--use-bitmap-index` option will be ignored in the presence of
+`--path-walk`.
 
 
 DELTA ISLANDS
