@@ -4732,6 +4732,15 @@ static int add_objects_by_path(const char *path,
 			continue;
 
 		add_object_entry(oid, type, path, exclude);
+
+		if (type == OBJ_COMMIT && write_bitmap_index) {
+			struct commit *commit;
+
+			commit = lookup_commit(the_repository, oid);
+			if (!commit)
+				die(_("could not find commit %s"), oid_to_hex(oid));
+			index_commit_for_bitmap(commit);
+		}
 	}
 
 	oe_end = to_pack.nr_objects;
@@ -5193,7 +5202,6 @@ int cmd_pack_objects(int argc,
 	if (path_walk) {
 		strvec_push(&rp, "--boundary");
 		strvec_push(&rp, "--objects");
-		use_bitmap_index = 0;
 	} else if (thin) {
 		use_internal_rev_list = 1;
 		strvec_push(&rp, shallow
