@@ -376,19 +376,37 @@ void resolve_tree_islands(struct repository *r,
 	if (progress)
 		progress_state = start_progress(r, _("Propagating island marks"), nr);
 
+	/*
+	 * Project `island_marks` onto a flat array indexed by `to_pack`
+	 * position. The inner loop then translates each tree entry's OID
+	 * to a `to_pack` position via `packlist_find()` and reads/writes
+	 * `bm[]` directly, avoiding the `kh_put_oid_map()` cost on every
+	 * tree-entry visit. After the loop, the array is written back
+	 * into `island_marks` so `in_same_island()` and friends see the
+	 * final state.
+	 */
+	{
+	struct island_bitmap **bm;
+
+	CALLOC_ARRAY(bm, to_pack->nr_objects);
+	for (i = 0; i < to_pack->nr_objects; i++) {
+		khiter_t kpos = kh_get_oid_map(island_marks,
+					       to_pack->objects[i].idx.oid);
+		if (kpos < kh_end(island_marks))
+			bm[i] = kh_value(island_marks, kpos);
+	}
+
 	for (i = 0; i < nr; i++) {
 		struct object_entry *ent = todo[i].entry;
 		struct island_bitmap *root_marks;
 		struct tree *tree;
 		struct tree_desc desc;
 		struct name_entry entry;
-		khiter_t pos;
+		uint32_t idx = ent - to_pack->objects;
 
-		pos = kh_get_oid_map(island_marks, ent->idx.oid);
-		if (pos >= kh_end(island_marks))
+		root_marks = bm[idx];
+		if (!root_marks)
 			continue;
-
-		root_marks = kh_value(island_marks, pos);
 
 		tree = lookup_tree(r, &ent->idx.oid);
 		if (!tree || repo_parse_tree(r, tree) < 0)
@@ -396,21 +414,43 @@ void resolve_tree_islands(struct repository *r,
 
 		init_tree_desc(&desc, &tree->object.oid, tree->buffer, tree->size);
 		while (tree_entry(&desc, &entry)) {
-			struct object *obj;
+			struct object_entry *child;
+			uint32_t cidx;
+			struct island_bitmap *b;
 
 			if (S_ISGITLINK(entry.mode))
 				continue;
 
-			obj = lookup_object(r, &entry.oid);
-			if (!obj)
+			child = packlist_find(to_pack, &entry.oid);
+			if (!child)
 				continue;
+			cidx = child - to_pack->objects;
 
-			set_island_marks(obj, root_marks);
+			b = bm[cidx];
+			if (!b) {
+				bm[cidx] = root_marks;
+				continue;
+			}
+			if (b == root_marks)
+				continue;
+			bm[cidx] = island_bitmap_or_intern(b, root_marks);
 		}
 
 		free_tree_buffer(tree);
 
 		display_progress(progress_state, i+1);
+	}
+
+	for (i = 0; i < to_pack->nr_objects; i++) {
+		khiter_t kpos;
+		int hash_ret;
+		if (!bm[i])
+			continue;
+		kpos = kh_put_oid_map(island_marks,
+				      to_pack->objects[i].idx.oid, &hash_ret);
+		kh_value(island_marks, kpos) = bm[i];
+	}
+	free(bm);
 	}
 
 	stop_progress(&progress_state);
