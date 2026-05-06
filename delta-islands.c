@@ -595,6 +595,21 @@ void resolve_tree_islands(struct repository *r,
 
 	stop_progress(&progress_state);
 	free(todo);
+
+	/*
+	 * After this point, no further `island_bitmap_or_intern()` calls
+	 * happen for this pack-objects run -- the consumer-side
+	 * `in_same_island()` and `island_delta_cmp()` only ask
+	 * `island_bitmap_is_subset()`. Reclaim the OR memo cache now so
+	 * its memory (one entry per distinct (a, b) pair seen during
+	 * propagation) doesn't sit untouched through the delta-search
+	 * phase. The canonical bitmap pool stays -- those pointers are
+	 * still referenced by `island_marks` for subset queries.
+	 */
+	if (bitmap_or_cache) {
+		kh_destroy_bitmap_or(bitmap_or_cache);
+		bitmap_or_cache = NULL;
+	}
 }
 
 struct island_load_data {
