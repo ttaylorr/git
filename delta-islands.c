@@ -13,6 +13,7 @@
 #include "progress.h"
 #include "refs.h"
 #include "khash.h"
+#include "hashmap.h"
 #include "pack-bitmap.h"
 #include "pack-objects.h"
 #include "delta-islands.h"
@@ -31,11 +32,70 @@ struct remote_island {
 };
 
 struct island_bitmap {
-	uint32_t refcount;
+	/*
+	 * Vestigial field, retained only because GCC's `-Wpedantic`
+	 * does not allow a struct with only a flexible array. The pool
+	 * owns each canonical bitmap, so explicit refcounting is not
+	 * needed; this field is read or written.
+	 */
+	uint32_t _reserved;
 	uint32_t bits[FLEX_ARRAY];
 };
 
 static uint32_t island_bitmap_size;
+
+/*
+ * Hash-cons pool of canonical bitmap values. Two bitmaps with the same
+ * `bits[]` content are represented by the same pointer, which lets us
+ * answer "do these bitmaps have equal content?" with a pointer
+ * comparison and lets us cache the result of pairwise unions by
+ * pointer pair.
+ */
+static khint_t island_bitmap_pool_hash(const struct island_bitmap *b)
+{
+	return memhash(b->bits, st_mult(island_bitmap_size, sizeof(*b->bits)));
+}
+
+static int island_bitmap_pool_eq(const struct island_bitmap *a,
+				 const struct island_bitmap *b)
+{
+	uint32_t i;
+	if (a == b)
+		return 1;
+	for (i = 0; i < island_bitmap_size; i++)
+		if (a->bits[i] != b->bits[i])
+			return 0;
+	return 1;
+}
+
+KHASH_INIT(bitmap_pool, struct island_bitmap *, struct island_bitmap *, 1,
+	   island_bitmap_pool_hash, island_bitmap_pool_eq)
+static kh_bitmap_pool_t *bitmap_pool;
+
+/*
+ * Memoize `intern(a | b)`. Each entry records a pair of canonical
+ * bitmap pointers (a, b) and the canonical pointer for `a | b`.
+ */
+struct bitmap_or_key {
+	struct island_bitmap *a;
+	struct island_bitmap *b;
+};
+
+static khint_t bitmap_or_hash(struct bitmap_or_key k)
+{
+	uintptr_t key[] = { (uintptr_t)k.a, (uintptr_t)k.b };
+
+	return memhash(key, sizeof(key));
+}
+
+static int bitmap_or_eq(struct bitmap_or_key x, struct bitmap_or_key y)
+{
+	return x.a == y.a && x.b == y.b;
+}
+
+KHASH_INIT(bitmap_or, struct bitmap_or_key, struct island_bitmap *, 1,
+	   bitmap_or_hash, bitmap_or_eq)
+static kh_bitmap_or_t *bitmap_or_cache;
 
 /*
  * Allocate a new bitmap; if "old" is not NULL, the new bitmap will be a copy
@@ -49,8 +109,33 @@ static struct island_bitmap *island_bitmap_new(const struct island_bitmap *old)
 	if (old)
 		memcpy(b, old, size);
 
-	b->refcount = 1;
 	return b;
+}
+
+/*
+ * Look up `b` in the canonical pool. If a bitmap with equal content
+ * already exists, free `b` and return the canonical one. Otherwise
+ * insert `b` and return it. Either way, the returned pointer is the
+ * pool's canonical entry for `b`'s content.
+ */
+static struct island_bitmap *island_bitmap_intern(struct island_bitmap *b)
+{
+	int hash_ret;
+	khiter_t pos;
+
+	if (!bitmap_pool)
+		bitmap_pool = kh_init_bitmap_pool();
+
+	pos = kh_put_bitmap_pool(bitmap_pool, b, &hash_ret);
+	if (hash_ret) {
+		kh_value(bitmap_pool, pos) = b;
+		return b;
+	} else {
+		struct island_bitmap *canonical = kh_value(bitmap_pool, pos);
+		if (canonical != b)
+			free(b);
+		return canonical;
+	}
 }
 
 static void island_bitmap_or(struct island_bitmap *a, const struct island_bitmap *b)
@@ -59,6 +144,45 @@ static void island_bitmap_or(struct island_bitmap *a, const struct island_bitmap
 
 	for (i = 0; i < island_bitmap_size; ++i)
 		a->bits[i] |= b->bits[i];
+}
+
+/*
+ * Compute the canonical bitmap representing `a | b`, with memoization.
+ * Both arguments must already be canonical pool entries.
+ */
+static struct island_bitmap *island_bitmap_or_intern(struct island_bitmap *a,
+						     struct island_bitmap *b)
+{
+	struct bitmap_or_key key;
+	struct island_bitmap *result, *fresh;
+	khiter_t pos;
+	int hash_ret;
+
+	if (a == b)
+		return a;
+
+	/* Canonicalize order so (a, b) and (b, a) collapse to the same key. */
+	if ((uintptr_t)a > (uintptr_t)b) {
+		struct island_bitmap *t = a;
+		a = b;
+		b = t;
+	}
+
+	key.a = a;
+	key.b = b;
+
+	if (!bitmap_or_cache)
+		bitmap_or_cache = kh_init_bitmap_or();
+
+	pos = kh_put_bitmap_or(bitmap_or_cache, key, &hash_ret);
+	if (!hash_ret)
+		return kh_value(bitmap_or_cache, pos);
+
+	fresh = island_bitmap_new(a);
+	island_bitmap_or(fresh, b);
+	result = island_bitmap_intern(fresh);
+	kh_value(bitmap_or_cache, pos) = result;
+	return result;
 }
 
 static int island_bitmap_is_subset(struct island_bitmap *self,
@@ -146,16 +270,11 @@ int island_delta_cmp(const struct object_id *a, const struct object_id *b)
 	return 0;
 }
 
-static struct island_bitmap *create_or_get_island_marks(struct object *obj)
+static struct island_bitmap *single_bit_bitmap(uint32_t i)
 {
-	khiter_t pos;
-	int hash_ret;
-
-	pos = kh_put_oid_map(island_marks, obj->oid, &hash_ret);
-	if (hash_ret)
-		kh_value(island_marks, pos) = island_bitmap_new(NULL);
-
-	return kh_value(island_marks, pos);
+	struct island_bitmap *fresh = island_bitmap_new(NULL);
+	island_bitmap_set(fresh, i);
+	return island_bitmap_intern(fresh);
 }
 
 static void set_island_marks(struct object *obj, struct island_bitmap *marks)
@@ -166,42 +285,30 @@ static void set_island_marks(struct object *obj, struct island_bitmap *marks)
 
 	pos = kh_put_oid_map(island_marks, obj->oid, &hash_ret);
 	if (hash_ret) {
-		/*
-		 * We don't have one yet; make a copy-on-write of the
-		 * parent.
-		 */
-		marks->refcount++;
 		kh_value(island_marks, pos) = marks;
 		return;
 	}
 
-	/*
-	 * We do have it. Make sure we split any copy-on-write before
-	 * updating.
-	 */
 	b = kh_value(island_marks, pos);
-	if (b->refcount > 1) {
-		b->refcount--;
-		b = kh_value(island_marks, pos) = island_bitmap_new(b);
-	}
-	island_bitmap_or(b, marks);
+	if (b == marks)
+		return;
+	kh_value(island_marks, pos) = island_bitmap_or_intern(b, marks);
 }
 
 static void mark_remote_island_1(struct repository *r,
 				 struct remote_island *rl,
 				 int is_core_island)
 {
+	struct island_bitmap *seed = single_bit_bitmap(island_counter);
 	uint32_t i;
 
 	for (i = 0; i < rl->oids.nr; ++i) {
-		struct island_bitmap *marks;
 		struct object *obj = parse_object(r, &rl->oids.oid[i]);
 
 		if (!obj)
 			continue;
 
-		marks = create_or_get_island_marks(obj);
-		island_bitmap_set(marks, island_counter);
+		set_island_marks(obj, seed);
 
 		if (is_core_island && obj->type == OBJ_COMMIT)
 			obj->flags |= NEEDS_BITMAP;
@@ -211,8 +318,7 @@ static void mark_remote_island_1(struct repository *r,
 			obj = ((struct tag *)obj)->tagged;
 			if (obj) {
 				parse_object(r, &obj->oid);
-				marks = create_or_get_island_marks(obj);
-				island_bitmap_set(marks, island_counter);
+				set_island_marks(obj, seed);
 			}
 		}
 	}
@@ -519,12 +625,20 @@ void free_island_marks(void)
 {
 	struct island_bitmap *bitmap;
 
-	if (island_marks) {
-		kh_foreach_value(island_marks, bitmap, {
-			if (!--bitmap->refcount)
-				free(bitmap);
-		});
+	if (island_marks)
 		kh_destroy_oid_map(island_marks);
+
+	if (bitmap_pool) {
+		kh_foreach_value(bitmap_pool, bitmap, {
+			free(bitmap);
+		});
+		kh_destroy_bitmap_pool(bitmap_pool);
+		bitmap_pool = NULL;
+	}
+
+	if (bitmap_or_cache) {
+		kh_destroy_bitmap_or(bitmap_or_cache);
+		bitmap_or_cache = NULL;
 	}
 
 	/* detect use-after-free with a an address which is never valid: */
