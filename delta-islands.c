@@ -33,54 +33,110 @@ struct remote_island {
 };
 
 /*
- * `island_bitmap` is just an EWAH-compressed bitmap with
+ * Each island_bitmap wraps an EWAH-compressed bitmap with
  * `island_bitmap_size` logical bits, one per island. We never mutate
  * an interned bitmap; ORs are computed via a dense `struct bitmap`
  * intermediate and re-compressed.
+ *
+ * The wrapper caches the bitmap's popcount and EWAH content hash
+ * alongside the pointer, so that callers can:
+ *
+ *   - reject `is_subset(a, b)` instantly when popcount(a) >= popcount(b)
+ *     and (a, b) are distinct canonical pointers (a strict subset has
+ *     strictly fewer bits, and equal popcount + distinct canonical
+ *     pointer implies non-subset because canonicality means equal
+ *     content collapses to equal pointer);
+ *
+ *   - short-circuit `or(a, b)` to whichever operand is the superset of
+ *     the other, avoiding the dense decompress + re-compress + intern
+ *     round-trip on the cache-miss path;
+ *
+ *   - hash a pool entry by its cached `checksum` rather than re-walking
+ *     the EWAH buffer on every `kh_put` / rehash.
  */
-struct island_bitmap;
-#define island_bitmap ewah_bitmap
+struct island_bitmap {
+	struct ewah_bitmap *ewah;
+	uint32_t popcount;
+	uint32_t checksum;
+};
 
 static uint32_t island_bitmap_size;	/* number of islands (logical bits) */
 
 /*
- * Hash-cons pool of canonical bitmap values. Two EWAH bitmaps with the
- * same set-bit content are represented by the same pointer, which lets
- * us answer "do these bitmaps have equal content?" with a pointer
+ * Allocate a wrapper that takes ownership of `raw` and caches its
+ * popcount and checksum. The returned wrapper is not yet interned;
+ * callers must pass it through `island_bitmap_intern()` to get back
+ * the canonical pool entry for its content.
+ */
+static struct island_bitmap *island_bitmap_wrap(struct ewah_bitmap *raw,
+						uint32_t popcount)
+{
+	struct island_bitmap *b = xmalloc(sizeof(*b));
+	b->ewah = raw;
+	b->popcount = popcount;
+	b->checksum = ewah_checksum(raw);
+	return b;
+}
+
+static void island_bitmap_destroy(struct island_bitmap *b)
+{
+	if (!b)
+		return;
+	ewah_free(b->ewah);
+	free(b);
+}
+
+/*
+ * Hash-cons pool of canonical bitmap values. Two bitmaps with the same
+ * set-bit content are represented by the same wrapper pointer, which
+ * lets us answer "do these bitmaps have equal content?" with a pointer
  * comparison and lets us cache the result of pairwise unions by
  * pointer pair.
  */
 static khint_t island_bitmap_pool_hash(const struct island_bitmap *b)
 {
-	/* `ewah_checksum()` is content-based and a stable hash. */
-	return (khint_t)ewah_checksum((struct island_bitmap *)b);
+	/* `checksum` is the cached content hash from `ewah_checksum()`. */
+	return (khint_t)b->checksum;
 }
 
 static int island_bitmap_pool_eq(const struct island_bitmap *a,
 				 const struct island_bitmap *b)
 {
-	struct ewah_iterator ita, itb;
-	eword_t wa, wb;
-	int next_a, next_b;
+	const struct ewah_bitmap *ea, *eb;
 
 	if (a == b)
 		return 1;
+	if (a->checksum != b->checksum)
+		return 0;
+	if (a->popcount != b->popcount)
+		return 0;
 
-	ewah_iterator_init(&ita, (struct ewah_bitmap *)a);
-	ewah_iterator_init(&itb, (struct ewah_bitmap *)b);
+	ea = a->ewah;
+	eb = b->ewah;
 
-	for (;;) {
-		next_a = ewah_iterator_next(&wa, &ita);
-		next_b = ewah_iterator_next(&wb, &itb);
-		if (!next_a && !next_b)
-			return 1;
-		if (!next_a)
-			wa = 0;
-		if (!next_b)
-			wb = 0;
-		if (wa != wb)
-			return 0;
-	}
+	/*
+	 * Pool entries come from one of two encoders:
+	 *   - `bitmap_to_ewah()`, which is canonical for any given logical
+	 *     content (trailing zero words are dropped, runs are emitted
+	 *     in a fixed schedule);
+	 *   - `ewah_set()` on a freshly-allocated `ewah_new()`, used only
+	 *     by `single_bit_bitmap()` for the singleton seeds.
+	 *
+	 * The two encoders produce different byte layouts in general, but
+	 * their logical-content domains are disjoint: singletons only ever
+	 * arrive via `single_bit_bitmap()`, and `bitmap_to_ewah()` is only
+	 * fed multi-bit unions (`island_bitmap_or_intern()` early-returns
+	 * when `a == b`, so a singleton OR'd with itself never reaches
+	 * `bitmap_to_ewah()`). So two pool entries with equal content also
+	 * have equal `(bit_size, buffer)` bytes and we can compare by
+	 * `memcmp` rather than by walking the EWAH iterator.
+	 */
+	if (ea->bit_size != eb->bit_size)
+		return 0;
+	if (ea->buffer_size != eb->buffer_size)
+		return 0;
+	return !memcmp(ea->buffer, eb->buffer,
+		       ea->buffer_size * sizeof(eword_t));
 }
 
 KHASH_INIT(bitmap_pool, struct island_bitmap *, struct island_bitmap *, 1,
@@ -123,10 +179,36 @@ static size_t island_bitmap_word_alloc(void)
 }
 
 /*
- * Look up `b` in the canonical pool. If a bitmap with equal content
- * already exists, free `b` and return the canonical one. Otherwise
- * insert `b` and return it. Either way, the returned pointer is the
- * pool's canonical entry for `b`'s content.
+ * Walk `super`'s EWAH and `self`'s EWAH in lock-step. Bail at the first
+ * word where `self` has bits not present in `super`. Both arguments
+ * must be canonical pool entries.
+ */
+static int island_bitmap_is_subset_uncached(struct island_bitmap *self,
+					    struct island_bitmap *super)
+{
+	struct ewah_iterator it_self, it_super;
+	eword_t w_self, w_super;
+	int next_self, next_super;
+
+	ewah_iterator_init(&it_self, self->ewah);
+	ewah_iterator_init(&it_super, super->ewah);
+
+	for (;;) {
+		next_self = ewah_iterator_next(&w_self, &it_self);
+		next_super = ewah_iterator_next(&w_super, &it_super);
+		if (!next_self)
+			return 1;
+		if (!next_super)
+			w_super = 0;
+		if (w_self & ~w_super)
+			return 0;
+	}
+}
+
+/*
+ * Intern `b` into the canonical pool. If a wrapper with equal content
+ * already exists, destroy `b` (and its underlying EWAH) and return the
+ * canonical one. Otherwise insert `b` and return it.
  */
 static struct island_bitmap *island_bitmap_intern(struct island_bitmap *b)
 {
@@ -143,7 +225,7 @@ static struct island_bitmap *island_bitmap_intern(struct island_bitmap *b)
 	} else {
 		struct island_bitmap *canonical = kh_value(bitmap_pool, pos);
 		if (canonical != b)
-			ewah_free(b);
+			island_bitmap_destroy(b);
 		return canonical;
 	}
 }
@@ -153,9 +235,11 @@ static struct island_bitmap *island_bitmap_intern(struct island_bitmap *b)
  * Both arguments must already be canonical pool entries.
  *
  * EWAH bitmaps are streaming-compressed and don't support random
- * mutation, so build the union via a dense `struct bitmap`
- * intermediate and re-compress with `bitmap_to_ewah()`. This only
- * runs on cache misses.
+ * mutation, so on a true cache miss we build the union via a dense
+ * `struct bitmap` intermediate and re-compress with `bitmap_to_ewah()`.
+ * Before paying that cost, try a popcount-guided subset check: if one
+ * operand is a subset of the other, the OR result is just the larger
+ * operand and we can skip the dense round-trip entirely.
  */
 static struct island_bitmap *island_bitmap_or_intern(struct island_bitmap *a,
 						     struct island_bitmap *b)
@@ -186,10 +270,40 @@ static struct island_bitmap *island_bitmap_or_intern(struct island_bitmap *a,
 	if (!hash_ret)
 		return kh_value(bitmap_or_cache, pos);
 
+	/*
+	 * Subset short-circuit: if one operand absorbs the other, the OR
+	 * result is just the superset. Pick the candidate direction by
+	 * popcount; equal popcount + distinct canonical pointers means
+	 * neither is a subset of the other (canonicality folds equal
+	 * content into equal pointers, caught above), so we skip the
+	 * subset check entirely in that case.
+	 */
+	if (a->popcount > b->popcount) {
+		if (island_bitmap_is_subset_uncached(b, a)) {
+			kh_value(bitmap_or_cache, pos) = a;
+			return a;
+		}
+	} else if (b->popcount > a->popcount) {
+		if (island_bitmap_is_subset_uncached(a, b)) {
+			kh_value(bitmap_or_cache, pos) = b;
+			return b;
+		}
+	}
+
 	tmp = bitmap_word_alloc(island_bitmap_word_alloc());
-	bitmap_or_ewah(tmp, (struct ewah_bitmap *)a);
-	bitmap_or_ewah(tmp, (struct ewah_bitmap *)b);
-	result = island_bitmap_intern(bitmap_to_ewah(tmp));
+	bitmap_or_ewah(tmp, a->ewah);
+	bitmap_or_ewah(tmp, b->ewah);
+	/*
+	 * Compute popcount from the dense intermediate so we don't pay
+	 * an extra full EWAH walk inside `island_bitmap_wrap`. The dense
+	 * buffer is already hot in cache from the two `bitmap_or_ewah`
+	 * passes above.
+	 */
+	{
+		uint32_t pc = (uint32_t)bitmap_popcount(tmp);
+		result = island_bitmap_intern(
+			island_bitmap_wrap(bitmap_to_ewah(tmp), pc));
+	}
 	bitmap_free(tmp);
 
 	kh_value(bitmap_or_cache, pos) = result;
@@ -206,28 +320,6 @@ KHASH_INIT(bitmap_subset, struct bitmap_or_key, int, 1,
 	   bitmap_or_hash, bitmap_or_eq)
 static kh_bitmap_subset_t *bitmap_subset_cache;
 
-static int island_bitmap_is_subset_uncached(struct island_bitmap *self,
-					    struct island_bitmap *super)
-{
-	struct ewah_iterator it_self, it_super;
-	eword_t w_self, w_super;
-	int next_self, next_super;
-
-	ewah_iterator_init(&it_self, (struct ewah_bitmap *)self);
-	ewah_iterator_init(&it_super, (struct ewah_bitmap *)super);
-
-	for (;;) {
-		next_self = ewah_iterator_next(&w_self, &it_self);
-		next_super = ewah_iterator_next(&w_super, &it_super);
-		if (!next_self)
-			return 1;
-		if (!next_super)
-			w_super = 0;
-		if (w_self & ~w_super)
-			return 0;
-	}
-}
-
 static int island_bitmap_is_subset(struct island_bitmap *self,
 				   struct island_bitmap *super)
 {
@@ -237,6 +329,13 @@ static int island_bitmap_is_subset(struct island_bitmap *self,
 
 	if (self == super)
 		return 1;
+	/*
+	 * Canonical pool entries fold equal content into equal pointers,
+	 * so a strict subset has strictly fewer bits. Equal popcount on
+	 * distinct pointers therefore implies non-subset.
+	 */
+	if (self->popcount >= super->popcount)
+		return 0;
 
 	if (!bitmap_subset_cache)
 		bitmap_subset_cache = kh_init_bitmap_subset();
@@ -258,7 +357,7 @@ static int island_bitmap_get(struct island_bitmap *self, uint32_t i)
 	eword_t word;
 	uint32_t pos = 0;
 
-	ewah_iterator_init(&it, (struct ewah_bitmap *)self);
+	ewah_iterator_init(&it, self->ewah);
 	while (ewah_iterator_next(&word, &it)) {
 		if (i < pos + BITS_IN_EWORD)
 			return (word >> (i - pos)) & 1;
@@ -271,7 +370,8 @@ static struct island_bitmap *single_bit_bitmap(uint32_t i)
 {
 	struct ewah_bitmap *fresh = ewah_new();
 	ewah_set(fresh, i);
-	return island_bitmap_intern(fresh);
+	/* A single-bit seed has popcount = 1 by construction. */
+	return island_bitmap_intern(island_bitmap_wrap(fresh, 1));
 }
 
 int in_same_island(const struct object_id *trg_oid, const struct object_id *src_oid)
@@ -723,7 +823,7 @@ void free_island_marks(void)
 
 	if (bitmap_pool) {
 		kh_foreach_value(bitmap_pool, bitmap, {
-			ewah_free(bitmap);
+			island_bitmap_destroy(bitmap);
 		});
 		kh_destroy_bitmap_pool(bitmap_pool);
 		bitmap_pool = NULL;
