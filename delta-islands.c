@@ -169,16 +169,6 @@ KHASH_INIT(bitmap_or, struct bitmap_or_key, struct island_bitmap *, 1,
 static kh_bitmap_or_t *bitmap_or_cache;
 
 /*
- * Return the number of dense words required to hold `island_bitmap_size`
- * logical bits. Used to pre-size the dense-bitmap intermediate when
- * building a fresh EWAH via OR.
- */
-static size_t island_bitmap_word_alloc(void)
-{
-	return (island_bitmap_size + BITS_IN_EWORD - 1) / BITS_IN_EWORD;
-}
-
-/*
  * Walk `super`'s EWAH and `self`'s EWAH in lock-step. Bail at the first
  * word where `self` has bits not present in `super`. Both arguments
  * must be canonical pool entries.
@@ -246,7 +236,6 @@ static struct island_bitmap *island_bitmap_or_intern(struct island_bitmap *a,
 {
 	struct bitmap_or_key key;
 	struct island_bitmap *result;
-	struct bitmap *tmp;
 	khiter_t pos;
 	int hash_ret;
 
@@ -290,21 +279,21 @@ static struct island_bitmap *island_bitmap_or_intern(struct island_bitmap *a,
 		}
 	}
 
-	tmp = bitmap_word_alloc(island_bitmap_word_alloc());
-	bitmap_or_ewah(tmp, a->ewah);
-	bitmap_or_ewah(tmp, b->ewah);
 	/*
-	 * Compute popcount from the dense intermediate so we don't pay
-	 * an extra full EWAH walk inside `island_bitmap_wrap`. The dense
-	 * buffer is already hot in cache from the two `bitmap_or_ewah`
-	 * passes above.
+	 * Compute the union directly in EWAH form via `ewah_or()`, which
+	 * walks both inputs' run-length-words in lock-step and emits an
+	 * RLW-encoded result with no dense intermediate. This avoids the
+	 * `bitmap_word_alloc()` allocation (8.4 KB at I=69k), the two
+	 * full-buffer `bitmap_or_ewah()` decompress walks, and the
+	 * separate `bitmap_to_ewah()` re-walk that the dense pipeline
+	 * required.
 	 */
 	{
-		uint32_t pc = (uint32_t)bitmap_popcount(tmp);
-		result = island_bitmap_intern(
-			island_bitmap_wrap(bitmap_to_ewah(tmp), pc));
+		struct ewah_bitmap *raw = ewah_new();
+		ewah_or(a->ewah, b->ewah, raw);
+		result = island_bitmap_intern(island_bitmap_wrap(
+			raw, (uint32_t)ewah_bitmap_popcount(raw)));
 	}
-	bitmap_free(tmp);
 
 	kh_value(bitmap_or_cache, pos) = result;
 	return result;
