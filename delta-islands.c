@@ -196,15 +196,22 @@ static struct island_bitmap *island_bitmap_or_intern(struct island_bitmap *a,
 	return result;
 }
 
-static int island_bitmap_is_subset(struct island_bitmap *self,
-				   struct island_bitmap *super)
+/*
+ * Memoize `subset(a, b)`. Both arguments are canonical pool entries,
+ * so pointer equality means content equality and we can key by the
+ * raw pointer pair. The relation is asymmetric, so don't canonicalize
+ * the order.
+ */
+KHASH_INIT(bitmap_subset, struct bitmap_or_key, int, 1,
+	   bitmap_or_hash, bitmap_or_eq)
+static kh_bitmap_subset_t *bitmap_subset_cache;
+
+static int island_bitmap_is_subset_uncached(struct island_bitmap *self,
+					    struct island_bitmap *super)
 {
 	struct ewah_iterator it_self, it_super;
 	eword_t w_self, w_super;
 	int next_self, next_super;
-
-	if (self == super)
-		return 1;
 
 	ewah_iterator_init(&it_self, (struct ewah_bitmap *)self);
 	ewah_iterator_init(&it_super, (struct ewah_bitmap *)super);
@@ -219,6 +226,30 @@ static int island_bitmap_is_subset(struct island_bitmap *self,
 		if (w_self & ~w_super)
 			return 0;
 	}
+}
+
+static int island_bitmap_is_subset(struct island_bitmap *self,
+				   struct island_bitmap *super)
+{
+	struct bitmap_or_key key;
+	khiter_t pos;
+	int hash_ret, result;
+
+	if (self == super)
+		return 1;
+
+	if (!bitmap_subset_cache)
+		bitmap_subset_cache = kh_init_bitmap_subset();
+
+	key.a = self;
+	key.b = super;
+	pos = kh_put_bitmap_subset(bitmap_subset_cache, key, &hash_ret);
+	if (!hash_ret)
+		return kh_value(bitmap_subset_cache, pos);
+
+	result = island_bitmap_is_subset_uncached(self, super);
+	kh_value(bitmap_subset_cache, pos) = result;
+	return result;
 }
 
 static int island_bitmap_get(struct island_bitmap *self, uint32_t i)
@@ -701,6 +732,11 @@ void free_island_marks(void)
 	if (bitmap_or_cache) {
 		kh_destroy_bitmap_or(bitmap_or_cache);
 		bitmap_or_cache = NULL;
+	}
+
+	if (bitmap_subset_cache) {
+		kh_destroy_bitmap_subset(bitmap_subset_cache);
+		bitmap_subset_cache = NULL;
 	}
 
 	/* detect use-after-free with a an address which is never valid: */
