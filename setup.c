@@ -22,6 +22,7 @@
 #include "chdir-notify.h"
 #include "path.h"
 #include "quote.h"
+#include "tempfile.h"
 #include "trace.h"
 #include "trace2.h"
 #include "worktree.h"
@@ -2162,12 +2163,17 @@ int daemonize(void)
 	errno = ENOSYS;
 	return -1;
 #else
-	switch (fork()) {
+	pid_t ppid = getpid();
+	pid_t pid;
+
+	switch ((pid = fork())) {
 		case 0:
+			reassign_tempfile_ownership(ppid, getpid());
 			break;
 		case -1:
 			die_errno(_("fork failed"));
 		default:
+			reassign_tempfile_ownership(ppid, pid);
 			exit(0);
 	}
 	if (setsid() == -1)

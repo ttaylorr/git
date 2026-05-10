@@ -1460,6 +1460,56 @@ test_expect_success '--detach causes maintenance to run in background' '
 	)
 '
 
+test_expect_success PIPE '--detach holds maintenance lock until daemonized child exits' '
+	test_when_finished "rm -rf repo" &&
+	git init repo &&
+	(
+		cd repo &&
+
+		mkfifo fifo &&
+
+		git config maintenance.auto false &&
+		git config core.lockfilepid true &&
+
+		git remote add origin /does/not/exist &&
+		git config set remote.origin.uploadpack \
+			"echo \$PPID >child && cat \"$(pwd)/fifo\"" &&
+
+		# Start a detached prefetch maintenance task. Note that
+		# we are backgrounding git-maintenance here in order to
+		# determine its PID to validate that the lockfile was
+		# created by the parent.
+		{ git maintenance run --task=prefetch --detach & } &&
+		parent="$!" &&
+
+		# Open fifo for writing, which will block until the
+		# upload-pack helper opens it for reading. Once exec
+		# returns, we know that the daemonized child is alive
+		# and pinned.
+		exec 8>fifo &&
+
+		test_path_is_file .git/objects/maintenance.lock &&
+		test_path_is_file .git/objects/maintenance~pid.lock &&
+
+		# Verify that the maintenance.lock still exists, and
+		# that it was created by the parent process, not the
+		# child.
+		echo "pid $parent" >expect &&
+		test_cmp expect .git/objects/maintenance~pid.lock &&
+
+		# Close the write end of the FIFO, causing our upload-pack
+		# helper to quit. Wait until the grandparent (from the
+		# perspective of our upload-pack helper, the daemonized
+		# git-maintenance child)
+		exec 8>&- &&
+		gpid="$(ps -o ppid= -p $(cat child) | tr -d " ")" &&
+		test -n $gpid && wait $gpid &&
+
+		test_path_is_missing .git/objects/maintenance.lock &&
+		test_path_is_missing .git/objects/maintenance~pid.lock
+	)
+'
+
 test_expect_success 'repacking loose objects is quiet' '
 	test_when_finished "rm -rf repo" &&
 	git init repo &&
