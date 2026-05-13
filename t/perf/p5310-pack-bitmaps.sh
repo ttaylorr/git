@@ -27,7 +27,7 @@ test_lookup_pack_bitmap () {
 		git tag --message="tag pointing to HEAD" perf-tag HEAD
 	'
 
-	test_perf "enable lookup table: $1" '
+	test_expect_success "enable lookup table: $1" '
 		git config pack.writeBitmapLookupTable '"$1"'
 	'
 
