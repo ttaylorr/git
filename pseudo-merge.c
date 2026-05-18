@@ -384,7 +384,7 @@ static void select_pseudo_merges_1(struct bitmap_writer *writer,
 		} while (j % group->stable_size);
 
 		if (merge->parents)
-			bitmap_writer_push_commit(writer, merge, 1);
+			bitmap_writer_push_pseudo_merge(writer, merge);
 	}
 
 	/* make up to group->max_merges pseudo merges for unstable commits */
@@ -425,7 +425,7 @@ static void select_pseudo_merges_1(struct bitmap_writer *writer,
 		}
 
 		if (merge->parents)
-			bitmap_writer_push_commit(writer, merge, 1);
+			bitmap_writer_push_pseudo_merge(writer, merge);
 		if (end >= matches->unstable_nr)
 			break;
 	}

@@ -193,29 +193,30 @@ int bitmap_writer_has_bitmapped_object_id(struct bitmap_writer *writer,
  * Compute the actual bitmaps
  */
 
-void bitmap_writer_push_commit(struct bitmap_writer *writer,
-			       struct commit *commit, unsigned pseudo_merge)
+void bitmap_writer_push_pseudo_merge(struct bitmap_writer *writer,
+				     struct commit *commit)
 {
-	if (pseudo_merge) {
-		ALLOC_GROW(writer->pseudo_merges, writer->pseudo_merges_nr + 1,
-			   writer->pseudo_merges_alloc);
+	ALLOC_GROW(writer->pseudo_merges, writer->pseudo_merges_nr + 1,
+		   writer->pseudo_merges_alloc);
 
-		writer->pseudo_merges[writer->pseudo_merges_nr].commit = commit;
-		writer->pseudo_merges[writer->pseudo_merges_nr].bitmap = NULL;
-		writer->pseudo_merges[writer->pseudo_merges_nr].parents = NULL;
-		writer->pseudo_merges_nr++;
-		return;
-	} else {
-		int hash_ret;
-		khiter_t hash_pos = kh_put_oid_map(writer->bitmaps,
-						   commit->object.oid,
-						   &hash_ret);
+	writer->pseudo_merges[writer->pseudo_merges_nr].commit = commit;
+	writer->pseudo_merges[writer->pseudo_merges_nr].bitmap = NULL;
+	writer->pseudo_merges[writer->pseudo_merges_nr].parents = NULL;
+	writer->pseudo_merges_nr++;
+}
 
-		if (!hash_ret)
-			die(_("duplicate entry when writing bitmap index: %s"),
-			    oid_to_hex(&commit->object.oid));
-		kh_value(writer->bitmaps, hash_pos) = NULL;
-	}
+void bitmap_writer_push_commit(struct bitmap_writer *writer,
+			       struct commit *commit)
+{
+	int hash_ret;
+	khiter_t hash_pos = kh_put_oid_map(writer->bitmaps,
+					   commit->object.oid,
+					   &hash_ret);
+
+	if (!hash_ret)
+		die(_("duplicate entry when writing bitmap index: %s"),
+		    oid_to_hex(&commit->object.oid));
+	kh_value(writer->bitmaps, hash_pos) = NULL;
 
 	if (writer->selected_nr >= writer->selected_alloc) {
 		writer->selected_alloc = (writer->selected_alloc + 32) * 2;
@@ -1042,7 +1043,7 @@ void bitmap_writer_select_commits(struct bitmap_writer *writer,
 
 	if (indexed_commits_nr < 100) {
 		for (i = 0; i < indexed_commits_nr; ++i)
-			bitmap_writer_push_commit(writer, indexed_commits[i], 0);
+			bitmap_writer_push_commit(writer, indexed_commits[i]);
 
 		select_pseudo_merges(writer);
 
@@ -1079,7 +1080,7 @@ void bitmap_writer_select_commits(struct bitmap_writer *writer,
 			}
 		}
 
-		bitmap_writer_push_commit(writer, chosen, 0);
+		bitmap_writer_push_commit(writer, chosen);
 
 		i += next + 1;
 		display_progress(writer->progress, i);
