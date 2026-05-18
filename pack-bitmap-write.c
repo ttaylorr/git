@@ -662,28 +662,39 @@ static int pseudo_merge_bitmap_parents;
 static int fill_bitmap_commit_calls_nr;
 static int fill_bitmap_commit_found_ancestor_nr;
 
-static int fill_bitmap_commit(struct bitmap_writer *writer,
-			      struct bb_commit *ent,
-			      struct commit *commit,
-			      struct prio_queue *queue,
-			      struct prio_queue *tree_queue,
-			      struct bitmap_index *old_bitmap,
-			      const uint32_t *mapping)
+static int fill_bitmap_commits(struct bitmap_writer *writer,
+			       struct bb_commit *ent,
+			       struct commit *self,
+			       struct commit_list *commits,
+			       struct prio_queue *queue,
+			       struct prio_queue *tree_queue,
+			       struct bitmap_index *old_bitmap,
+			       const uint32_t *mapping)
 {
 	int found;
-	int from_pseudo_merge = commit->object.flags & BITMAP_PSEUDO_MERGE;
+	int fill_from_pseudo_merge = !self;
 	uint32_t pos;
+	struct commit_list *p;
 
 	fill_bitmap_commit_calls_nr++;
 
 	if (!ent->bitmap)
 		ent->bitmap = bitmap_new();
 
-	prio_queue_put(queue, commit);
+	for (p = commits; p; p = p->next) {
+		pos = find_object_pos(writer, &p->item->object.oid, &found);
+		if (!found)
+			return -1;
+		if (!bitmap_get(ent->bitmap, pos)) {
+			bitmap_set(ent->bitmap, pos);
+			prio_queue_put(queue, p->item);
+		}
+	}
 
 	while (queue->nr) {
 		struct commit_list *p;
 		struct commit *c = prio_queue_get(queue);
+		struct tree *tree;
 
 		if (old_bitmap && mapping) {
 			struct ewah_bitmap *old;
@@ -711,7 +722,7 @@ static int fill_bitmap_commit(struct bitmap_writer *writer,
 		 * short-circuit the walk: its stored bitmap already covers
 		 * the commit itself, its tree, and all of its ancestors.
 		 */
-		if (c != commit) {
+		if (c != self) {
 			khiter_t hash_pos = kh_get_oid_map(writer->bitmaps,
 							   c->object.oid);
 			if (hash_pos != kh_end(writer->bitmaps)) {
@@ -730,34 +741,27 @@ static int fill_bitmap_commit(struct bitmap_writer *writer,
 		 * Mark ourselves and queue our tree. The commit
 		 * walk ensures we cover all parents.
 		 */
-		if (!(c->object.flags & BITMAP_PSEUDO_MERGE)) {
-			struct tree *tree;
-
-			if (from_pseudo_merge && !c->object.parsed) {
-				/*
-				 * Commits reachable from selected
-				 * non-pseudo-merges are already parsed
-				 * by the regular bitmap build.
-				 *
-				 * However, pseudo-merge fills can also
-				 * reach commits that were not covered
-				 * there, so parse any such leftovers
-				 * before reading their tree or parents.
-				 */
-				if (repo_parse_commit(writer->repo, c))
-					return -1;
-			}
-
-			pos = find_object_pos(writer, &c->object.oid, &found);
-			if (!found)
+		if (fill_from_pseudo_merge && !c->object.parsed) {
+			/*
+			 * Commits reachable from selected non-pseudo-merges
+			 * are already parsed by the regular bitmap build.
+			 * Pseudo-merge fills can also reach commits that were
+			 * not covered there, so parse any such leftovers
+			 * before reading their tree or parents.
+			 */
+			if (repo_parse_commit(writer->repo, c))
 				return -1;
-			bitmap_set(ent->bitmap, pos);
-
-			tree = repo_get_commit_tree(writer->repo, c);
-			if (!tree)
-				return -1;
-			prio_queue_put(tree_queue, tree);
 		}
+
+		pos = find_object_pos(writer, &c->object.oid, &found);
+		if (!found)
+			return -1;
+		bitmap_set(ent->bitmap, pos);
+
+		tree = repo_get_commit_tree(writer->repo, c);
+		if (!tree)
+			return -1;
+		prio_queue_put(tree_queue, tree);
 
 		for (p = c->parents; p; p = p->next) {
 			pos = find_object_pos(writer, &p->item->object.oid,
@@ -791,6 +795,19 @@ static int fill_bitmap_commit(struct bitmap_writer *writer,
 			return -1;
 	}
 	return 0;
+}
+
+static int fill_bitmap_commit(struct bitmap_writer *writer,
+			      struct bb_commit *ent,
+			      struct commit *commit,
+			      struct prio_queue *queue,
+			      struct prio_queue *tree_queue,
+			      struct bitmap_index *old_bitmap,
+			      const uint32_t *mapping)
+{
+	struct commit_list commit_list = { commit, NULL };
+	return fill_bitmap_commits(writer, ent, commit, &commit_list,
+				   queue, tree_queue, old_bitmap, mapping);
 }
 
 static int reuse_pseudo_merge_bitmap(struct bitmap_index *old_bitmap,
@@ -842,8 +859,8 @@ static int build_pseudo_merge_bitmap(struct bitmap_writer *writer,
 		goto done;
 	}
 
-	ret = fill_bitmap_commit(writer, &ent, merge, &queue, &tree_queue,
-				 old_bitmap, mapping);
+	ret = fill_bitmap_commits(writer, &ent, NULL, merge->parents,
+				  &queue, &tree_queue, old_bitmap, mapping);
 
 	if (!ret)
 		*out = bitmap_to_ewah(ent.bitmap);
