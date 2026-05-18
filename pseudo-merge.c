@@ -313,25 +313,6 @@ static struct commit *push_pseudo_merge(struct pseudo_merge_group *group)
 	return merge;
 }
 
-static struct pseudo_merge_commit_idx *pseudo_merge_idx(kh_oid_map_t *pseudo_merge_commits,
-							const struct object_id *oid)
-
-{
-	struct pseudo_merge_commit_idx *pmc;
-	int hash_ret;
-	khiter_t hash_pos = kh_put_oid_map(pseudo_merge_commits, *oid,
-					   &hash_ret);
-
-	if (hash_ret) {
-		CALLOC_ARRAY(pmc, 1);
-		kh_value(pseudo_merge_commits, hash_pos) = pmc;
-	} else {
-		pmc = kh_value(pseudo_merge_commits, hash_pos);
-	}
-
-	return pmc;
-}
-
 #define MIN_PSEUDO_MERGE_SIZE 8
 
 static void select_pseudo_merges_1(struct bitmap_writer *writer,
@@ -363,23 +344,11 @@ static void select_pseudo_merges_1(struct bitmap_writer *writer,
 		 */
 		do {
 			struct commit *c;
-			struct pseudo_merge_commit_idx *pmc;
 
 			if (j >= matches->stable_nr)
 				break;
 
 			c = matches->stable[j++];
-			/*
-			 * Here and below, make sure that we keep our mapping of
-			 * commits -> pseudo-merge(s) which include the key'd
-			 * commit up-to-date.
-			 */
-			pmc = pseudo_merge_idx(writer->pseudo_merge_commits,
-					       &c->object.oid);
-
-			ALLOC_GROW(pmc->pseudo_merge, pmc->nr + 1, pmc->alloc);
-
-			pmc->pseudo_merge[pmc->nr++] = writer->pseudo_merges_nr;
 			p = commit_list_append(c, p);
 		} while (j % group->stable_size);
 
@@ -410,17 +379,10 @@ static void select_pseudo_merges_1(struct bitmap_writer *writer,
 		 */
 		for (; j < end && j < matches->unstable_nr; j++) {
 			struct commit *c = matches->unstable[j];
-			struct pseudo_merge_commit_idx *pmc;
 
 			if (j % (uint32_t)(1.0 / group->sample_rate))
 				continue;
 
-			pmc = pseudo_merge_idx(writer->pseudo_merge_commits,
-					       &c->object.oid);
-
-			ALLOC_GROW(pmc->pseudo_merge, pmc->nr + 1, pmc->alloc);
-
-			pmc->pseudo_merge[pmc->nr++] = writer->pseudo_merges_nr;
 			p = commit_list_append(c, p);
 		}
 
