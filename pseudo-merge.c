@@ -11,7 +11,6 @@
 #include "refs.h"
 #include "pack-bitmap.h"
 #include "commit.h"
-#include "alloc.h"
 #include "progress.h"
 #include "hex.h"
 
@@ -296,15 +295,13 @@ static int find_pseudo_merge_group_for_ref(const struct reference *ref, void *_d
 	return 0;
 }
 
-static struct commit *push_pseudo_merge(void)
+static void push_pseudo_merge(struct bitmap_writer *writer,
+			      struct commit_list **commits)
 {
-	struct commit *merge;
+	if (*commits)
+		bitmap_writer_push_pseudo_merge(writer, *commits);
 
-	merge = alloc_commit_node(the_repository);
-	merge->object.parsed = 1;
-	merge->object.flags |= BITMAP_PSEUDO_MERGE;
-
-	return merge;
+	*commits = NULL;
 }
 
 #define MIN_PSEUDO_MERGE_SIZE 8
@@ -325,16 +322,13 @@ static void select_pseudo_merges_1(struct bitmap_writer *writer,
 
 	/* make stable_merges_nr pseudo merges for stable commits */
 	for (i = 0, j = 0; i < stable_merges_nr; i++) {
-		struct commit *merge;
-		struct commit_list **p;
-
-		merge = push_pseudo_merge();
-		p = &merge->parents;
+		struct commit_list *commits = NULL;
+		struct commit_list **tail = &commits;
 
 		/*
-		 * For each pseudo-merge created above, add parents to the
-		 * allocated commit node from the stable set of commits
-		 * (un-bitmapped, newer than the stable threshold).
+		 * For each pseudo-merge created above, add commits from
+		 * the stable set of commits (un-bitmapped, newer than the
+		 * stable threshold).
 		 */
 		do {
 			struct commit *c;
@@ -343,33 +337,28 @@ static void select_pseudo_merges_1(struct bitmap_writer *writer,
 				break;
 
 			c = matches->stable[j++];
-			p = commit_list_append(c, p);
+			tail = commit_list_append(c, tail);
 		} while (j % group->stable_size);
 
-		if (merge->parents)
-			bitmap_writer_push_pseudo_merge(writer, merge);
+		push_pseudo_merge(writer, &commits);
 	}
 
 	/* make up to group->max_merges pseudo merges for unstable commits */
 	for (i = 0, j = 0; i < group->max_merges; i++) {
-		struct commit *merge;
-		struct commit_list **p;
+		struct commit_list *commits = NULL;
+		struct commit_list **tail = &commits;
 		uint32_t size, end;
-
-		merge = push_pseudo_merge();
-		p = &merge->parents;
 
 		size = pseudo_merge_group_size(group, matches, i);
 		end = size < MIN_PSEUDO_MERGE_SIZE ? matches->unstable_nr : j + size;
 
 		/*
-		 * For each pseudo-merge commit created above, add parents to
-		 * the allocated commit node from the unstable set of commits
-		 * (newer than the stable threshold).
+		 * For each pseudo-merge created above, add commits from the
+		 * unstable set of commits (newer than the stable threshold).
 		 *
 		 * Account for the sample rate, since not every candidate from
 		 * the set of stable commits will be included as a pseudo-merge
-		 * parent.
+		 * member.
 		 */
 		for (; j < end && j < matches->unstable_nr; j++) {
 			struct commit *c = matches->unstable[j];
@@ -377,11 +366,10 @@ static void select_pseudo_merges_1(struct bitmap_writer *writer,
 			if (j % (uint32_t)(1.0 / group->sample_rate))
 				continue;
 
-			p = commit_list_append(c, p);
+			tail = commit_list_append(c, tail);
 		}
 
-		if (merge->parents)
-			bitmap_writer_push_pseudo_merge(writer, merge);
+		push_pseudo_merge(writer, &commits);
 		if (end >= matches->unstable_nr)
 			break;
 	}

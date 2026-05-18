@@ -114,6 +114,7 @@ void bitmap_writer_free(struct bitmap_writer *writer)
 	for (i = 0; i < writer->pseudo_merges_nr; i++) {
 		struct bitmapped_pseudo_merge *merge = &writer->pseudo_merges[i];
 
+		commit_list_free(merge->commits);
 		ewah_free(merge->commits_bitmap);
 		ewah_free(merge->bitmap);
 	}
@@ -217,32 +218,6 @@ static struct pseudo_merge_commit_idx *pseudo_merge_idx(struct bitmap_writer *wr
 	return pmc;
 }
 
-void bitmap_writer_push_pseudo_merge(struct bitmap_writer *writer,
-				     struct commit *commit)
-{
-	struct commit_list *p;
-	struct bitmapped_pseudo_merge *merge;
-
-	ALLOC_GROW(writer->pseudo_merges, writer->pseudo_merges_nr + 1,
-		   writer->pseudo_merges_alloc);
-
-	merge = &writer->pseudo_merges[writer->pseudo_merges_nr];
-	merge->commits = commit->parents;
-	merge->commits_nr = commit_list_count(commit->parents);
-	merge->commits_bitmap = NULL;
-	merge->bitmap = NULL;
-
-	for (p = merge->commits; p; p = p->next) {
-		struct pseudo_merge_commit_idx *pmc;
-
-		pmc = pseudo_merge_idx(writer, &p->item->object.oid);
-		ALLOC_GROW(pmc->pseudo_merge, pmc->nr + 1, pmc->alloc);
-		pmc->pseudo_merge[pmc->nr++] = writer->pseudo_merges_nr;
-	}
-
-	writer->pseudo_merges_nr++;
-}
-
 void bitmap_writer_push_commit(struct bitmap_writer *writer,
 			       struct commit *commit)
 {
@@ -267,6 +242,35 @@ void bitmap_writer_push_commit(struct bitmap_writer *writer,
 	writer->selected[writer->selected_nr].flags = 0;
 
 	writer->selected_nr++;
+}
+
+void bitmap_writer_push_pseudo_merge(struct bitmap_writer *writer,
+				     struct commit_list *commits)
+{
+	struct commit_list *p;
+	struct bitmapped_pseudo_merge *merge;
+
+	if (!commits)
+		BUG("attempted to add an empty pseudo-merge");
+
+	ALLOC_GROW(writer->pseudo_merges, writer->pseudo_merges_nr + 1,
+		   writer->pseudo_merges_alloc);
+
+	merge = &writer->pseudo_merges[writer->pseudo_merges_nr];
+	merge->commits = commits;
+	merge->commits_nr = commit_list_count(commits);
+	merge->commits_bitmap = NULL;
+	merge->bitmap = NULL;
+
+	for (p = commits; p; p = p->next) {
+		struct pseudo_merge_commit_idx *pmc;
+
+		pmc = pseudo_merge_idx(writer, &p->item->object.oid);
+		ALLOC_GROW(pmc->pseudo_merge, pmc->nr + 1, pmc->alloc);
+		pmc->pseudo_merge[pmc->nr++] = writer->pseudo_merges_nr;
+	}
+
+	writer->pseudo_merges_nr++;
 }
 
 struct bitmap_pos_cache_entry {
