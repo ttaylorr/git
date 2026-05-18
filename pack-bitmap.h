@@ -9,6 +9,7 @@
 #include "string-list.h"
 
 struct commit;
+struct commit_list;
 struct repository;
 struct rev_info;
 
@@ -22,7 +23,6 @@ struct bitmap_disk_header {
 	unsigned char checksum[GIT_MAX_RAWSZ];
 };
 
-#define BITMAP_PSEUDO_MERGE (1u<<21)
 #define NEEDS_BITMAP (1u<<22)
 
 /*
@@ -153,7 +153,7 @@ struct bitmap_writer {
 	struct bitmapped_commit *selected;
 	unsigned int selected_nr, selected_alloc;
 
-	struct pseudo_merge_entry *pseudo_merges;
+	struct bitmapped_pseudo_merge *pseudo_merges;
 	size_t pseudo_merges_nr, pseudo_merges_alloc;
 
 	struct string_list pseudo_merge_groups;
@@ -176,8 +176,12 @@ int bitmap_writer_has_bitmapped_object_id(struct bitmap_writer *writer,
 					  const struct object_id *oid);
 void bitmap_writer_push_commit(struct bitmap_writer *writer,
 			       struct commit *commit);
+/*
+ * Add a pseudo-merge containing the given commits. Takes ownership of
+ * the commit_list, but not the commit objects it points at.
+ */
 void bitmap_writer_push_pseudo_merge(struct bitmap_writer *writer,
-				     struct commit *commit);
+				     struct commit_list *commits);
 uint32_t *create_bitmap_mapping(struct bitmap_index *bitmap_git,
 				struct packing_data *mapping);
 int rebuild_bitmap(const uint32_t *reposition,
@@ -185,8 +189,8 @@ int rebuild_bitmap(const uint32_t *reposition,
 		   struct bitmap *dest);
 struct ewah_bitmap *bitmap_for_commit(struct bitmap_index *bitmap_git,
 				      struct commit *commit);
-struct ewah_bitmap *pseudo_merge_bitmap_for_commit(struct bitmap_index *bitmap_git,
-						   struct commit *commit);
+struct ewah_bitmap *pseudo_merge_bitmap_for_commits(struct bitmap_index *bitmap_git,
+						    struct commit_list *commits);
 void bitmap_writer_select_commits(struct bitmap_writer *writer,
 				  struct commit **indexed_commits,
 				  unsigned int indexed_commits_nr);

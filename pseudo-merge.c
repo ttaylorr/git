@@ -11,7 +11,6 @@
 #include "refs.h"
 #include "pack-bitmap.h"
 #include "commit.h"
-#include "alloc.h"
 #include "progress.h"
 #include "hex.h"
 
@@ -113,8 +112,6 @@ void pseudo_merge_group_release(struct pseudo_merge_group *group)
 		free(matches);
 	}
 	strmap_clear(&group->matches, 0);
-
-	free(group->merges);
 }
 
 static int pseudo_merge_config(const char *var, const char *value,
@@ -298,38 +295,13 @@ static int find_pseudo_merge_group_for_ref(const struct reference *ref, void *_d
 	return 0;
 }
 
-static struct commit *push_pseudo_merge(struct pseudo_merge_group *group)
+static void push_pseudo_merge(struct bitmap_writer *writer,
+			      struct commit_list **commits)
 {
-	struct commit *merge;
+	if (*commits)
+		bitmap_writer_push_pseudo_merge(writer, *commits);
 
-	ALLOC_GROW(group->merges, group->merges_nr + 1, group->merges_alloc);
-
-	merge = alloc_commit_node(the_repository);
-	merge->object.parsed = 1;
-	merge->object.flags |= BITMAP_PSEUDO_MERGE;
-
-	group->merges[group->merges_nr++] = merge;
-
-	return merge;
-}
-
-static struct pseudo_merge_commit_idx *pseudo_merge_idx(kh_oid_map_t *pseudo_merge_commits,
-							const struct object_id *oid)
-
-{
-	struct pseudo_merge_commit_idx *pmc;
-	int hash_ret;
-	khiter_t hash_pos = kh_put_oid_map(pseudo_merge_commits, *oid,
-					   &hash_ret);
-
-	if (hash_ret) {
-		CALLOC_ARRAY(pmc, 1);
-		kh_value(pseudo_merge_commits, hash_pos) = pmc;
-	} else {
-		pmc = kh_value(pseudo_merge_commits, hash_pos);
-	}
-
-	return pmc;
+	*commits = NULL;
 }
 
 #define MIN_PSEUDO_MERGE_SIZE 8
@@ -350,82 +322,54 @@ static void select_pseudo_merges_1(struct bitmap_writer *writer,
 
 	/* make stable_merges_nr pseudo merges for stable commits */
 	for (i = 0, j = 0; i < stable_merges_nr; i++) {
-		struct commit *merge;
-		struct commit_list **p;
-
-		merge = push_pseudo_merge(group);
-		p = &merge->parents;
+		struct commit_list *commits = NULL;
+		struct commit_list **tail = &commits;
 
 		/*
-		 * For each pseudo-merge created above, add parents to the
-		 * allocated commit node from the stable set of commits
-		 * (un-bitmapped, newer than the stable threshold).
+		 * For each pseudo-merge created above, add commits from
+		 * the stable set of commits (un-bitmapped, newer than the
+		 * stable threshold).
 		 */
 		do {
 			struct commit *c;
-			struct pseudo_merge_commit_idx *pmc;
 
 			if (j >= matches->stable_nr)
 				break;
 
 			c = matches->stable[j++];
-			/*
-			 * Here and below, make sure that we keep our mapping of
-			 * commits -> pseudo-merge(s) which include the key'd
-			 * commit up-to-date.
-			 */
-			pmc = pseudo_merge_idx(writer->pseudo_merge_commits,
-					       &c->object.oid);
-
-			ALLOC_GROW(pmc->pseudo_merge, pmc->nr + 1, pmc->alloc);
-
-			pmc->pseudo_merge[pmc->nr++] = writer->pseudo_merges_nr;
-			p = commit_list_append(c, p);
+			tail = commit_list_append(c, tail);
 		} while (j % group->stable_size);
 
-		if (merge->parents)
-			bitmap_writer_push_pseudo_merge(writer, merge);
+		push_pseudo_merge(writer, &commits);
 	}
 
 	/* make up to group->max_merges pseudo merges for unstable commits */
 	for (i = 0, j = 0; i < group->max_merges; i++) {
-		struct commit *merge;
-		struct commit_list **p;
+		struct commit_list *commits = NULL;
+		struct commit_list **tail = &commits;
 		uint32_t size, end;
-
-		merge = push_pseudo_merge(group);
-		p = &merge->parents;
 
 		size = pseudo_merge_group_size(group, matches, i);
 		end = size < MIN_PSEUDO_MERGE_SIZE ? matches->unstable_nr : j + size;
 
 		/*
-		 * For each pseudo-merge commit created above, add parents to
-		 * the allocated commit node from the unstable set of commits
-		 * (newer than the stable threshold).
+		 * For each pseudo-merge created above, add commits from the
+		 * unstable set of commits (newer than the stable threshold).
 		 *
 		 * Account for the sample rate, since not every candidate from
 		 * the set of stable commits will be included as a pseudo-merge
-		 * parent.
+		 * member.
 		 */
 		for (; j < end && j < matches->unstable_nr; j++) {
 			struct commit *c = matches->unstable[j];
-			struct pseudo_merge_commit_idx *pmc;
 
 			if (j % (uint32_t)(1.0 / group->sample_rate))
 				continue;
 
-			pmc = pseudo_merge_idx(writer->pseudo_merge_commits,
-					       &c->object.oid);
-
-			ALLOC_GROW(pmc->pseudo_merge, pmc->nr + 1, pmc->alloc);
-
-			pmc->pseudo_merge[pmc->nr++] = writer->pseudo_merges_nr;
-			p = commit_list_append(c, p);
+			tail = commit_list_append(c, tail);
 		}
 
-		if (merge->parents)
-			bitmap_writer_push_pseudo_merge(writer, merge);
+		push_pseudo_merge(writer, &commits);
 		if (end >= matches->unstable_nr)
 			break;
 	}

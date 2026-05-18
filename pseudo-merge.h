@@ -3,7 +3,6 @@
 
 #include "git-compat-util.h"
 #include "strmap.h"
-#include "khash.h"
 #include "ewah/ewok.h"
 
 struct commit;
@@ -29,15 +28,6 @@ struct pseudo_merge_group {
 
 	/* capture group(s) -> struct pseudo_merge_matches */
 	struct strmap matches;
-
-	/*
-	 * The individual pseudo-merge(s) that are generated from the
-	 * above array of matches, partitioned according to the below
-	 * parameters.
-	 */
-	struct commit **merges;
-	size_t merges_nr;
-	size_t merges_alloc;
 
 	/*
 	 * Pseudo-merge grouping parameters. See git-config(1) for
@@ -78,22 +68,11 @@ struct pseudo_merge_matches {
 void load_pseudo_merges_from_config(struct repository *r, struct string_list *list);
 
 /*
- * A pseudo-merge commit index (pseudo_merge_commit_idx) maps a
- * particular (non-pseudo-merge) commit to the list of pseudo-merge(s)
- * it appears in.
- */
-struct pseudo_merge_commit_idx {
-	uint32_t *pseudo_merge;
-	size_t nr, alloc;
-};
-
-/*
  * Selects pseudo-merges from a list of commits, populating the given
  * string_list of pseudo-merge groups.
  *
- * Populates the pseudo_merge_commits map with a commit_idx
- * corresponding to each commit in the list. Counts the total number
- * of pseudo-merges generated.
+ * The resulting pseudo-merges are registered with the given bitmap
+ * writer.
  *
  * Optionally shows a progress meter.
  */
