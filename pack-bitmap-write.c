@@ -821,7 +821,7 @@ static int reuse_pseudo_merge_bitmap(struct bitmap_index *old_bitmap,
 	if (!old_bitmap || !mapping)
 		return 0;
 
-	old = pseudo_merge_bitmap_for_commit(old_bitmap, merge);
+	old = pseudo_merge_bitmap_for_commits(old_bitmap, merge->parents);
 	if (!old)
 		return 0;
 

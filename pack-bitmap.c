@@ -1467,8 +1467,8 @@ cleanup:
 	return cb.base;
 }
 
-struct ewah_bitmap *pseudo_merge_bitmap_for_commit(struct bitmap_index *bitmap_git,
-						   struct commit *commit)
+struct ewah_bitmap *pseudo_merge_bitmap_for_commits(struct bitmap_index *bitmap_git,
+						    struct commit_list *commits)
 {
 	struct commit_list *p;
 	struct bitmap *parents;
@@ -1479,7 +1479,7 @@ struct ewah_bitmap *pseudo_merge_bitmap_for_commit(struct bitmap_index *bitmap_g
 
 	parents = bitmap_new();
 
-	for (p = commit->parents; p; p = p->next) {
+	for (p = commits; p; p = p->next) {
 		int pos = bitmap_position(bitmap_git, &p->item->object.oid);
 		if (pos < 0 || pos >= bitmap_num_objects(bitmap_git))
 			goto done;
