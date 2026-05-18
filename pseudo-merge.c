@@ -113,8 +113,6 @@ void pseudo_merge_group_release(struct pseudo_merge_group *group)
 		free(matches);
 	}
 	strmap_clear(&group->matches, 0);
-
-	free(group->merges);
 }
 
 static int pseudo_merge_config(const char *var, const char *value,
@@ -298,17 +296,13 @@ static int find_pseudo_merge_group_for_ref(const struct reference *ref, void *_d
 	return 0;
 }
 
-static struct commit *push_pseudo_merge(struct pseudo_merge_group *group)
+static struct commit *push_pseudo_merge(void)
 {
 	struct commit *merge;
-
-	ALLOC_GROW(group->merges, group->merges_nr + 1, group->merges_alloc);
 
 	merge = alloc_commit_node(the_repository);
 	merge->object.parsed = 1;
 	merge->object.flags |= BITMAP_PSEUDO_MERGE;
-
-	group->merges[group->merges_nr++] = merge;
 
 	return merge;
 }
@@ -334,7 +328,7 @@ static void select_pseudo_merges_1(struct bitmap_writer *writer,
 		struct commit *merge;
 		struct commit_list **p;
 
-		merge = push_pseudo_merge(group);
+		merge = push_pseudo_merge();
 		p = &merge->parents;
 
 		/*
@@ -362,7 +356,7 @@ static void select_pseudo_merges_1(struct bitmap_writer *writer,
 		struct commit_list **p;
 		uint32_t size, end;
 
-		merge = push_pseudo_merge(group);
+		merge = push_pseudo_merge();
 		p = &merge->parents;
 
 		size = pseudo_merge_group_size(group, matches, i);
