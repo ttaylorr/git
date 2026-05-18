@@ -175,7 +175,9 @@ void bitmap_writer_build_type_index(struct bitmap_writer *writer,
 int bitmap_writer_has_bitmapped_object_id(struct bitmap_writer *writer,
 					  const struct object_id *oid);
 void bitmap_writer_push_commit(struct bitmap_writer *writer,
-			       struct commit *commit, unsigned pseudo_merge);
+			       struct commit *commit);
+void bitmap_writer_push_pseudo_merge(struct bitmap_writer *writer,
+				     struct commit *commit);
 uint32_t *create_bitmap_mapping(struct bitmap_index *bitmap_git,
 				struct packing_data *mapping);
 int rebuild_bitmap(const uint32_t *reposition,
