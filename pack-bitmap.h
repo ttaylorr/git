@@ -154,7 +154,7 @@ struct bitmap_writer {
 	struct bitmapped_commit *selected;
 	unsigned int selected_nr, selected_alloc;
 
-	struct pseudo_merge_entry *pseudo_merges;
+	struct bitmapped_pseudo_merge *pseudo_merges;
 	size_t pseudo_merges_nr, pseudo_merges_alloc;
 
 	struct string_list pseudo_merge_groups;
