@@ -187,8 +187,9 @@ int bitmap_writer_has_bitmapped_object_id(struct bitmap_writer *writer,
  * Compute the actual bitmaps
  */
 
-void bitmap_writer_push_commit(struct bitmap_writer *writer,
-			       struct commit *commit, unsigned pseudo_merge)
+static void bitmap_writer_push_commit_1(struct bitmap_writer *writer,
+					struct commit *commit,
+					unsigned pseudo_merge)
 {
 	if (writer->selected_nr >= writer->selected_alloc) {
 		writer->selected_alloc = (writer->selected_alloc + 32) * 2;
@@ -215,6 +216,19 @@ void bitmap_writer_push_commit(struct bitmap_writer *writer,
 	writer->selected[writer->selected_nr].pseudo_merge_parents = NULL;
 
 	writer->selected_nr++;
+}
+
+void bitmap_writer_push_commit(struct bitmap_writer *writer,
+			       struct commit *commit)
+{
+	bitmap_writer_push_commit_1(writer, commit, 0);
+}
+
+void bitmap_writer_push_pseudo_merge(struct bitmap_writer *writer,
+				     struct commit *commit)
+{
+	bitmap_writer_push_commit_1(writer, commit, 1);
+	writer->pseudo_merges_nr++;
 }
 
 struct bitmap_pos_cache_entry {
@@ -1050,7 +1064,7 @@ void bitmap_writer_select_commits(struct bitmap_writer *writer,
 
 	if (indexed_commits_nr < 100) {
 		for (i = 0; i < indexed_commits_nr; ++i)
-			bitmap_writer_push_commit(writer, indexed_commits[i], 0);
+			bitmap_writer_push_commit(writer, indexed_commits[i]);
 
 		select_pseudo_merges(writer);
 
@@ -1087,7 +1101,7 @@ void bitmap_writer_select_commits(struct bitmap_writer *writer,
 			}
 		}
 
-		bitmap_writer_push_commit(writer, chosen, 0);
+		bitmap_writer_push_commit(writer, chosen);
 
 		i += next + 1;
 		display_progress(writer->progress, i);

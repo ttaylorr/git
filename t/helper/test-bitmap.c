@@ -118,7 +118,7 @@ static int bitmap_write(const char *basename)
 		if (!c || repo_parse_commit(the_repository, c))
 			die("could not parse commit %s", buf.buf);
 
-		bitmap_writer_push_commit(&writer, c, 0);
+		bitmap_writer_push_commit(&writer, c);
 	}
 
 	select_pseudo_merges(&writer);
