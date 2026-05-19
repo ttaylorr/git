@@ -495,6 +495,18 @@ That puts the heads and tags for each fork in their own island (named
 "1234" or similar), and the pull refs for each go into their own
 "1234-pull".
 
+When many island refs become stale, `pack.islandDecay` can be set to a
+date cutoff to coalesce matching ref tips older than that cutoff.
+Decayed tips are grouped into `pack.islandDecayShards` shards
+according to the name computed from the configured regexes. For each
+doubling in age relative to the configured cutoff, the number of
+shards is halved until only one shard remains. This reduces the number
+of islands that need to be propagated through history, but means
+fetches of those old islands may need to break more on-disk deltas on
+the fly. Age is based on the committer date of the peeled commit at
+the ref tip; refs whose tips do not peel to commits are grouped
+normally. The island named by `pack.islandCore` is not coalesced.
+
 Note that we pick a single island for each regex to go into, using "last
 one wins" ordering (which allows repo-specific config to take precedence
 over user-wide config, and so forth).

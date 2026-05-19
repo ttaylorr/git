@@ -25,6 +25,14 @@ commit() {
 	eval "echo >&2 $1=\$$1"
 }
 
+commit_at() {
+	GIT_AUTHOR_DATE="$1" &&
+	GIT_COMMITTER_DATE="$1" &&
+	export GIT_AUTHOR_DATE GIT_COMMITTER_DATE &&
+	shift &&
+	commit "$@"
+}
+
 test_expect_success 'setup commits' '
 	commit one seed 1 &&
 	commit two seed 12
@@ -139,6 +147,70 @@ test_expect_success 'island core places core objects first' '
 
 test_expect_success 'unmatched island core is not fatal' '
 	git -c "pack.islandcore=one" repack -adfi
+'
+
+test_expect_success 'setup island decay commits' '
+	raw=$(test-tool date timestamp now) &&
+	now="${raw#* -> }" &&
+	day=86400 &&
+	decay_cutoff=$((now - 365 * day)) &&
+
+	# With two decay shards, these names have deterministic
+	# strhash() values:
+	#
+	#  - decay_a, decay_c, and decay_e are in shard 1, and
+	#  - decay_b is in shard 0.
+	#
+	# decay_e is old enough to be in a different decay level.
+	commit_at "$((now - 400 * day)) +0000" decay_a decay 1 &&
+	commit_at "$((now - 401 * day)) +0000" decay_b decay 12b &&
+	commit_at "$((now - 402 * day)) +0000" decay_c decay 12c &&
+	commit_at "$((now - 800 * day)) +0000" decay_e decay 12e &&
+
+	commit_at "$((now - 30 * day)) +0000" decay_young_a young-decay 1 &&
+	commit_at "$((now - 31 * day)) +0000" decay_young_b young-decay 12
+'
+
+repack_with_decay() {
+	git \
+		-c "pack.island=$1" \
+		-c "pack.islandDecay=$decay_cutoff +0000" \
+		-c "pack.islandDecayShards=$2" \
+		repack -adfi
+}
+
+test_expect_success 'decayed island tips in the same shard are coalesced' '
+	repack_with_decay "refs/heads/(decay_[ac])" 2 &&
+	is_delta_base $decay_a $decay_c
+'
+
+test_expect_success 'decayed island tips in different shards stay separate' '
+	repack_with_decay "refs/heads/(decay_[ab])" 2 &&
+	! is_delta_base $decay_a $decay_b &&
+	! is_delta_base $decay_b $decay_a
+'
+
+test_expect_success 'decayed island tips in different levels stay separate' '
+	repack_with_decay "refs/heads/(decay_[ae])" 2 &&
+	! is_delta_base $decay_a $decay_e &&
+	! is_delta_base $decay_e $decay_a
+'
+
+test_expect_success 'island decay leaves young tips alone' '
+	repack_with_decay "refs/heads/(decay_young_.*)" 1 &&
+	! is_delta_base $decay_young_a $decay_young_b &&
+	! is_delta_base $decay_young_b $decay_young_a
+'
+
+test_expect_success 'decayed island tips do not override core island' '
+	git \
+		-c "pack.island=refs/heads/(decay_[ab])" \
+		-c "pack.islandcore=decay_a" \
+		-c "pack.islandDecay=$decay_cutoff +0000" \
+		-c "pack.islandDecayShards=1" \
+		repack -adfi &&
+	! is_delta_base $decay_a $decay_b &&
+	! is_delta_base $decay_b $decay_a
 '
 
 test_done
