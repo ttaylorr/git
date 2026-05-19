@@ -39,6 +39,7 @@ struct bitmapped_commit {
 
 struct pseudo_merge_entry {
 	struct commit *commit;
+	struct commit_list *commits;
 	struct ewah_bitmap *bitmap;
 	struct ewah_bitmap *parents;
 };
@@ -251,6 +252,7 @@ void bitmap_writer_push_pseudo_merge(struct bitmap_writer *writer,
 		   writer->pseudo_merges_alloc);
 
 	writer->pseudo_merges[writer->pseudo_merges_nr].commit = commit;
+	writer->pseudo_merges[writer->pseudo_merges_nr].commits = commit->parents;
 	writer->pseudo_merges[writer->pseudo_merges_nr].bitmap = NULL;
 	writer->pseudo_merges[writer->pseudo_merges_nr].parents = NULL;
 
@@ -812,7 +814,7 @@ static int fill_bitmap_commit(struct bitmap_writer *writer,
 
 static int reuse_pseudo_merge_bitmap(struct bitmap_index *old_bitmap,
 				     const uint32_t *mapping,
-				     struct commit *merge,
+				     struct pseudo_merge_entry *merge,
 				     struct ewah_bitmap **out)
 {
 	struct ewah_bitmap *old;
@@ -821,7 +823,7 @@ static int reuse_pseudo_merge_bitmap(struct bitmap_index *old_bitmap,
 	if (!old_bitmap || !mapping)
 		return 0;
 
-	old = pseudo_merge_bitmap_for_commit(old_bitmap, merge);
+	old = pseudo_merge_bitmap_for_commits(old_bitmap, merge->commits);
 	if (!old)
 		return 0;
 
@@ -840,13 +842,13 @@ static int reuse_pseudo_merge_bitmap(struct bitmap_index *old_bitmap,
 static int build_pseudo_merge_bitmap(struct bitmap_writer *writer,
 				     struct bitmap_index *old_bitmap,
 				     const uint32_t *mapping,
-				     struct commit *merge,
+				     struct pseudo_merge_entry *merge,
 				     struct ewah_bitmap **out)
 {
 	struct bb_commit ent = { 0 };
 	struct prio_queue queue = { NULL };
 	struct prio_queue tree_queue = { NULL };
-	unsigned parents = commit_list_count(merge->parents);
+	unsigned parents = commit_list_count(merge->commits);
 	int ret;
 
 	ent.bitmap = bitmap_new();
@@ -859,7 +861,7 @@ static int build_pseudo_merge_bitmap(struct bitmap_writer *writer,
 		goto done;
 	}
 
-	ret = fill_bitmap_commits(writer, &ent, NULL, merge->parents,
+	ret = fill_bitmap_commits(writer, &ent, NULL, merge->commits,
 				  &queue, &tree_queue, old_bitmap, mapping);
 
 	if (!ret)
@@ -893,7 +895,7 @@ static int build_pseudo_merge_bitmaps(struct bitmap_writer *writer,
 		struct bitmap *parents = bitmap_new();
 		struct ewah_bitmap *objects = NULL;
 
-		for (p = merge->commit->parents; p; p = p->next) {
+		for (p = merge->commits; p; p = p->next) {
 			int found;
 			uint32_t pos = find_object_pos(writer,
 						       &p->item->object.oid,
@@ -910,7 +912,7 @@ static int build_pseudo_merge_bitmaps(struct bitmap_writer *writer,
 		bitmap_free(parents);
 
 		if (build_pseudo_merge_bitmap(writer, old_bitmap, mapping,
-					      merge->commit, &objects) < 0) {
+					      merge, &objects) < 0) {
 			ret = -1;
 			goto done;
 		}
