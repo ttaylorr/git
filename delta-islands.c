@@ -19,8 +19,11 @@
 #include "oid-array.h"
 #include "config.h"
 #include "ewah/ewok.h"
+#include "hashmap.h"
 
 KHASH_INIT(str, const char *, void *, 1, kh_str_hash_func, kh_str_hash_equal)
+
+#define DEFAULT_ISLAND_DECAY_SHARDS 64
 
 static kh_oid_map_t *island_marks;
 static unsigned island_counter;
@@ -611,8 +614,12 @@ void resolve_tree_islands(struct repository *r,
 }
 
 struct island_load_data {
+	struct repository *r;
 	kh_str_t *remote_islands;
 	regex_t *rx;
+	timestamp_t decay;
+	timestamp_t now;
+	unsigned int decay_shards;
 	size_t nr;
 	size_t alloc;
 };
@@ -639,7 +646,7 @@ static void free_remote_islands(kh_str_t *remote_islands)
 }
 
 static int island_config_callback(const char *k, const char *v,
-				  const struct config_context *ctx UNUSED,
+				  const struct config_context *ctx,
 				  void *cb)
 {
 	struct island_load_data *ild = cb;
@@ -667,6 +674,18 @@ static int island_config_callback(const char *k, const char *v,
 	if (!strcmp(k, "pack.islandcore"))
 		return git_config_string(&core_island_name, k, v);
 
+	if (!strcmp(k, "pack.islanddecay"))
+		return git_config_expiry_date(&ild->decay, k, v);
+
+	if (!strcmp(k, "pack.islanddecayshards")) {
+		int shards = git_config_int(k, v, ctx->kvi);
+		if (shards <= 0)
+			return error(_("%s must be positive"), k);
+
+		ild->decay_shards = shards;
+		return 0;
+	}
+
 	return 0;
 }
 
@@ -691,6 +710,64 @@ static void add_ref_to_island(kh_str_t *remote_islands, const char *island_name,
 	rl->hash += sha_core;
 }
 
+static int island_tip_should_decay(struct island_load_data *ild,
+				   const char *island_name,
+				   const struct reference *ref,
+				   timestamp_t *date)
+{
+	struct commit *c;
+
+	if (!ild->decay)
+		return 0;
+	if (core_island_name && !strcmp(core_island_name, island_name))
+		return 0;
+
+	c = lookup_commit_reference_gently(ild->r, ref->oid, 1);
+	if (!c || c->date > ild->decay)
+		return 0;
+
+	if (date)
+		*date = c->date;
+	return 1;
+}
+
+static unsigned int decayed_tip_level(struct island_load_data *ild,
+				      timestamp_t tip_date)
+{
+	unsigned int decay_level, max_decay_level;
+	timestamp_t age, span;
+
+	if (ild->now <= tip_date || ild->now <= ild->decay)
+		return 0;
+	if (ild->decay_shards <= 1)
+		return 0;
+
+	age = ild->now - tip_date;
+	span = ild->now - ild->decay;
+	if (!span)
+		span = 1;
+
+	decay_level = log2u(age / span);
+
+	/*
+	 * If tip_date is older than 'span * 2^N', (where we define
+	 * 'N=ceil(log2(decay_shards))') then the shard count has
+	 * already decayed to 1.
+	 *
+	 * Clamp the decay level at 'N' so that ancient tips don't
+	 * create additional shards.
+	 *
+	 * Since 'log2u()' rounds down, compute 'N' as
+	 * `log2u(decay_shards - 1) + 1`, which is equivalent to
+	 * `ceil(log2(decay_shards))` for positive 'decay_shards'.
+	 */
+	max_decay_level = log2u(ild->decay_shards - 1) + 1;
+	if (decay_level > max_decay_level)
+		decay_level = max_decay_level;
+
+	return decay_level;
+}
+
 static int find_island_for_ref(const struct reference *ref, void *cb)
 {
 	struct island_load_data *ild = cb;
@@ -703,6 +780,7 @@ static int find_island_for_ref(const struct reference *ref, void *cb)
 	regmatch_t matches[16];
 	int i, m;
 	struct strbuf island_name = STRBUF_INIT;
+	timestamp_t date;
 
 	/* walk backwards to get last-one-wins ordering */
 	for (i = ild->nr - 1; i >= 0; i--) {
@@ -729,6 +807,22 @@ static int find_island_for_ref(const struct reference *ref, void *cb)
 			strbuf_addch(&island_name, '-');
 
 		strbuf_add(&island_name, ref->name + match->rm_so, match->rm_eo - match->rm_so);
+	}
+
+	if (island_tip_should_decay(ild, island_name.buf, ref, &date)) {
+		unsigned int decay_level = decayed_tip_level(ild, date);
+		unsigned int shard_nr = DIV_ROUND_UP(ild->decay_shards,
+						     1U << decay_level);
+		unsigned int shard = strhash(island_name.buf) % shard_nr;
+
+		strbuf_reset(&island_name);
+		/*
+		 * Intentionally use a '~' character which is not
+		 * allowed in ref names to avoid any potential
+		 * collisions with legitimate island names.
+		 */
+		strbuf_addf(&island_name, "~decayed-%u-%u", decay_level,
+			    shard);
 	}
 
 	add_ref_to_island(ild->remote_islands, island_name.buf, ref->oid);
@@ -788,6 +882,9 @@ void load_delta_islands(struct repository *r, int progress)
 
 	island_marks = kh_init_oid_map();
 
+	ild.r = r;
+	ild.now = time(NULL);
+	ild.decay_shards = DEFAULT_ISLAND_DECAY_SHARDS;
 	repo_config(r, island_config_callback, &ild);
 	ild.remote_islands = kh_init_str();
 	refs_for_each_ref(get_main_ref_store(r),

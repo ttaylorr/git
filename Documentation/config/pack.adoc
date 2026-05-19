@@ -54,6 +54,18 @@ pack.islandCore::
 	the most commonly cloned in the repo. See also "DELTA ISLANDS"
 	in linkgit:git-pack-objects[1].
 
+pack.islandDecay::
+	When set to a timestamp other than `never`, island refs whose
+	tips are commits older than the configured cutoff are placed
+	in fewer delta islands. See "DELTA ISLANDS" in
+	linkgit:git-pack-objects[1] for details.
+
+pack.islandDecayShards::
+	The number of shards to use for island refs older than
+	`pack.islandDecay`. This number is halved for each doubling in
+	age relative to `pack.islandDecay`, until a single shard
+	remains. Defaults to 64.
+
 pack.deltaCacheSize::
 	The maximum memory in bytes used for caching deltas in
 	linkgit:git-pack-objects[1] before writing them out to a pack.
