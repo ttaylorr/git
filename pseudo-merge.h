@@ -30,15 +30,6 @@ struct pseudo_merge_group {
 	struct strmap matches;
 
 	/*
-	 * The individual pseudo-merge(s) that are generated from the
-	 * above array of matches, partitioned according to the below
-	 * parameters.
-	 */
-	struct commit **merges;
-	size_t merges_nr;
-	size_t merges_alloc;
-
-	/*
 	 * Pseudo-merge grouping parameters. See git-config(1) for
 	 * more information.
 	 */
