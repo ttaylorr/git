@@ -78,6 +78,15 @@ test_expect_success '--stdin-packs is incompatible with --revs' '
 	)
 '
 
+test_expect_success '--stdin-packs is incompatible with --delta-islands' '
+	(
+		cd stdin-packs &&
+		test_must_fail git pack-objects --stdin-packs --delta-islands \
+			--stdout </dev/null 2>err &&
+		test_grep "options .--stdin-packs. and .--delta-islands. cannot be used together" err
+	)
+'
+
 test_expect_success '--stdin-packs with loose objects' '
 	(
 		cd stdin-packs &&
