@@ -3804,6 +3804,25 @@ static int add_object_entry_from_pack(const struct object_id *oid,
 	return 0;
 }
 
+static void record_delta_island_tree_depth(struct object *obj, const char *name)
+{
+	const char *p;
+	unsigned depth;
+	struct object_entry *ent;
+
+	if (!use_delta_islands)
+		return;
+
+	/* the empty string is a root tree, which is depth 0 */
+	depth = name && *name ? 1 : 0;
+	for (p = name ? strchr(name, '/') : NULL; p; p = strchr(p + 1, '/'))
+		depth++;
+
+	ent = packlist_find(&to_pack, &obj->oid);
+	if (ent && depth > oe_tree_depth(&to_pack, ent))
+		oe_set_tree_depth(&to_pack, ent, depth);
+}
+
 static void show_object_pack_hint(struct object *object, const char *name,
 				  void *data)
 {
@@ -4374,21 +4393,7 @@ static void show_object(struct object *obj, const char *name,
 {
 	add_preferred_base_object(name);
 	add_object_entry(&obj->oid, obj->type, name, 0);
-
-	if (use_delta_islands) {
-		const char *p;
-		unsigned depth;
-		struct object_entry *ent;
-
-		/* the empty string is a root tree, which is depth 0 */
-		depth = *name ? 1 : 0;
-		for (p = strchr(name, '/'); p; p = strchr(p + 1, '/'))
-			depth++;
-
-		ent = packlist_find(&to_pack, &obj->oid);
-		if (ent && depth > oe_tree_depth(&to_pack, ent))
-			oe_set_tree_depth(&to_pack, ent, depth);
-	}
+	record_delta_island_tree_depth(obj, name);
 }
 
 static void show_object__ma_allow_any(struct object *obj, const char *name, void *data)
