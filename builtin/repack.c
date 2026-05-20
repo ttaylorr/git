@@ -335,7 +335,7 @@ int cmd_repack(int argc,
 		pack_geometry_repack_promisors(repo, &po_args, &geometry,
 					       &names, packtmp);
 
-		if (midx_must_contain_cruft)
+		if (midx_must_contain_cruft && !use_delta_islands)
 			strvec_push(&cmd.args, "--stdin-packs");
 		else
 			strvec_push(&cmd.args, "--stdin-packs=follow");
