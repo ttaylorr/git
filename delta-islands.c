@@ -18,6 +18,7 @@
 #include "delta-islands.h"
 #include "oid-array.h"
 #include "config.h"
+#include "trace2.h"
 
 KHASH_INIT(str, const char *, void *, 1, kh_str_hash_func, kh_str_hash_equal)
 
@@ -248,6 +249,8 @@ void resolve_tree_islands(struct repository *r,
 	if (!island_marks)
 		return;
 
+	trace2_region_enter("delta-islands", "resolve_tree_islands", r);
+
 	/*
 	 * We process only trees, as commits and tags have already been handled
 	 * (and passed their marks on to root trees, as well. We must make sure
@@ -306,6 +309,7 @@ void resolve_tree_islands(struct repository *r,
 	}
 
 	stop_progress(&progress_state);
+	trace2_region_leave("delta-islands", "resolve_tree_islands", r);
 	free(todo);
 }
 
@@ -485,18 +489,31 @@ void load_delta_islands(struct repository *r, int progress)
 {
 	struct island_load_data ild = { 0 };
 
+	trace2_region_enter("delta-islands", "load_delta_islands", r);
+
 	island_marks = kh_init_oid_map();
 
+	trace2_region_enter("delta-islands", "load_config", r);
 	repo_config(r, island_config_callback, &ild);
+	trace2_region_leave("delta-islands", "load_config", r);
+
 	ild.remote_islands = kh_init_str();
+	trace2_region_enter("delta-islands", "load_refs", r);
 	refs_for_each_ref(get_main_ref_store(r),
 			  find_island_for_ref, &ild);
+	trace2_region_leave("delta-islands", "load_refs", r);
+
 	free_config_regexes(&ild);
+	trace2_region_enter("delta-islands", "deduplicate_islands", r);
 	deduplicate_islands(ild.remote_islands, r);
+	trace2_region_leave("delta-islands", "deduplicate_islands", r);
+
 	free_remote_islands(ild.remote_islands);
 
 	if (progress)
 		fprintf(stderr, _("Marked %d islands, done.\n"), island_counter);
+
+	trace2_region_leave("delta-islands", "load_delta_islands", r);
 }
 
 void propagate_island_marks(struct repository *r, struct commit *commit)
@@ -535,8 +552,12 @@ int compute_pack_layers(struct packing_data *to_pack)
 {
 	uint32_t i;
 
-	if (!core_island_name || !island_marks)
+	trace2_region_enter("delta-islands", "compute_pack_layers", NULL);
+
+	if (!core_island_name || !island_marks) {
+		trace2_region_leave("delta-islands", "compute_pack_layers", NULL);
 		return 1;
+	}
 
 	for (i = 0; i < to_pack->nr_objects; ++i) {
 		struct object_entry *entry = &to_pack->objects[i];
@@ -551,6 +572,8 @@ int compute_pack_layers(struct packing_data *to_pack)
 				oe_set_layer(to_pack, entry, 0);
 		}
 	}
+
+	trace2_region_leave("delta-islands", "compute_pack_layers", NULL);
 
 	return 2;
 }
