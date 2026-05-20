@@ -113,8 +113,12 @@ This mode is useful, for example, to resurrect once-unreachable
 objects found in cruft packs to generate packs which are closed under
 reachability up to the boundary set by the excluded packs.
 +
+When used with `--delta-islands`, island marks are propagated from ref
+tips down to excluded-closed pack boundaries.
++
 Incompatible with `--revs`, or options that imply `--revs` (such as
 `--all`), with the exception of `--unpacked`, which is compatible.
+`--delta-islands` may only be used with `--stdin-packs=follow`.
 
 --cruft::
 	Packs unreachable objects into a separate "cruft" pack, denoted

@@ -3852,11 +3852,16 @@ static void show_object_pack_hint(struct object *object, const char *name,
 
 		stdin_packs_hints_nr++;
 	}
+
+	record_delta_island_tree_depth(object, name);
 }
 
 static void show_commit_pack_hint(struct commit *commit, void *data)
 {
 	enum stdin_packs_mode mode = *(enum stdin_packs_mode *)data;
+
+	if (use_delta_islands)
+		propagate_island_marks(the_repository, commit);
 
 	if (mode == STDIN_PACKS_MODE_FOLLOW) {
 		show_object_pack_hint((struct object *)commit, "", data);
@@ -3865,6 +3870,12 @@ static void show_commit_pack_hint(struct commit *commit, void *data)
 
 	/* nothing to do; commits don't have a namehash */
 
+}
+
+static void propagate_island_marks_from_commit(struct commit *commit,
+					       void *data UNUSED)
+{
+	propagate_island_marks(the_repository, commit);
 }
 
 /*
@@ -4060,6 +4071,36 @@ static void stdin_packs_read_input(struct rev_info *revs,
 	strmap_clear(&packs, 1);
 }
 
+static void stdin_packs_propagate_delta_islands(void)
+{
+	struct rev_info revs;
+	struct setup_revision_opt s_r_opt = {
+		.allow_exclude_promisor_objects = 1,
+	};
+	struct strvec args = STRVEC_INIT;
+
+	reset_revision_walk();
+
+	repo_init_revisions(the_repository, &revs, NULL);
+	revs.no_kept_objects = 1;
+	revs.keep_pack_cache_flags |= KEPT_PACK_IN_CORE;
+	revs.ignore_missing_links = 1;
+	revs.exclude_promisor_objects = exclude_promisor_objects;
+
+	strvec_pushl(&args, "pack-objects", "--all", NULL);
+	setup_revisions_from_strvec(&args, &revs, &s_r_opt);
+
+	if (prepare_revision_walk(&revs))
+		die(_("revision walk setup failed"));
+	traverse_commit_list(&revs,
+			     propagate_island_marks_from_commit,
+			     NULL,
+			     NULL);
+
+	strvec_clear(&args);
+	release_revisions(&revs);
+}
+
 static void add_unreachable_loose_objects(struct rev_info *revs);
 
 static void read_stdin_packs(enum stdin_packs_mode mode, int rev_list_unpacked)
@@ -4106,6 +4147,9 @@ static void read_stdin_packs(enum stdin_packs_mode mode, int rev_list_unpacked)
 	if (rev_list_unpacked)
 		add_unreachable_loose_objects(&revs);
 
+	if (use_delta_islands)
+		load_delta_islands(the_repository, progress);
+
 	if (prepare_revision_walk(&revs))
 		die(_("revision walk setup failed"));
 	traverse_commit_list(&revs,
@@ -4114,6 +4158,9 @@ static void read_stdin_packs(enum stdin_packs_mode mode, int rev_list_unpacked)
 			     &mode);
 
 	release_revisions(&revs);
+
+	if (use_delta_islands && mode == STDIN_PACKS_MODE_FOLLOW)
+		stdin_packs_propagate_delta_islands();
 
 	trace2_data_intmax("pack-objects", the_repository, "stdin_packs_found",
 			   stdin_packs_found_nr);
@@ -5277,6 +5324,9 @@ int cmd_pack_objects(int argc,
 
 	die_for_incompatible_opt2(stdin_packs, "--stdin-packs",
 				  filter_options.choice, "--filter");
+	die_for_incompatible_opt2(stdin_packs == STDIN_PACKS_MODE_STANDARD,
+				  "--stdin-packs",
+				  use_delta_islands, "--delta-islands");
 
 
 	if (stdin_packs && use_internal_rev_list)

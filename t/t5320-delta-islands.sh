@@ -11,6 +11,23 @@ is_delta_base () {
 	test "$delta_base" = "$2"
 }
 
+is_delta_base_in_pack () {
+	object=$1 &&
+	base=$2 &&
+	pack=$3 &&
+	git verify-pack -v "$pack" >pack.objects &&
+	awk -v object="$object" -v base="$base" '
+		$1 == object { found = ($7 == base) }
+		END { exit !found }
+	' pack.objects
+}
+
+objects_in_pack () {
+	git show-index <"$1" >objects.raw &&
+	cut -d" " -f2 objects.raw | sort &&
+	rm -f objects.raw
+}
+
 # generate a commit on branch $1 with a single file, "file", whose
 # content is mostly based on the seed $2, but with a unique bit
 # of content $3 appended. This should allow us to see whether
@@ -139,6 +156,53 @@ test_expect_success 'island core places core objects first' '
 
 test_expect_success 'unmatched island core is not fatal' '
 	git -c "pack.islandcore=one" repack -adfi
+'
+
+test_expect_success '--stdin-packs=follow respects delta islands' '
+	test_when_finished "rm -fr stdin-follow" &&
+	git init stdin-follow &&
+	(
+		cd stdin-follow &&
+		packdir=.git/objects/pack &&
+
+		commit one seed 1 &&
+		commit two seed 12 &&
+		one_parent=$(git rev-parse one) &&
+		two_parent=$(git rev-parse two) &&
+
+		one_tip=$(git commit-tree "$(git rev-parse one^{tree})" \
+			-p "$one_parent" -m one-tip) &&
+		two_tip=$(git commit-tree "$(git rev-parse two^{tree})" \
+			-p "$two_parent" -m two-tip) &&
+		git update-ref refs/heads/one "$one_tip" &&
+		git update-ref refs/heads/two "$two_tip" &&
+
+		parents=$(git pack-objects --revs $packdir/pack <<-EOF
+		$one_parent
+		$two_parent
+		EOF
+		) &&
+		tips=$(printf "%s\n%s\n" "$one_tip" "$two_tip" |
+			git pack-objects $packdir/pack) &&
+		git prune-packed &&
+		echo "pack-$parents.pack" >packs &&
+
+		vanilla=$(git pack-objects --stdin-packs=follow \
+			--no-reuse-delta $packdir/vanilla <packs) &&
+		is_delta_base_in_pack $one $two \
+			$packdir/vanilla-$vanilla.pack &&
+
+		islands=$(git -c "pack.island=refs/heads/(.*)" \
+			pack-objects --stdin-packs=follow --delta-islands \
+			--no-reuse-delta $packdir/islands <packs) &&
+		objects_in_pack $packdir/vanilla-$vanilla.idx >expect &&
+		objects_in_pack $packdir/islands-$islands.idx >actual &&
+		test_cmp expect actual &&
+		! is_delta_base_in_pack $one $two \
+			$packdir/islands-$islands.pack &&
+		! is_delta_base_in_pack $two $one \
+			$packdir/islands-$islands.pack
+	)
 '
 
 test_done
