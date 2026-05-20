@@ -245,6 +245,10 @@ progression.
 Loose objects are implicitly included in this "roll-up", without respect to
 their reachability. This is subject to change in the future.
 +
+When combined with `--delta-islands`, a geometric repack uses
+`--stdin-packs=follow` to compute island membership for objects in the
+roll-up.
++
 When writing a multi-pack bitmap, `git repack` selects the largest resulting
 pack as the preferred pack for object selection by the MIDX (see
 linkgit:git-multi-pack-index[1]).

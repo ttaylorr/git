@@ -16,6 +16,17 @@ packed_objects () {
 	rm tmp-object-list
  }
 
+is_delta_base_in_pack () {
+	object=$1 &&
+	base=$2 &&
+	pack=$3 &&
+	git verify-pack -v "$pack" >pack.objects &&
+	awk -v object="$object" -v base="$base" '
+		$1 == object { found = ($7 == base) }
+		END { exit !found }
+	' pack.objects
+}
+
 test_expect_success '--geometric with no packs' '
 	git init geometric &&
 	test_when_finished "rm -fr geometric" &&
@@ -216,6 +227,44 @@ test_expect_success '--geometric ignores --keep-pack packs' '
 		test_cmp packs.before packs.after &&
 
 		git fsck
+	)
+'
+
+test_expect_success '--geometric with --delta-islands' '
+	git init geometric-islands &&
+	test_when_finished "rm -fr geometric-islands" &&
+	(
+		cd geometric-islands &&
+
+		one=$( { test-tool genrandom seed 10240 && echo 1; } |
+			git hash-object -w --stdin) &&
+		one_tree=$(printf "100644 blob %s\tfile\n" "$one" |
+			git mktree) &&
+		one_commit=$(echo one | git commit-tree "$one_tree") &&
+		git update-ref refs/heads/one "$one_commit" &&
+
+		two=$( { test-tool genrandom seed 10240 && echo 12; } |
+			git hash-object -w --stdin) &&
+		two_tree=$(printf "100644 blob %s\tfile\n" "$two" |
+			git mktree) &&
+		two_commit=$(echo two | git commit-tree "$two_tree") &&
+		git update-ref refs/heads/two "$two_commit" &&
+
+		echo refs/heads/one |
+			git pack-objects --revs $packdir/pack &&
+		echo refs/heads/two |
+			git pack-objects --revs $packdir/pack &&
+		git prune-packed &&
+
+		find $packdir -name "pack-*.pack" | sort >before &&
+		git -c "pack.island=refs/heads/(.*)" repack \
+			--geometric=2 -df --delta-islands &&
+		find $packdir -name "pack-*.pack" | sort >after &&
+		comm -13 before after >new &&
+		test_line_count = 1 new &&
+
+		! is_delta_base_in_pack $one $two "$(cat new)" &&
+		! is_delta_base_in_pack $two $one "$(cat new)"
 	)
 '
 
