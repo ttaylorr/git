@@ -20,6 +20,7 @@
 #include "oid-array.h"
 #include "config.h"
 #include "trace2.h"
+#include "ewah/ewok.h"
 
 KHASH_INIT(str, const char *, void *, 1, kh_str_hash_func, kh_str_hash_equal)
 
@@ -32,41 +33,55 @@ struct remote_island {
 	struct oid_array oids;
 };
 
-struct island_bitmap {
-	/*
-	 * Vestigial field, retained only because GCC's `-Wpedantic`
-	 * does not allow a struct with only a flexible array. The pool
-	 * owns each canonical bitmap, so explicit refcounting is not
-	 * needed; this field is read or written.
-	 */
-	uint32_t _reserved;
-	uint32_t bits[FLEX_ARRAY];
-};
+/*
+ * `island_bitmap` is just an EWAH-compressed bitmap with
+ * `island_bitmap_size` logical bits, one per island. We never mutate
+ * an interned bitmap; ORs are computed via a dense `struct bitmap`
+ * intermediate and re-compressed.
+ */
+struct island_bitmap;
+#define island_bitmap ewah_bitmap
 
-static uint32_t island_bitmap_size;
+static uint32_t island_bitmap_size;	/* number of islands (logical bits) */
 
 /*
- * Hash-cons pool of canonical bitmap values. Two bitmaps with the same
- * `bits[]` content are represented by the same pointer, which lets us
- * answer "do these bitmaps have equal content?" with a pointer
+ * Hash-cons pool of canonical bitmap values. Two EWAH bitmaps with the
+ * same set-bit content are represented by the same pointer, which lets
+ * us answer "do these bitmaps have equal content?" with a pointer
  * comparison and lets us cache the result of pairwise unions by
  * pointer pair.
  */
 static khint_t island_bitmap_pool_hash(const struct island_bitmap *b)
 {
-	return memhash(b->bits, st_mult(island_bitmap_size, sizeof(*b->bits)));
+	/* `ewah_checksum()` is content-based and a stable hash. */
+	return (khint_t)ewah_checksum((struct island_bitmap *)b);
 }
 
 static int island_bitmap_pool_eq(const struct island_bitmap *a,
 				 const struct island_bitmap *b)
 {
-	uint32_t i;
+	struct ewah_iterator ita, itb;
+	eword_t wa, wb;
+	int next_a, next_b;
+
 	if (a == b)
 		return 1;
-	for (i = 0; i < island_bitmap_size; i++)
-		if (a->bits[i] != b->bits[i])
+
+	ewah_iterator_init(&ita, (struct ewah_bitmap *)a);
+	ewah_iterator_init(&itb, (struct ewah_bitmap *)b);
+
+	for (;;) {
+		next_a = ewah_iterator_next(&wa, &ita);
+		next_b = ewah_iterator_next(&wb, &itb);
+		if (!next_a && !next_b)
+			return 1;
+		if (!next_a)
+			wa = 0;
+		if (!next_b)
+			wb = 0;
+		if (wa != wb)
 			return 0;
-	return 1;
+	}
 }
 
 KHASH_INIT(bitmap_pool, struct island_bitmap *, struct island_bitmap *, 1,
@@ -99,18 +114,13 @@ KHASH_INIT(bitmap_or, struct bitmap_or_key, struct island_bitmap *, 1,
 static kh_bitmap_or_t *bitmap_or_cache;
 
 /*
- * Allocate a new bitmap; if "old" is not NULL, the new bitmap will be a copy
- * of "old". Otherwise, the new bitmap is empty.
+ * Return the number of dense words required to hold `island_bitmap_size`
+ * logical bits. Used to pre-size the dense-bitmap intermediate when
+ * building a fresh EWAH via OR.
  */
-static struct island_bitmap *island_bitmap_new(const struct island_bitmap *old)
+static size_t island_bitmap_word_alloc(void)
 {
-	size_t size = sizeof(struct island_bitmap) + (island_bitmap_size * 4);
-	struct island_bitmap *b = xcalloc(1, size);
-
-	if (old)
-		memcpy(b, old, size);
-
-	return b;
+	return (island_bitmap_size + BITS_IN_EWORD - 1) / BITS_IN_EWORD;
 }
 
 /*
@@ -134,28 +144,26 @@ static struct island_bitmap *island_bitmap_intern(struct island_bitmap *b)
 	} else {
 		struct island_bitmap *canonical = kh_value(bitmap_pool, pos);
 		if (canonical != b)
-			free(b);
+			ewah_free(b);
 		return canonical;
 	}
-}
-
-static void island_bitmap_or(struct island_bitmap *a, const struct island_bitmap *b)
-{
-	uint32_t i;
-
-	for (i = 0; i < island_bitmap_size; ++i)
-		a->bits[i] |= b->bits[i];
 }
 
 /*
  * Compute the canonical bitmap representing `a | b`, with memoization.
  * Both arguments must already be canonical pool entries.
+ *
+ * EWAH bitmaps are streaming-compressed and don't support random
+ * mutation, so build the union via a dense `struct bitmap`
+ * intermediate and re-compress with `bitmap_to_ewah()`. This only
+ * runs on cache misses.
  */
 static struct island_bitmap *island_bitmap_or_intern(struct island_bitmap *a,
 						     struct island_bitmap *b)
 {
 	struct bitmap_or_key key;
-	struct island_bitmap *result, *fresh;
+	struct island_bitmap *result;
+	struct bitmap *tmp;
 	khiter_t pos;
 	int hash_ret;
 
@@ -179,40 +187,61 @@ static struct island_bitmap *island_bitmap_or_intern(struct island_bitmap *a,
 	if (!hash_ret)
 		return kh_value(bitmap_or_cache, pos);
 
-	fresh = island_bitmap_new(a);
-	island_bitmap_or(fresh, b);
-	result = island_bitmap_intern(fresh);
+	tmp = bitmap_word_alloc(island_bitmap_word_alloc());
+	bitmap_or_ewah(tmp, (struct ewah_bitmap *)a);
+	bitmap_or_ewah(tmp, (struct ewah_bitmap *)b);
+	result = island_bitmap_intern(bitmap_to_ewah(tmp));
+	bitmap_free(tmp);
+
 	kh_value(bitmap_or_cache, pos) = result;
 	return result;
 }
 
 static int island_bitmap_is_subset(struct island_bitmap *self,
-		struct island_bitmap *super)
+				   struct island_bitmap *super)
 {
-	uint32_t i;
+	struct ewah_iterator it_self, it_super;
+	eword_t w_self, w_super;
+	int next_self, next_super;
 
 	if (self == super)
 		return 1;
 
-	for (i = 0; i < island_bitmap_size; ++i) {
-		if ((self->bits[i] & super->bits[i]) != self->bits[i])
+	ewah_iterator_init(&it_self, (struct ewah_bitmap *)self);
+	ewah_iterator_init(&it_super, (struct ewah_bitmap *)super);
+
+	for (;;) {
+		next_self = ewah_iterator_next(&w_self, &it_self);
+		next_super = ewah_iterator_next(&w_super, &it_super);
+		if (!next_self)
+			return 1;
+		if (!next_super)
+			w_super = 0;
+		if (w_self & ~w_super)
 			return 0;
 	}
-
-	return 1;
-}
-
-#define ISLAND_BITMAP_BLOCK(x) (x / 32)
-#define ISLAND_BITMAP_MASK(x) (1 << (x % 32))
-
-static void island_bitmap_set(struct island_bitmap *self, uint32_t i)
-{
-	self->bits[ISLAND_BITMAP_BLOCK(i)] |= ISLAND_BITMAP_MASK(i);
 }
 
 static int island_bitmap_get(struct island_bitmap *self, uint32_t i)
 {
-	return (self->bits[ISLAND_BITMAP_BLOCK(i)] & ISLAND_BITMAP_MASK(i)) != 0;
+	struct ewah_iterator it;
+	eword_t word;
+	uint32_t pos = 0;
+
+	ewah_iterator_init(&it, (struct ewah_bitmap *)self);
+	while (ewah_iterator_next(&word, &it)) {
+		if (i < pos + BITS_IN_EWORD)
+			return (word >> (i - pos)) & 1;
+		pos += BITS_IN_EWORD;
+	}
+	return 0;
+}
+
+static struct island_bitmap *single_bit_bitmap(uint32_t i)
+{
+	struct ewah_bitmap *fresh = ewah_new();
+	ewah_set(fresh, i);
+	return island_bitmap_intern(fresh);
 }
 
 int in_same_island(const struct object_id *trg_oid, const struct object_id *src_oid)
@@ -269,13 +298,6 @@ int island_delta_cmp(const struct object_id *a, const struct object_id *b)
 	}
 
 	return 0;
-}
-
-static struct island_bitmap *single_bit_bitmap(uint32_t i)
-{
-	struct island_bitmap *fresh = island_bitmap_new(NULL);
-	island_bitmap_set(fresh, i);
-	return island_bitmap_intern(fresh);
 }
 
 static void set_island_marks(struct object *obj, struct island_bitmap *marks)
@@ -621,7 +643,7 @@ static void deduplicate_islands(kh_str_t *remote_islands, struct repository *r)
 		island_count = dst;
 	}
 
-	island_bitmap_size = (island_count / 32) + 1;
+	island_bitmap_size = island_count;
 	core = get_core_island(remote_islands);
 
 	for (i = 0; i < island_count; ++i) {
@@ -687,7 +709,7 @@ void free_island_marks(void)
 
 	if (bitmap_pool) {
 		kh_foreach_value(bitmap_pool, bitmap, {
-			free(bitmap);
+			ewah_free(bitmap);
 		});
 		kh_destroy_bitmap_pool(bitmap_pool);
 		bitmap_pool = NULL;
